@@ -14,11 +14,11 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_dir)))
 sys.path.insert(0, project_root)
 
-from .opentools.models.initializer import Initializer
-from .opentools.models.planner import Planner
-from .opentools.models.memory import Memory
-from .opentools.models.executor import Executor
-from .opentools.models.utlis import make_json_serializable
+from opentools.models.initializer import Initializer
+from opentools.models.planner import Planner
+from opentools.models.memory import Memory
+from opentools.models.executor import Executor
+from opentools.models.utlis import make_json_serializable
 
 # solver = None
 
