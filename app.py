@@ -8,7 +8,7 @@ def save_image(user_query, user_image):
     user_image.save("user_image.jpg")
 
     # Display the query
-    return f"Query: {user_query}"
+    return "Assistant", f"Query: {user_query}"
 
 # ========== Gradio Interface ==========
 with gr.Blocks() as demo:
