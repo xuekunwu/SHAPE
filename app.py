@@ -1,27 +1,34 @@
 import gradio as gr
-import datetime
 import os
+import datetime
+from PIL import Image
 
-# Ensure logs directory exists
-os.makedirs("logs", exist_ok=True)
+# Create a directory for uploaded images
+os.makedirs("uploaded_images", exist_ok=True)
 
-def log_user_data(inputs, outputs):
-    # Create a log entry
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    log_entry = f"{timestamp} | Input: {inputs} | Output: {outputs}\n"
+def save_image(image):
+    # Generate a timestamped filename
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    file_path = f"uploaded_images/image_{timestamp}.png"
     
-    # Write to a log file
-    with open("logs/user_data.log", "a") as log_file:
-        log_file.write(log_entry)
-    
-    return outputs
+    # Save the image
+    image.save(file_path)
 
-def process_input(user_input):
-    response = f"Hello, {user_input}!"
-    log_user_data(user_input, response)
-    return response
+    # Check if saved
+    print(f"Image saved to: {file_path} | Exists: {os.path.exists(file_path)}")
 
-demo = gr.Interface(fn=process_input, inputs="text", outputs="text")
+    # Open image and print dims
+    img = Image.open(file_path)
+    print(f"Image dimensions: {img.size}")
+
+    return f"Image saved to: {file_path}"
+
+demo = gr.Interface(
+    fn=save_image,
+    inputs=gr.Image(type="pil"),  # Accepts PIL Image objects
+    outputs="text"
+)
+
 demo.launch()
 
 # import os
