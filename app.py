@@ -1,9 +1,30 @@
 import gradio as gr
 
-def greet(name):
-    return "Hello " + name + "!!"
+def save_image(user_query, user_image):
+    """
+    Function to save the user-uploaded image and display the query.
+    """
+    # Save the image
+    user_image.save("user_image.jpg")
 
-demo = gr.Interface(fn=greet, inputs="text", outputs="text")
+    # Display the query
+    return f"Query: {user_query}"
+
+# ========== Gradio Interface ==========
+with gr.Blocks() as demo:
+    gr.Markdown("# 🧠 OctoTools AI Solver")  # Title
+
+    with gr.Row():
+        user_query = gr.Textbox(label="Enter your query", placeholder="Type your question here...")
+        user_image = gr.Image(type="pil", label="Upload an image")  # Accepts multiple formats
+
+    run_button = gr.Button("Run")  # Run button
+    chatbot_output = gr.Chatbot(label="Problem-Solving Output")
+
+    # Link button click to function
+    run_button.click(fn=save_image, inputs=[user_query, user_image], outputs=chatbot_output)
+
+# Launch the Gradio app
 demo.launch()
 
 # import os
