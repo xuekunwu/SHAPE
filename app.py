@@ -1,30 +1,27 @@
 import gradio as gr
+import datetime
+import os
 
-def save_image(user_query, user_image):
-    """
-    Function to save the user-uploaded image and display the query.
-    """
-    # Save the image
-    user_image.save("user_image.jpg")
+# Ensure logs directory exists
+os.makedirs("logs", exist_ok=True)
 
-    # Display the query
-    yield ['', '']
+def log_user_data(inputs, outputs):
+    # Create a log entry
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    log_entry = f"{timestamp} | Input: {inputs} | Output: {outputs}\n"
+    
+    # Write to a log file
+    with open("logs/user_data.log", "a") as log_file:
+        log_file.write(log_entry)
+    
+    return outputs
 
-# ========== Gradio Interface ==========
-with gr.Blocks() as demo:
-    gr.Markdown("# 🧠 OctoTools AI Solver")  # Title
+def process_input(user_input):
+    response = f"Hello, {user_input}!"
+    log_user_data(user_input, response)
+    return response
 
-    with gr.Row():
-        user_query = gr.Textbox(label="Enter your query", placeholder="Type your question here...")
-        user_image = gr.Image(type="pil", label="Upload an image")  # Accepts multiple formats
-
-    run_button = gr.Button("Run")  # Run button
-    chatbot_output = gr.Chatbot(label="Problem-Solving Output")
-
-    # Link button click to function
-    run_button.click(fn=save_image, inputs=[user_query, user_image], outputs=chatbot_output)
-
-# Launch the Gradio app
+demo = gr.Interface(fn=process_input, inputs="text", outputs="text")
 demo.launch()
 
 # import os
