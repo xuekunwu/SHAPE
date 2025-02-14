@@ -110,7 +110,6 @@ class Solver:
         json_data = {"query": user_query, "image": "Image received as bytes"}
 
         # Step 4: Query Analysis
-        import pdb; pdb.set_trace()
         query_analysis = self.planner.analyze_query(user_query, img_path)
         json_data["query_analysis"] = query_analysis
         messages.append(ChatMessage(role="assistant", content=f"🔍 Query Analysis:\n{query_analysis}"))
