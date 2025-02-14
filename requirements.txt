@@ -1,0 +1,13 @@
+easyocr==1.7.1
+openai==1.58.1
+python-dotenv==1.0.1
+wikipedia==1.4.0
+pillow==10.4.0
+platformdirs==4.2.2
+sympy==1.13.2
+tenacity==9.0.0
+diskcache==5.6.3
+transformers==4.44.2
+pymed==0.8.9
+metapub==0.5.12
+-e ./opentools

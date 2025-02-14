@@ -1,57 +1,24 @@
-import gradio as gr
 import os
-import datetime
+import sys
+import json
+import argparse
+import time
+import io
+import uuid
 from PIL import Image
+from typing import List, Dict, Any, Iterator
+import gradio as gr
 
-# Create a directory for uploaded images
-os.makedirs("uploaded_images", exist_ok=True)
+# Add the project root to the Python path
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_dir)))
+sys.path.insert(0, project_root)
 
-def save_image(image):
-    # Generate a timestamped filename
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    file_path = f"uploaded_images/image_{timestamp}.png"
-    
-    # Save the image
-    image.save(file_path)
-
-    # Check if saved
-    print(f"Image saved to: {file_path} | Exists: {os.path.exists(file_path)}")
-
-    # Open image and print dims
-    img = Image.open(file_path)
-    print(f"Image dimensions: {img.size}")
-
-    return f"Image saved to: {file_path}"
-
-demo = gr.Interface(
-    fn=save_image,
-    inputs=gr.Image(type="pil"),  # Accepts PIL Image objects
-    outputs="text"
-)
-
-demo.launch()
-
-# import os
-# import sys
-# import json
-# import argparse
-# import time
-# import io
-# import uuid
-# from PIL import Image
-# from typing import List, Dict, Any, Iterator
-# import gradio as gr
-
-# # Add the project root to the Python path
-# current_dir = os.path.dirname(os.path.abspath(__file__))
-# project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_dir)))
-# sys.path.insert(0, project_root)
-
-# from opentools.models.initializer import Initializer
-# from opentools.models.planner import Planner
-# from opentools.models.memory import Memory
-# from opentools.models.executor import Executor
-# from opentools.models.utlis import make_json_serializable
+from .opentools.models.initializer import Initializer
+from .opentools.models.planner import Planner
+from .opentools.models.memory import Memory
+from .opentools.models.executor import Executor
+from .opentools.models.utlis import make_json_serializable
 
 # solver = None
 
