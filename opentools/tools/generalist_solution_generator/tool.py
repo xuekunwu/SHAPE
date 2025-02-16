@@ -4,8 +4,9 @@ from opentools.engine.openai import ChatOpenAI
 
 class Generalist_Solution_Generator_Tool(BaseTool):
     require_llm_engine = True
+    require_api_key = True
 
-    def __init__(self, model_string="gpt-4o-mini"):
+    def __init__(self, model_string="gpt-4o-mini", api_key=None):
         super().__init__(
             tool_name="Generalist_Solution_Generator_Tool",
             tool_description="A generalized tool that takes query from the user as prompt, and answers the question step by step to the best of its ability. It can also accept an image.",
@@ -72,12 +73,13 @@ class Generalist_Solution_Generator_Tool(BaseTool):
             # }
         )
         self.model_string = model_string  
+        self.api_key = api_key
 
     def execute(self, prompt, image=None):
 
         print(f"\nInitializing Generalist Tool with model: {self.model_string}")
         multimodal = True if image else False
-        llm_engine = ChatOpenAI(model_string=self.model_string, is_multimodal=multimodal)
+        llm_engine = ChatOpenAI(model_string=self.model_string, is_multimodal=multimodal, api_key=self.api_key)
 
         try:
             input_data = [prompt]

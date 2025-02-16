@@ -7,11 +7,12 @@ from typing import Dict, Any, List, Tuple
 
 
 class Initializer:
-    def __init__(self, enabled_tools: List[str] = [], model_string: str = None):
+    def __init__(self, enabled_tools: List[str] = [], model_string: str = None, api_key: str = None):
         self.toolbox_metadata = {}
         self.available_tools = []
         self.enabled_tools = enabled_tools
         self.model_string = model_string # llm model string
+        self.api_key = api_key
 
         print("\nInitializing OpenTools...")
         print(f"Enabled tools: {self.enabled_tools}")
@@ -64,10 +65,14 @@ class Initializer:
                             # print(f"Class __dict__: {obj.__dict__}")
                             try:
                                 # Check if the tool requires an LLM engine
+                                inputs = {}
                                 if hasattr(obj, 'require_llm_engine') and obj.require_llm_engine:
-                                    tool_instance = obj(model_string=self.model_string)
-                                else:
-                                    tool_instance = obj()
+                                    inputs['model_string'] = self.model_string
+                                
+                                if hasattr(obj, 'require_api_key') and obj.require_api_key:
+                                    inputs['api_key'] = self.api_key
+                                    
+                                tool_instance = obj(**inputs)
 
                                 # print(f"\nInstance attributes: {dir(tool_instance)}")
                                 # print(f"\nInstance __dict__: {tool_instance.__dict__}")

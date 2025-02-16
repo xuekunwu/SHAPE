@@ -9,10 +9,10 @@ from opentools.models.memory import Memory
 from opentools.models.formatters import QueryAnalysis, NextStep, MemoryVerification
 
 class Planner:
-    def __init__(self, llm_engine_name: str, toolbox_metadata: dict = None, available_tools: List = None):
+    def __init__(self, llm_engine_name: str, toolbox_metadata: dict = None, available_tools: List = None, api_key: str = None):
         self.llm_engine_name = llm_engine_name
-        self.llm_engine_mm = ChatOpenAI(model_string=llm_engine_name, is_multimodal=True)
-        self.llm_engine = ChatOpenAI(model_string=llm_engine_name, is_multimodal=False)
+        self.llm_engine_mm = ChatOpenAI(model_string=llm_engine_name, is_multimodal=True, api_key=api_key)
+        self.llm_engine = ChatOpenAI(model_string=llm_engine_name, is_multimodal=False, api_key=api_key)
         self.toolbox_metadata = toolbox_metadata if toolbox_metadata is not None else {}
         self.available_tools = available_tools if available_tools is not None else []
 
@@ -47,13 +47,10 @@ class Planner:
         return image_info
 
     def generate_base_response(self, question: str, image: str, max_tokens: str = 4000, bytes_mode: bool = False) -> str:
-        if bytes_mode:
-            image_info = self.get_image_info_bytes(image)
-        else:
-            image_info = self.get_image_info(image)
+        image_info = self.get_image_info(image)
 
         input_data = [question]
-        if image_info and "image_path" in image_info and not bytes_mode:
+        if image_info and "image_path" in image_info:
             try:
                 with open(image_info["image_path"], 'rb') as file:
                     image_bytes = file.read()
@@ -66,10 +63,7 @@ class Planner:
         return self.base_response
 
     def analyze_query(self, question: str, image: str, bytes_mode: bool = False) -> str:
-        if bytes_mode:
-            image_info = self.get_image_info_bytes(image)
-        else:
-            image_info = self.get_image_info(image)
+        image_info = self.get_image_info(image)
         print("image_info: ", image_info)
 
         query_prompt = f"""
@@ -100,9 +94,7 @@ Please present your analysis in a clear, structured format.
 """
 
         input_data = [query_prompt]
-        if bytes_mode:
-            image_bytes = image
-        else:
+        if image_info and "image_path" in image_info:
             try:
                 with open(image_info["image_path"], 'rb') as file:
                     image_bytes = file.read()

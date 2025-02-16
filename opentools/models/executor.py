@@ -18,13 +18,14 @@ def timeout_handler(signum, frame):
     raise TimeoutError("Function execution timed out")
 
 class Executor:
-    def __init__(self, llm_engine_name: str, root_cache_dir: str = "solver_cache",  num_threads: int = 1, max_time: int = 120, max_output_length: int = 100000, enable_signal: bool = True):
+    def __init__(self, llm_engine_name: str, root_cache_dir: str = "solver_cache",  num_threads: int = 1, max_time: int = 120, max_output_length: int = 100000, enable_signal: bool = True, api_key: str = None):
         self.llm_engine_name = llm_engine_name
         self.root_cache_dir = root_cache_dir
         self.num_threads = num_threads
         self.max_time = max_time
         self.max_output_length = max_output_length
         self.enable_signal = enable_signal
+        self.api_key = api_key
 
     def set_query_cache_dir(self, query_cache_dir):
         if query_cache_dir:
@@ -130,7 +131,7 @@ Reason: The command should process multiple items in a single execution, not sep
 Remember: Your <command> field MUST be valid Python code including any necessary data preparation steps and one or more `execution = tool.execute(` calls, without any additional explanatory text. The format `execution = tool.execute` must be strictly followed, and the last line must begin with `execution = tool.execute` to capture the final output.
 """
 
-        llm_generate_tool_command = ChatOpenAI(model_string=self.llm_engine_name, is_multimodal=False)
+        llm_generate_tool_command = ChatOpenAI(model_string=self.llm_engine_name, is_multimodal=False, api_key=self.api_key)
         tool_command = llm_generate_tool_command(prompt_generate_tool_command, response_format=ToolCommand)
 
         return tool_command
@@ -207,12 +208,14 @@ Remember: Your <command> field MUST be valid Python code including any necessary
 
             # Check if the tool requires an LLM engine
             # NOTE FIXME may need to refine base.py and tool.py to handle this better
+            inputs = {}
             if getattr(tool_class, 'require_llm_engine', False):
                 # Instantiate the tool with the model_string
-                tool = tool_class(model_string=self.llm_engine_name)
-            else:
-                # Instantiate the tool without model_string for tools that don't require it
-                tool = tool_class()
+                inputs['model_string'] = self.llm_engine_name
+            if getattr(tool_class, 'require_api_key', False):
+                # Instantiate the tool with the api_key
+                inputs['api_key'] = self.api_key
+            tool = tool_class(**inputs)
             
             # Set the custom output directory
             # NOTE FIXME: May have a better way to handle this

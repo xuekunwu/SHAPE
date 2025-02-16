@@ -18,9 +18,7 @@ from opentools.models.initializer import Initializer
 from opentools.models.planner import Planner
 from opentools.models.memory import Memory
 from opentools.models.executor import Executor
-from opentools.models.utlis import make_json_serializable
-
-solver = None
+from opentools.models.utils import make_json_serializable
 
 class ChatMessage:
     def __init__(self, role: str, content: str, metadata: dict = None):
@@ -63,7 +61,7 @@ class Solver:
 
 
 
-    def stream_solve_user_problem(self, user_query: str, user_image: Image.Image, messages: List[ChatMessage]) -> Iterator[List[ChatMessage]]:
+    def stream_solve_user_problem(self, user_query: str, user_image: Image.Image, api_key: str, messages: List[ChatMessage]) -> Iterator[List[ChatMessage]]:
         """
         Streams intermediate thoughts and final responses for the problem-solving process based on user input.
         
@@ -198,39 +196,28 @@ def parse_arguments():
     return parser.parse_args()
 
 
-def solve_problem_gradio(user_query, user_image):
+def solve_problem_gradio(user_query, user_image, api_key):
     """
     Wrapper function to connect the solver to Gradio.
     Streams responses from `solver.stream_solve_user_problem` for real-time UI updates.
     """
-    global solver  # Ensure we're using the globally defined solver
-
-    if solver is None:
-        return [["assistant", "⚠️ Error: Solver is not initialized. Please restart the application."]]
-
-    messages = []  # Initialize message list
-    for message_batch in solver.stream_solve_user_problem(user_query, user_image, messages):
-        yield [[msg.role, msg.content] for msg in message_batch]  # Ensure correct format for Gradio Chatbot
-
-
-
-def main(args):
-    global solver
+    
     # Initialize Tools
     enabled_tools = args.enabled_tools.split(",") if args.enabled_tools else []
-
 
     # Instantiate Initializer
     initializer = Initializer(
         enabled_tools=enabled_tools,
-        model_string=args.llm_engine_name
+        model_string=args.llm_engine_name,
+        api_key=api_key
     )
 
     # Instantiate Planner
     planner = Planner(
         llm_engine_name=args.llm_engine_name,
         toolbox_metadata=initializer.toolbox_metadata,
-        available_tools=initializer.available_tools
+        available_tools=initializer.available_tools,
+        api_key=api_key
     )
 
     # Instantiate Memory
@@ -240,7 +227,8 @@ def main(args):
     executor = Executor(
         llm_engine_name=args.llm_engine_name,
         root_cache_dir=args.root_cache_dir,
-        enable_signal=False
+        enable_signal=False,
+        api_key=api_key
     )
 
     # Instantiate Solver
@@ -258,44 +246,31 @@ def main(args):
         root_cache_dir=args.root_cache_dir
     )
 
-    # Test Inputs
-    # user_query = "How many balls are there in the image?"
-    # user_image_path = "/home/sheng/toolbox-agent/mathvista_113.png"  # Replace with your actual image path
+    if solver is None:
+        return [["assistant", "⚠️ Error: Solver is not initialized. Please restart the application."]]
 
-    # # Load the image as a PIL object
-    # user_image = Image.open(user_image_path).convert("RGB")  # Ensure it's in RGB mode
-
-    # print("\n=== Starting Problem Solving ===\n")
-    # messages = []
-    # for message_batch in solver.stream_solve_user_problem(user_query, user_image, messages):
-    #     for message in message_batch:
-    #         print(f"{message.role}: {message.content}") 
-
-    # messages = []
-    # solver.stream_solve_user_problem(user_query, user_image, messages)
+    messages = []  # Initialize message list
+    for message_batch in solver.stream_solve_user_problem(user_query, user_image, api_key, messages):
+        yield [[msg.role, msg.content] for msg in message_batch]  # Ensure correct format for Gradio Chatbot
 
 
-    # def solve_problem_stream(user_query, user_image):
-    #     messages = []  # Ensure it's a list of [role, content] pairs
 
-    #     for message_batch in solver.stream_solve_user_problem(user_query, user_image, messages):
-    #         yield message_batch  # Stream messages correctly in tuple format
-
-    # solve_problem_stream(user_query, user_image)
-
+def main(args):
     # ========== Gradio Interface ==========
     with gr.Blocks() as demo:
         gr.Markdown("# 🧠 OctoTools AI Solver")  # Title
 
         with gr.Row():
-            user_query = gr.Textbox(label="Enter your query", placeholder="Type your question here...")
-            user_image = gr.Image(type="pil", label="Upload an image")  # Accepts multiple formats
-
-        run_button = gr.Button("Run")  # Run button
-        chatbot_output = gr.Chatbot(label="Problem-Solving Output")
+            with gr.Column(scale=1, min_width=300):
+                user_query = gr.Textbox(label="Enter your query", placeholder="Type your question here...")
+                api_key = gr.Textbox(label="API Key", placeholder="Your API key will not be stored in any way.", type="password")
+                user_image = gr.Image(type="pil", label="Upload an image")  # Accepts multiple formats
+                run_button = gr.Button("Run")  # Run button
+            with gr.Column(scale=3, min_width=300):
+                chatbot_output = gr.Chatbot(label="Problem-Solving Output")
 
         # Link button click to function
-        run_button.click(fn=solve_problem_gradio, inputs=[user_query, user_image], outputs=chatbot_output)
+        run_button.click(fn=solve_problem_gradio, inputs=[user_query, user_image, api_key], outputs=chatbot_output)
 
     # Launch the Gradio app
     demo.launch()

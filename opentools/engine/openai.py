@@ -43,6 +43,7 @@ class ChatOpenAI(EngineLM, CachedEngine):
         is_multimodal: bool=False,
         # enable_cache: bool=True,
         enable_cache: bool=False, # NOTE: disable cache for now
+        api_key: str=None,
         **kwargs):
         """
         :param model_string:
@@ -61,11 +62,11 @@ class ChatOpenAI(EngineLM, CachedEngine):
             super().__init__(cache_path=cache_path)
 
         self.system_prompt = system_prompt
-        if os.getenv("OPENAI_API_KEY") is None:
+        if api_key is None:
             raise ValueError("Please set the OPENAI_API_KEY environment variable if you'd like to use OpenAI models.")
         
         self.client = OpenAI(
-            api_key=os.getenv("OPENAI_API_KEY"),
+            api_key=api_key,
         )
         self.model_string = model_string
         self.is_multimodal = is_multimodal
