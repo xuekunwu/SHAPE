@@ -7,21 +7,26 @@ import io
 import uuid
 from PIL import Image
 from typing import List, Dict, Any, Iterator
-
 import gradio as gr
-from gradio import ChatMessage
 
 # Add the project root to the Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_dir)))
 sys.path.insert(0, project_root)
 
-from octotools.models.initializer import Initializer
-from octotools.models.planner import Planner
-from octotools.models.memory import Memory
-from octotools.models.executor import Executor
-from octotools.models.utils import make_json_serializable
+from opentools.models.initializer import Initializer
+from opentools.models.planner import Planner
+from opentools.models.memory import Memory
+from opentools.models.executor import Executor
+from opentools.models.utlis import make_json_serializable
 
+solver = None
+
+class ChatMessage:
+    def __init__(self, role: str, content: str, metadata: dict = None):
+        self.role = role
+        self.content = content
+        self.metadata = metadata or {}
 
 class Solver:
     def __init__(
@@ -54,8 +59,11 @@ class Solver:
         self.output_types = output_types.lower().split(',')
         assert all(output_type in ["base", "final", "direct"] for output_type in self.output_types), "Invalid output type. Supported types are 'base', 'final', 'direct'."
 
+        # self.benchmark_data = self.load_benchmark_data()
 
-    def stream_solve_user_problem(self, user_query: str, user_image: Image.Image, api_key: str, messages: List[ChatMessage]) -> Iterator[List[ChatMessage]]:
+
+
+    def stream_solve_user_problem(self, user_query: str, user_image: Image.Image, messages: List[ChatMessage]) -> Iterator[List[ChatMessage]]:
         """
         Streams intermediate thoughts and final responses for the problem-solving process based on user input.
         
@@ -89,12 +97,12 @@ class Solver:
             messages.append(ChatMessage(role="assistant", content=f"📝 Received Query: {user_query}"))
         yield messages
 
-        # # Step 2: Add "thinking" status while processing
-        # messages.append(ChatMessage(
-        #     role="assistant",
-        #     content="",
-        #     metadata={"title": "⏳ Thinking: Processing input..."}
-        # ))
+        # Step 2: Add "thinking" status while processing
+        messages.append(ChatMessage(
+            role="assistant",
+            content="",
+            metadata={"title": "⏳ Thinking: Processing input..."}
+        ))
 
         # Step 3: Initialize problem-solving state
         start_time = time.time()
@@ -104,17 +112,13 @@ class Solver:
         # Step 4: Query Analysis
         query_analysis = self.planner.analyze_query(user_query, img_path)
         json_data["query_analysis"] = query_analysis
-        messages.append(ChatMessage(role="assistant", 
-                                    content=f"{query_analysis}", 
-                                    metadata={"title": "🔍 Query Analysis"}))
+        messages.append(ChatMessage(role="assistant", content=f"🔍 Query Analysis:\n{query_analysis}"))
         yield messages
 
         # Step 5: Execution loop (similar to your step-by-step solver)
         while step_count < self.max_steps and (time.time() - start_time) < self.max_time:
             step_count += 1
-            # messages.append(ChatMessage(role="assistant", 
-            #                             content=f"Generating next step...",
-            #                             metadata={"title": f"🔄 Step {step_count}"}))
+            messages.append(ChatMessage(role="assistant", content=f"🔄 Step {step_count}: Generating next step..."))
             yield messages
 
             # Generate the next step
@@ -126,16 +130,13 @@ class Solver:
             # Display the step information
             messages.append(ChatMessage(
                 role="assistant",
-                content=f"- Context: {context}\n- Sub-goal: {sub_goal}\n- Tool: {tool_name}",
-                metadata={"title": f"📌 Step {step_count}: {tool_name}"}
+                content=f"📌 Step {step_count} Details:\n- Context: {context}\n- Sub-goal: {sub_goal}\n- Tool: {tool_name}"
             ))
             yield messages
 
             # Handle tool execution or errors
             if tool_name not in self.planner.available_tools:
-                messages.append(ChatMessage(
-                    role="assistant", 
-                    content=f"⚠️ Error: Tool '{tool_name}' is not available."))
+                messages.append(ChatMessage(role="assistant", content=f"⚠️ Error: Tool '{tool_name}' is not available."))
                 yield messages
                 continue
 
@@ -147,10 +148,7 @@ class Solver:
             result = self.executor.execute_tool_command(tool_name, command)
             result = make_json_serializable(result)
 
-            messages.append(ChatMessage(
-                role="assistant", 
-                content=f"{json.dumps(result, indent=4)}",
-                metadata={"title": f"✅ Step {step_count} Result: {tool_name}"}))
+            messages.append(ChatMessage(role="assistant", content=f"✅ Step {step_count} Result:\n{json.dumps(result, indent=4)}"))
             yield messages
 
             # Step 6: Memory update and stopping condition
@@ -158,9 +156,7 @@ class Solver:
             stop_verification = self.planner.verificate_memory(user_query, img_path, query_analysis, self.memory)
             conclusion = self.planner.extract_conclusion(stop_verification)
 
-            messages.append(ChatMessage(
-                role="assistant", 
-                content=f"🛑 Step {step_count} Conclusion: {conclusion}"))
+            messages.append(ChatMessage(role="assistant", content=f"🛑 Step {step_count} Conclusion: {conclusion}"))
             yield messages
 
             if conclusion == 'STOP':
@@ -181,9 +177,8 @@ class Solver:
         messages.append(ChatMessage(role="assistant", content="✅ Problem-solving process complete."))
         yield messages
             
-
 def parse_arguments():
-    parser = argparse.ArgumentParser(description="Run the OctoTools demo with specified parameters.")
+    parser = argparse.ArgumentParser(description="Run the OpenTools demo with specified parameters.")
     parser.add_argument("--llm_engine_name", default="gpt-4o", help="LLM engine name.")
     parser.add_argument("--max_tokens", type=int, default=2000, help="Maximum tokens for LLM generation.")
     parser.add_argument("--run_baseline_only", type=bool, default=False, help="Run only the baseline (no toolbox).")
@@ -197,35 +192,45 @@ def parse_arguments():
     parser.add_argument("--enabled_tools", default="Generalist_Solution_Generator_Tool", help="List of enabled tools.")
     parser.add_argument("--root_cache_dir", default="demo_solver_cache", help="Path to solver cache directory.")
     parser.add_argument("--output_json_dir", default="demo_results", help="Path to output JSON directory.")
+    parser.add_argument("--max_steps", type=int, default=10, help="Maximum number of steps to execute.")
+    parser.add_argument("--max_time", type=int, default=60, help="Maximum time allowed in seconds.")
     parser.add_argument("--verbose", type=bool, default=True, help="Enable verbose output.")
     return parser.parse_args()
 
 
-def solve_problem_gradio(user_query, user_image, max_steps=10, max_time=60, api_key=None):
+def solve_problem_gradio(user_query, user_image):
     """
     Wrapper function to connect the solver to Gradio.
     Streams responses from `solver.stream_solve_user_problem` for real-time UI updates.
     """
+    global solver  # Ensure we're using the globally defined solver
 
-    if api_key is None:
-        return [["assistant", "⚠️ Error: OpenAI API Key is required."]]
-    
+    if solver is None:
+        return [["assistant", "⚠️ Error: Solver is not initialized. Please restart the application."]]
+
+    messages = []  # Initialize message list
+    for message_batch in solver.stream_solve_user_problem(user_query, user_image, messages):
+        yield [[msg.role, msg.content] for msg in message_batch]  # Ensure correct format for Gradio Chatbot
+
+
+
+def main(args):
+    global solver
     # Initialize Tools
     enabled_tools = args.enabled_tools.split(",") if args.enabled_tools else []
+
 
     # Instantiate Initializer
     initializer = Initializer(
         enabled_tools=enabled_tools,
-        model_string=args.llm_engine_name,
-        api_key=api_key
+        model_string=args.llm_engine_name
     )
 
     # Instantiate Planner
     planner = Planner(
         llm_engine_name=args.llm_engine_name,
         toolbox_metadata=initializer.toolbox_metadata,
-        available_tools=initializer.available_tools,
-        api_key=api_key
+        available_tools=initializer.available_tools
     )
 
     # Instantiate Memory
@@ -235,8 +240,7 @@ def solve_problem_gradio(user_query, user_image, max_steps=10, max_time=60, api_
     executor = Executor(
         llm_engine_name=args.llm_engine_name,
         root_cache_dir=args.root_cache_dir,
-        enable_signal=False,
-        api_key=api_key
+        enable_signal=False
     )
 
     # Instantiate Solver
@@ -248,79 +252,56 @@ def solve_problem_gradio(user_query, user_image, max_steps=10, max_time=60, api_
         task_description=args.task_description,
         output_types=args.output_types,  # Add new parameter
         verbose=args.verbose,
-        max_steps=max_steps,
-        max_time=max_time,
+        max_steps=args.max_steps,
+        max_time=args.max_time,
         output_json_dir=args.output_json_dir,
         root_cache_dir=args.root_cache_dir
     )
 
-    if solver is None:
-        return [["assistant", "⚠️ Error: Solver is not initialized. Please restart the application."]]
+    # Test Inputs
+    # user_query = "How many balls are there in the image?"
+    # user_image_path = "/home/sheng/toolbox-agent/mathvista_113.png"  # Replace with your actual image path
 
-    messages = []  # Initialize message list
-    for message_batch in solver.stream_solve_user_problem(user_query, user_image, api_key, messages):
-        yield [msg for msg in message_batch]  # Ensure correct format for Gradio Chatbot
+    # # Load the image as a PIL object
+    # user_image = Image.open(user_image_path).convert("RGB")  # Ensure it's in RGB mode
+
+    # print("\n=== Starting Problem Solving ===\n")
+    # messages = []
+    # for message_batch in solver.stream_solve_user_problem(user_query, user_image, messages):
+    #     for message in message_batch:
+    #         print(f"{message.role}: {message.content}") 
+
+    # messages = []
+    # solver.stream_solve_user_problem(user_query, user_image, messages)
 
 
+    # def solve_problem_stream(user_query, user_image):
+    #     messages = []  # Ensure it's a list of [role, content] pairs
 
-def main(args):
-    #################### Gradio Interface ####################
+    #     for message_batch in solver.stream_solve_user_problem(user_query, user_image, messages):
+    #         yield message_batch  # Stream messages correctly in tuple format
+
+    # solve_problem_stream(user_query, user_image)
+
+    # ========== Gradio Interface ==========
     with gr.Blocks() as demo:
-        gr.Markdown("# 🧠 The OctoTools Agentic Solver")  # Title
+        gr.Markdown("# 🧠 OctoTools AI Solver")  # Title
 
         with gr.Row():
-            with gr.Column(scale=1):
-                api_key = gr.Textbox(show_label=False, placeholder="Your API key will not be stored in any way.", type="password", container=False)
-                user_image = gr.Image(type="pil", label="Upload an image")  # Accepts multiple formats
-                max_steps = gr.Slider(value=5, minimum=1, maximum=10, step=1, label="Max Steps")
-                max_time = gr.Slider(value=150, minimum=60, maximum=300, step=30, label="Max Time (seconds)")
-            with gr.Column(scale=3):
-                chatbot_output = gr.Chatbot(type="messages", label="Problem-Solving Output")
-                # chatbot_output.like(lambda x: print(f"User liked: {x}"))
-                with gr.Row():
-                    with gr.Column(scale=8):
-                        user_query = gr.Textbox(show_label=False, placeholder="Type your question here...", container=False)
-                    with gr.Column(scale=1):
-                        run_button = gr.Button("Run")  # Run button
-                with gr.Row(elem_id="buttons") as button_row:
-                    upvote_btn = gr.Button(value="👍  Upvote", interactive=False)
-                    downvote_btn = gr.Button(value="👎  Downvote", interactive=False)
-                    clear_btn = gr.Button(value="🗑️  Clear history", interactive=False)
+            user_query = gr.Textbox(label="Enter your query", placeholder="Type your question here...")
+            user_image = gr.Image(type="pil", label="Upload an image")  # Accepts multiple formats
+
+        run_button = gr.Button("Run")  # Run button
+        chatbot_output = gr.Chatbot(label="Problem-Solving Output")
 
         # Link button click to function
-        run_button.click(fn=solve_problem_gradio, inputs=[user_query, user_image, max_steps, max_time, api_key], outputs=chatbot_output)
-    #################### Gradio Interface ####################
+        run_button.click(fn=solve_problem_gradio, inputs=[user_query, user_image], outputs=chatbot_output)
 
     # Launch the Gradio app
     demo.launch()
 
 
+
 if __name__ == "__main__":
     args = parse_arguments()
-
-    # Manually set enabled tools
-    # args.enabled_tools = "Generalist_Solution_Generator_Tool"
-
-
-    # All tools
-    all_tools = [
-        "Generalist_Solution_Generator_Tool",
-
-        "Image_Captioner_Tool",
-        "Object_Detector_Tool",
-        "Text_Detector_Tool",
-        "Relevant_Patch_Zoomer_Tool",
-
-        "Python_Code_Generator_Tool",
-
-        "ArXiv_Paper_Searcher_Tool",
-        "Google_Search_Tool",
-        "Nature_News_Fetcher_Tool",
-        "Pubmed_Search_Tool",
-        "URL_Text_Extractor_Tool",
-        "Wikipedia_Knowledge_Searcher_Tool"
-    ]
-    args.enabled_tools = ",".join(all_tools)
-
     main(args)
-

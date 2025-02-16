@@ -10,3 +10,5 @@ diskcache==5.6.3
 transformers==4.44.2
 pymed==0.8.9
 metapub==0.5.12
+
+gradio==5.16.0
