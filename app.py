@@ -7,6 +7,7 @@ import io
 import uuid
 from PIL import Image
 from typing import List, Dict, Any, Iterator
+
 import gradio as gr
 from gradio import ChatMessage
 
@@ -295,6 +296,7 @@ def main(args):
 
         # Link button click to function
         run_button.click(fn=solve_problem_gradio, inputs=[user_query, user_image, max_steps, max_time, api_key], outputs=chatbot_output)
+    # ========== Gradio Interface ==========
 
     # Launch the Gradio app
     demo.launch()
