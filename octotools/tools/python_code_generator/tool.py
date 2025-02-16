@@ -37,8 +37,9 @@ def timeout(seconds):
 
 class Python_Code_Generator_Tool(BaseTool):
     require_llm_engine = True
+    require_api_key = True
 
-    def __init__(self, model_string="gpt-4o-mini"):
+    def __init__(self, model_string="gpt-4o-mini", api_key=None):
         super().__init__(
             tool_name="Python_Code_Generator_Tool",
             tool_description="A tool that generates and executes simple Python code snippets for basic arithmetical calculations and math-related problems. The generated code runs in a highly restricted environment with only basic mathematical operations available.",
@@ -83,7 +84,7 @@ class Python_Code_Generator_Tool(BaseTool):
             }
         )
         print(f"\nInitializing Python_Code_Generator_Tool with model_string: {model_string}")
-        self.llm_engine = ChatOpenAI(model_string=model_string, is_multimodal=False) if model_string else None
+        self.llm_engine = ChatOpenAI(model_string=model_string, is_multimodal=False, api_key=api_key) if model_string else None
 
     @staticmethod
     def preprocess_code(code):

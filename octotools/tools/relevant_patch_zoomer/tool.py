@@ -10,8 +10,9 @@ class PatchZoomerResponse(BaseModel):
 
 class Relevant_Patch_Zoomer_Tool(BaseTool):
     require_llm_engine = True
+    require_api_key = True
 
-    def __init__(self, model_string="gpt-4o"):
+    def __init__(self, model_string="gpt-4o", api_key=None):
         super().__init__(
             tool_name="Relevant_Patch_Zoomer_Tool",
             tool_description="A tool that analyzes an image, divides it into 5 regions (4 quarters + center), and identifies the most relevant patches based on a question. The returned patches are zoomed in by a factor of 2.",
@@ -44,7 +45,7 @@ class Relevant_Patch_Zoomer_Tool(BaseTool):
         }
 
         print(f"\nInitializing Patch Zoomer Tool with model: {model_string}")
-        self.llm_engine = ChatOpenAI(model_string=model_string, is_multimodal=True) if model_string else None
+        self.llm_engine = ChatOpenAI(model_string=model_string, is_multimodal=True, api_key=api_key) if model_string else None
         
     def _save_patch(self, image_path, patch, save_path, zoom_factor=2):
         """Extract and save a specific patch from the image with 10% margins."""

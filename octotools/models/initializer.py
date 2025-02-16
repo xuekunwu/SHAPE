@@ -113,7 +113,13 @@ class Initializer:
                 tool_class = getattr(module, tool_name)
 
                 # Instantiate the tool
-                tool_instance = tool_class()
+                inputs = {}
+                if hasattr(tool_class, 'require_llm_engine') and tool_class.require_llm_engine:
+                    inputs['model_string'] = self.model_string
+                
+                if hasattr(tool_class, 'require_api_key') and tool_class.require_api_key:
+                    inputs['api_key'] = self.api_key
+                tool_instance = tool_class(**inputs)
 
                 # FIXME This is a temporary workaround to avoid running demo commands
                 self.available_tools.append(tool_name)
