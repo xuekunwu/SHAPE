@@ -8,6 +8,7 @@ import uuid
 from PIL import Image
 from typing import List, Dict, Any, Iterator
 import gradio as gr
+# from gradio import ChatMessage
 
 # Add the project root to the Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -89,6 +90,7 @@ class Solver:
         self.executor.set_query_cache_dir(_cache_dir)
         
         # Step 1: Display the received inputs
+        import pdb; pdb.set_trace()
         if user_image:
             messages.append(ChatMessage(role="assistant", content=f"📝 Received Query: {user_query}\n🖼️ Image Uploaded"))
         else:
@@ -190,17 +192,18 @@ def parse_arguments():
     parser.add_argument("--enabled_tools", default="Generalist_Solution_Generator_Tool", help="List of enabled tools.")
     parser.add_argument("--root_cache_dir", default="demo_solver_cache", help="Path to solver cache directory.")
     parser.add_argument("--output_json_dir", default="demo_results", help="Path to output JSON directory.")
-    parser.add_argument("--max_steps", type=int, default=10, help="Maximum number of steps to execute.")
-    parser.add_argument("--max_time", type=int, default=60, help="Maximum time allowed in seconds.")
     parser.add_argument("--verbose", type=bool, default=True, help="Enable verbose output.")
     return parser.parse_args()
 
 
-def solve_problem_gradio(user_query, user_image, api_key):
+def solve_problem_gradio(user_query, user_image, max_steps=10, max_time=60, api_key=None):
     """
     Wrapper function to connect the solver to Gradio.
     Streams responses from `solver.stream_solve_user_problem` for real-time UI updates.
     """
+
+    if api_key is None:
+        return [["assistant", "⚠️ Error: API Key is required."]]
     
     # Initialize Tools
     enabled_tools = args.enabled_tools.split(",") if args.enabled_tools else []
@@ -240,8 +243,8 @@ def solve_problem_gradio(user_query, user_image, api_key):
         task_description=args.task_description,
         output_types=args.output_types,  # Add new parameter
         verbose=args.verbose,
-        max_steps=args.max_steps,
-        max_time=args.max_time,
+        max_steps=max_steps,
+        max_time=max_time,
         output_json_dir=args.output_json_dir,
         root_cache_dir=args.root_cache_dir
     )
@@ -261,16 +264,26 @@ def main(args):
         gr.Markdown("# 🧠 OctoTools AI Solver")  # Title
 
         with gr.Row():
-            with gr.Column(scale=1, min_width=300):
-                user_query = gr.Textbox(label="Enter your query", placeholder="Type your question here...")
-                api_key = gr.Textbox(label="API Key", placeholder="Your API key will not be stored in any way.", type="password")
+            with gr.Column(scale=1):
+                api_key = gr.Textbox(show_label=False, placeholder="Your API key will not be stored in any way.", type="password", container=False)
                 user_image = gr.Image(type="pil", label="Upload an image")  # Accepts multiple formats
-                run_button = gr.Button("Run")  # Run button
-            with gr.Column(scale=3, min_width=300):
-                chatbot_output = gr.Chatbot(label="Problem-Solving Output")
+                max_steps = gr.Slider(value=5, minimum=1, maximum=10, step=1)
+                max_time = gr.Slider(value=180, minimum=60, maximum=300, step=20)
+            with gr.Column(scale=3):
+                chatbot_output = gr.Chatbot(label="Problem-Solving Output", show_copy_button=True)
+                chatbot_output.like(lambda x: print(f"User liked: {x}"))
+                with gr.Row():
+                    with gr.Column(scale=8):
+                        user_query = gr.Textbox(show_label=False, placeholder="Type your question here...", container=False)
+                    with gr.Column(scale=1):
+                        run_button = gr.Button("Run")  # Run button
+                with gr.Row(elem_id="buttons") as button_row:
+                    upvote_btn = gr.Button(value="👍  Upvote", interactive=False)
+                    downvote_btn = gr.Button(value="👎  Downvote", interactive=False)
+                    clear_btn = gr.Button(value="🗑️  Clear history", interactive=False)
 
         # Link button click to function
-        run_button.click(fn=solve_problem_gradio, inputs=[user_query, user_image, api_key], outputs=chatbot_output)
+        run_button.click(fn=solve_problem_gradio, inputs=[user_query, user_image, max_steps, max_time, api_key], outputs=chatbot_output)
 
     # Launch the Gradio app
     demo.launch()
