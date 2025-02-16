@@ -8,7 +8,7 @@ import uuid
 from PIL import Image
 from typing import List, Dict, Any, Iterator
 import gradio as gr
-# from gradio import ChatMessage
+from gradio import ChatMessage
 
 # Add the project root to the Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -21,11 +21,11 @@ from opentools.models.memory import Memory
 from opentools.models.executor import Executor
 from opentools.models.utils import make_json_serializable
 
-class ChatMessage:
-    def __init__(self, role: str, content: str, metadata: dict = None):
-        self.role = role
-        self.content = content
-        self.metadata = metadata or {}
+# class ChatMessage:
+#     def __init__(self, role: str, content: str, metadata: dict = None):
+#         self.role = role
+#         self.content = content
+#         self.metadata = metadata or {}
 
 class Solver:
     def __init__(
@@ -90,19 +90,18 @@ class Solver:
         self.executor.set_query_cache_dir(_cache_dir)
         
         # Step 1: Display the received inputs
-        import pdb; pdb.set_trace()
         if user_image:
             messages.append(ChatMessage(role="assistant", content=f"📝 Received Query: {user_query}\n🖼️ Image Uploaded"))
         else:
             messages.append(ChatMessage(role="assistant", content=f"📝 Received Query: {user_query}"))
         yield messages
 
-        # Step 2: Add "thinking" status while processing
-        messages.append(ChatMessage(
-            role="assistant",
-            content="",
-            metadata={"title": "⏳ Thinking: Processing input..."}
-        ))
+        # # Step 2: Add "thinking" status while processing
+        # messages.append(ChatMessage(
+        #     role="assistant",
+        #     content="",
+        #     metadata={"title": "⏳ Thinking: Processing input..."}
+        # ))
 
         # Step 3: Initialize problem-solving state
         start_time = time.time()
@@ -112,13 +111,17 @@ class Solver:
         # Step 4: Query Analysis
         query_analysis = self.planner.analyze_query(user_query, img_path)
         json_data["query_analysis"] = query_analysis
-        messages.append(ChatMessage(role="assistant", content=f"🔍 Query Analysis:\n{query_analysis}"))
+        messages.append(ChatMessage(role="assistant", 
+                                    content=f"{query_analysis}", 
+                                    metadata={"title": "🔍 Query Analysis"}))
         yield messages
 
         # Step 5: Execution loop (similar to your step-by-step solver)
         while step_count < self.max_steps and (time.time() - start_time) < self.max_time:
             step_count += 1
-            messages.append(ChatMessage(role="assistant", content=f"🔄 Step {step_count}: Generating next step..."))
+            # messages.append(ChatMessage(role="assistant", 
+            #                             content=f"Generating next step...",
+            #                             metadata={"title": f"🔄 Step {step_count}"}))
             yield messages
 
             # Generate the next step
@@ -130,13 +133,16 @@ class Solver:
             # Display the step information
             messages.append(ChatMessage(
                 role="assistant",
-                content=f"📌 Step {step_count} Details:\n- Context: {context}\n- Sub-goal: {sub_goal}\n- Tool: {tool_name}"
+                content=f"- Context: {context}\n- Sub-goal: {sub_goal}\n- Tool: {tool_name}",
+                metadata={"title": f"📌 Step {step_count}: {tool_name}"}
             ))
             yield messages
 
             # Handle tool execution or errors
             if tool_name not in self.planner.available_tools:
-                messages.append(ChatMessage(role="assistant", content=f"⚠️ Error: Tool '{tool_name}' is not available."))
+                messages.append(ChatMessage(
+                    role="assistant", 
+                    content=f"⚠️ Error: Tool '{tool_name}' is not available."))
                 yield messages
                 continue
 
@@ -148,7 +154,10 @@ class Solver:
             result = self.executor.execute_tool_command(tool_name, command)
             result = make_json_serializable(result)
 
-            messages.append(ChatMessage(role="assistant", content=f"✅ Step {step_count} Result:\n{json.dumps(result, indent=4)}"))
+            messages.append(ChatMessage(
+                role="assistant", 
+                content=f"{json.dumps(result, indent=4)}",
+                metadata={"title": f"✅ Step {step_count} Result: {tool_name}"}))
             yield messages
 
             # Step 6: Memory update and stopping condition
@@ -156,7 +165,9 @@ class Solver:
             stop_verification = self.planner.verificate_memory(user_query, img_path, query_analysis, self.memory)
             conclusion = self.planner.extract_conclusion(stop_verification)
 
-            messages.append(ChatMessage(role="assistant", content=f"🛑 Step {step_count} Conclusion: {conclusion}"))
+            messages.append(ChatMessage(
+                role="assistant", 
+                content=f"🛑 Step {step_count} Conclusion: {conclusion}"))
             yield messages
 
             if conclusion == 'STOP':
@@ -254,7 +265,7 @@ def solve_problem_gradio(user_query, user_image, max_steps=10, max_time=60, api_
 
     messages = []  # Initialize message list
     for message_batch in solver.stream_solve_user_problem(user_query, user_image, api_key, messages):
-        yield [[msg.role, msg.content] for msg in message_batch]  # Ensure correct format for Gradio Chatbot
+        yield [msg for msg in message_batch]  # Ensure correct format for Gradio Chatbot
 
 
 
@@ -270,8 +281,8 @@ def main(args):
                 max_steps = gr.Slider(value=5, minimum=1, maximum=10, step=1)
                 max_time = gr.Slider(value=180, minimum=60, maximum=300, step=20)
             with gr.Column(scale=3):
-                chatbot_output = gr.Chatbot(label="Problem-Solving Output", show_copy_button=True)
-                chatbot_output.like(lambda x: print(f"User liked: {x}"))
+                chatbot_output = gr.Chatbot(type="messages", label="Problem-Solving Output")
+                # chatbot_output.like(lambda x: print(f"User liked: {x}"))
                 with gr.Row():
                     with gr.Column(scale=8):
                         user_query = gr.Textbox(show_label=False, placeholder="Type your question here...", container=False)
