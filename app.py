@@ -267,7 +267,9 @@ def solve_problem_gradio(user_query, user_image, max_steps=10, max_time=60, api_
 
 def main(args):
     #################### Gradio Interface ####################
-    with gr.Blocks() as demo:
+    with gr.Blocks(theme=gr.themes.Soft()) as demo:
+        # Theming https://www.gradio.app/guides/theming-guide
+
         gr.Markdown("# 🐙 Chat with OctoTools: An Agentic Framework for Complex Reasoning")  # Title
         # gr.Markdown("[![OctoTools](https://img.shields.io/badge/OctoTools-Agentic%20Framework%20for%20Complex%20Reasoning-blue)](https://octotools.github.io/)")  # Title
         gr.Markdown("""
@@ -294,6 +296,7 @@ def main(args):
                         # container=False
                     )
 
+                with gr.Row():
                     llm_model_engine = gr.Dropdown(
                         choices=["gpt-4o", "gpt-4o-2024-11-20", "gpt-4o-2024-08-06", "gpt-4o-2024-05-13",
                                 "gpt-4o-mini", "gpt-4o-mini-2024-07-18"], 
@@ -302,23 +305,26 @@ def main(args):
                     )
                 with gr.Row():
                     max_steps = gr.Slider(value=5, minimum=1, maximum=10, step=1, label="Max Steps")
+                
+                with gr.Row():
                     max_time = gr.Slider(value=180, minimum=60, maximum=300, step=30, label="Max Time (seconds)")
 
                 with gr.Row():
                     # Container for tools section
                     with gr.Column():
-                        # First row for buttons
-                        with gr.Row():
-                            enable_all_btn = gr.Button("Select All Tools")
-                            disable_all_btn = gr.Button("Clear All Tools")
-                        
-                        # Second row for checkbox group
+
+                        # First row for checkbox group
                         enabled_tools = gr.CheckboxGroup(
                             choices=all_tools,
                             value=all_tools,
                             label="Selected Tools",
                         )
 
+                        # Second row for buttons
+                        with gr.Row():
+                            enable_all_btn = gr.Button("Select All Tools")
+                            disable_all_btn = gr.Button("Clear All Tools")
+                        
                         # Add click handlers for the buttons
                         enable_all_btn.click(
                             lambda: all_tools,
@@ -334,23 +340,24 @@ def main(args):
                 with gr.Row():
                     # Middle column for the query
                     with gr.Column(scale=2):
-                        user_image = gr.Image(type="pil", label="Upload An Image (Optional)", height=500)  # Accepts multiple formats
+                        user_image = gr.Image(type="pil", label="Upload an Image (Optional)", height=500)  # Accepts multiple formats
                         
                         with gr.Row():
                             user_query = gr.Textbox( placeholder="Type your question here...", label="Question (Required)")
 
                         with gr.Row():
-                            run_button = gr.Button("Submit and Run", variant="primary")  # Run button with blue color
+                            run_button = gr.Button("🐙 Submit and Run", variant="primary")  # Run button with blue color
 
                     # Right column for the output
                     with gr.Column(scale=3):
-                        chatbot_output = gr.Chatbot(type="messages", label="Step-Wise Problem-Solving Output (Deep Thinking)", height=500)
+                        chatbot_output = gr.Chatbot(type="messages", label="Step-wise Problem-Solving Output (Deep Thinking)", height=500)
                         # chatbot_output.like(lambda x: print(f"User liked: {x}"))
 
                         # TODO: Add actions to the buttons
                         with gr.Row(elem_id="buttons") as button_row:
                             upvote_btn = gr.Button(value="👍  Upvote", interactive=True, variant="primary")
                             downvote_btn = gr.Button(value="👎  Downvote", interactive=True, variant="primary")
+                            stop_btn = gr.Button(value="⛔️  Stop", interactive=True, variant="primary")
                             clear_btn = gr.Button(value="🗑️  Clear history", interactive=True)
 
                         with gr.Row():
@@ -374,9 +381,10 @@ def main(args):
                                 [ "examples/rotting_kiwi.png", "You are given a 3 x 3 grid in which each cell can contain either no kiwi, one fresh kiwi, or one rotten kiwi. Every minute, any fresh kiwi that is 4-directionally adjacent to a rotten kiwi also becomes rotten. What is the minimum number of minutes that must elapse until no cell has a fresh kiwi?", ["Image_Captioner_Tool"]],
 
                                 ["examples/lung.jpg", "What is the organ on the left side of this image?", ["Image_Captioner_Tool"]],
+
                             ],
                             inputs=[user_image, user_query, enabled_tools],
-                            label="Try these examples"
+                            label="Try these examples with suggested tools."
                         )
 
         # Link button click to function
