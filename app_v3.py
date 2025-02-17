@@ -310,49 +310,34 @@ def main(args):
                         label="Enabled Tools",
                     )
                     
-            with gr.Column(scale=5):
+
+                    
+            # Middle column for the query
+            with gr.Column(scale=2):
+                user_image = gr.Image(type="pil", label="Upload an image (optional)", height=500)  # Accepts multiple formats
                 
                 with gr.Row():
+                    user_query = gr.Textbox( placeholder="Type your question here...", label="Question")
 
-                    # Middle column for the query
-                    with gr.Column(scale=2):
-                        user_image = gr.Image(type="pil", label="Upload an image (optional)", height=500)  # Accepts multiple formats
-                        
-                        with gr.Row():
-                            user_query = gr.Textbox( placeholder="Type your question here...", label="Question")
-
-                        with gr.Row():
-                            run_button = gr.Button("Run")  # Run button
-
-                    # Right column for the output
-                    with gr.Column(scale=3):
-                        chatbot_output = gr.Chatbot(type="messages", label="Step-wise problem-solving output (Deep Thinking)", height=500)
-                        # chatbot_output.like(lambda x: print(f"User liked: {x}"))
-
-                        # TODO: Add actions to the buttons
-                        with gr.Row(elem_id="buttons") as button_row:
-                            upvote_btn = gr.Button(value="👍  Upvote", interactive=True)
-                            downvote_btn = gr.Button(value="👎  Downvote", interactive=True)
-                            clear_btn = gr.Button(value="🗑️  Clear history", interactive=True)
-
-                        with gr.Row():
-                            comment_textbox = gr.Textbox(value="", 
-                                                        placeholder="Feel free to add any comments here. Thanks for using OctoTools!",
-                                                        label="💬 Comment", interactive=True)
-                            
-                # Bottom row for examples
                 with gr.Row():
-                    with gr.Column(scale=5):
-                        gr.Examples(
-                            examples=[
-                                [ "examples/baseball.png", "How many baseballs are there?"],
-                                [ "examples/baseball.png", "How many buckets are there?"],
-                                [ None, "Who is the president of the United States?"]
-                            ],
-                            inputs=[user_image, user_query],
-                            label="Try these examples"
-                        )
+                    run_button = gr.Button("Run")  # Run button
 
+            # Right column for the output
+            with gr.Column(scale=3):
+                chatbot_output = gr.Chatbot(type="messages", label="Step-wise problem-solving output (Deep Thinking)", height=500)
+                # chatbot_output.like(lambda x: print(f"User liked: {x}"))
+
+                # TODO: Add actions to the buttons
+                with gr.Row(elem_id="buttons") as button_row:
+                    upvote_btn = gr.Button(value="👍  Upvote", interactive=True)
+                    downvote_btn = gr.Button(value="👎  Downvote", interactive=True)
+                    clear_btn = gr.Button(value="🗑️  Clear history", interactive=True)
+
+                with gr.Row():
+                    comment_textbox = gr.Textbox(value="", 
+                                                placeholder="Feel free to add any comments here. Thanks for using OctoTools!",
+                                                label="💬 Comment", interactive=True)
+                    
         # Link button click to function
         run_button.click(
             fn=solve_problem_gradio, 
