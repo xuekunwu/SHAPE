@@ -184,13 +184,10 @@ class Solver:
         yield messages
             
 
-
-
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Run the OctoTools demo with specified parameters.")
     parser.add_argument("--llm_engine_name", default="gpt-4o", help="LLM engine name.")
     parser.add_argument("--max_tokens", type=int, default=2000, help="Maximum tokens for LLM generation.")
-    parser.add_argument("--run_baseline_only", type=bool, default=False, help="Run only the baseline (no toolbox).")
     parser.add_argument("--task", default="minitoolbench", help="Task to run.")
     parser.add_argument("--task_description", default="", help="Task description.")
     parser.add_argument(
@@ -203,6 +200,7 @@ def parse_arguments():
     parser.add_argument("--verbose", type=bool, default=True, help="Enable verbose output.")
 
     # NOTE: Add new arguments
+    parser.add_argument("--run_baseline_only", type=bool, default=False, help="Run only the baseline (no toolbox).")
     parser.add_argument("--openai_api_source", default="we_provided", choices=["we_provided", "user_provided"], help="Source of OpenAI API key.")
     return parser.parse_args()
 
@@ -214,7 +212,7 @@ def solve_problem_gradio(user_query, user_image, max_steps=10, max_time=60, api_
     """
 
     # Generate shorter ID (Date and first 8 characters of UUID)
-    query_id = time.strftime("%Y%m%d_%H%M%S") + "_" + str(uuid.uuid4())[:8] # e.g, 20250217_612f2474
+    query_id = time.strftime("%Y%m%d_%H%M%S") + "_" + str(uuid.uuid4())[:8] # e.g, 20250217_062225_612f2474
     print(f"Query ID: {query_id}")
 
     # Create a directory for the query ID
@@ -303,13 +301,22 @@ def main(args):
             # Left column for settings
             with gr.Column(scale=1):
                 with gr.Row():
-                    api_key = gr.Textbox(
-                        show_label=True,
-                        placeholder="Your API key will not be stored in any way.",
-                        type="password", 
-                        label="OpenAI API Key",
-                        # container=False
-                    )
+                    if args.openai_api_source == "user_provided":
+                        print("Using API key from user input.")
+                        api_key = gr.Textbox(
+                            show_label=True,
+                            placeholder="Your API key will not be stored in any way.",
+                            type="password", 
+                            label="OpenAI API Key",
+                            # container=False
+                        )
+                    else:
+                        print(f"Using local API key from environment variable: {os.getenv('OPENAI_API_KEY')[:4]}...")
+                        api_key = gr.Textbox(
+                            value=os.getenv("OPENAI_API_KEY"),
+                            visible=False,
+                            interactive=False
+                        )
 
                 with gr.Row():
                     llm_model_engine = gr.Dropdown(
@@ -371,8 +378,8 @@ def main(args):
                         with gr.Row(elem_id="buttons") as button_row:
                             upvote_btn = gr.Button(value="👍  Upvote", interactive=True, variant="primary") # TODO
                             downvote_btn = gr.Button(value="👎  Downvote", interactive=True, variant="primary") # TODO
-                            stop_btn = gr.Button(value="⛔️  Stop", interactive=True) # TODO
-                            clear_btn = gr.Button(value="🗑️  Clear history", interactive=True) # TODO
+                            # stop_btn = gr.Button(value="⛔️  Stop", interactive=True) # TODO
+                            # clear_btn = gr.Button(value="🗑️  Clear history", interactive=True) # TODO
 
                         # TODO: Add comment textbox
                         with gr.Row():
