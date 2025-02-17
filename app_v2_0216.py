@@ -264,74 +264,70 @@ def solve_problem_gradio(user_query, user_image, max_steps=10, max_time=60, api_
         yield [msg for msg in message_batch]  # Ensure correct format for Gradio Chatbot
 
 
+
 def main(args):
     #################### Gradio Interface ####################
     with gr.Blocks() as demo:
-        gr.Markdown("# 🐙 Chat with OctoTools: An Agentic Framework for Complex Reasoning")  # Title
-        # gr.Markdown("[![OctoTools](https://img.shields.io/badge/OctoTools-Agentic%20Framework%20for%20Complex%20Reasoning-blue)](https://octotools.github.io/)")  # Title
-        gr.Markdown("""
-        **OctoTools** is a training-free, user-friendly, and easily extensible open-source agentic framework designed to tackle complex reasoning across diverse domains. 
-        It introduces standardized **tool cards** to encapsulate tool functionality, a **planner** for both high-level and low-level planning, and an **executor** to carry out tool usage. 
-                    
-        [Website](https://octotools.github.io/) | 
-        [Github](https://github.com/octotools/octotools) | 
-        [arXiv](https://github.com/octotools/octotools/assets/paper.pdf) | 
-        [Paper](https://github.com/octotools/octotools/assets/paper.pdf) | 
-        [Tool Cards](https://octotools.github.io/#tool-cards) | 
-        [Example Visualizations](https://octotools.github.io/#visualization)
-        """)
+        gr.Markdown("# 🧠 The OctoTools Agentic Solver")  # Title
 
         with gr.Row():
-            with gr.Column(scale=1):
-                with gr.Row():
-                    api_key = gr.Textbox(
-                        show_label=True,
-                        placeholder="Your API key will not be stored in any way.",
-                        type="password", 
-                        label="OpenAI API Key",
-                        # container=False
-                    )
-
-                    llm_model_engine = gr.Dropdown(
-                        choices=["gpt-4o", "gpt-4o-2024-11-20", "gpt-4o-2024-08-06", "gpt-4o-2024-05-13",
-                                "gpt-4o-mini", "gpt-4o-mini-2024-07-18"], 
-                        value="gpt-4o", 
-                        label="LLM Model"
-                    )
-                with gr.Row():
-                    max_steps = gr.Slider(value=5, minimum=1, maximum=10, step=1, label="Max Steps")
-                    max_time = gr.Slider(value=180, minimum=60, maximum=300, step=30, label="Max Time (seconds)")
-
-                with gr.Row():
-                    enabled_tools = gr.CheckboxGroup(
-                        choices=all_tools,
-                        value=all_tools,
-                        label="Enabled Tools",
-                    )
-                    
             with gr.Column(scale=2):
-                user_image = gr.Image(type="pil", label="Upload an image (optional)", height=500)  # Accepts multiple formats
+                api_key = gr.Textbox(show_label=False, placeholder="Your API key will not be stored in any way.", type="password", container=False)
+                user_image = gr.Image(type="pil", label="Upload an image")  # Accepts multiple formats
                 
                 with gr.Row():
-                    user_query = gr.Textbox( placeholder="Type your question here...", label="Query")
+                    with gr.Column(scale=8):
+                        user_query = gr.Textbox(show_label=False, placeholder="Type your question here...", container=False)
+                    with gr.Column(scale=1):
+                        run_button = gr.Button("Run")  # Run button
 
+                max_steps = gr.Slider(value=5, minimum=1, maximum=10, step=1, label="Max Steps")
+                max_time = gr.Slider(value=150, minimum=60, maximum=300, step=30, label="Max Time (seconds)")
+                llm_model_engine = gr.Dropdown(
+                    choices=["gpt-4o", "gpt-4o-2024-11-20", "gpt-4o-2024-08-06", "gpt-4o-2024-05-13",
+                             "gpt-4o-mini", "gpt-4o-mini-2024-07-18"], 
+                    value="gpt-4o", 
+                    label="LLM Model"
+                )
+                enabled_tools = gr.CheckboxGroup(
+                    choices=all_tools,
+                    value=all_tools,
+                    label="Enabled Tools"
+                )
+                
+            with gr.Column(scale=2):
+                api_key = gr.Textbox(show_label=False, placeholder="Your API key will not be stored in any way.", type="password", container=False)
+                user_image = gr.Image(type="pil", label="Upload an image")  # Accepts multiple formats
+                
                 with gr.Row():
-                    run_button = gr.Button("Run")  # Run button
+                    with gr.Column(scale=8):
+                        user_query = gr.Textbox(show_label=False, placeholder="Type your question here...", container=False)
+                    with gr.Column(scale=1):
+                        run_button = gr.Button("Run")  # Run button
 
-            with gr.Column(scale=3):
-                chatbot_output = gr.Chatbot(type="messages", label="Step-wise problem-solving output (Deep Thinking)", height=500)
+                max_steps = gr.Slider(value=5, minimum=1, maximum=10, step=1, label="Max Steps")
+                max_time = gr.Slider(value=150, minimum=60, maximum=300, step=30, label="Max Time (seconds)")
+                llm_model_engine = gr.Dropdown(
+                    choices=["gpt-4o", "gpt-4o-2024-11-20", "gpt-4o-2024-08-06", "gpt-4o-2024-05-13",
+                             "gpt-4o-mini", "gpt-4o-mini-2024-07-18"], 
+                    value="gpt-4o", 
+                    label="LLM Model"
+                )
+                enabled_tools = gr.CheckboxGroup(
+                    choices=all_tools,
+                    value=all_tools,
+                    label="Enabled Tools"
+                )
+
+
+            with gr.Column(scale=2):
+                chatbot_output = gr.Chatbot(type="messages", label="Problem-Solving Output")
                 # chatbot_output.like(lambda x: print(f"User liked: {x}"))
 
-                # TODO: Add actions to the buttons
                 with gr.Row(elem_id="buttons") as button_row:
-                    upvote_btn = gr.Button(value="👍  Upvote", interactive=True)
-                    downvote_btn = gr.Button(value="👎  Downvote", interactive=True)
-                    clear_btn = gr.Button(value="🗑️  Clear history", interactive=True)
-
-                with gr.Row():
-                    comment_textbox = gr.Textbox(value="", 
-                                                 placeholder="Feel free to add any comments here. Thanks for using OctoTools!",
-                                                 label="💬 Comment", interactive=True)
+                    upvote_btn = gr.Button(value="👍  Upvote", interactive=False)
+                    downvote_btn = gr.Button(value="👎  Downvote", interactive=False)
+                    clear_btn = gr.Button(value="🗑️  Clear history", interactive=False)
 
         # Link button click to function
         run_button.click(

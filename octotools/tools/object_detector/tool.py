@@ -59,6 +59,7 @@ class Object_Detector_Tool(BaseTool):
     def build_tool(self, model_size='tiny'):
         model_name = f"IDEA-Research/grounding-dino-{model_size}"
         device = "cuda" if torch.cuda.is_available() else "cpu"
+        print(f"Building the Object Detection tool with model: {model_name} on device: {device}")
         try:
             pipe = pipeline(model=model_name, task="zero-shot-object-detection", device=device)
             return pipe
