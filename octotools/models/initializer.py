@@ -17,6 +17,7 @@ class Initializer:
         print("\nInitializing OctoTools...")
         print(f"Enabled tools: {self.enabled_tools}")
         print(f"LLM model string: {self.model_string}")
+
         self._set_up_tools()
 
     def get_project_root(self):
@@ -48,7 +49,7 @@ class Initializer:
 
         for root, dirs, files in os.walk(tools_dir):
             # print(f"\nScanning directory: {root}")
-            if 'tool.py' in files and os.path.basename(root) in self.available_tools:
+            if 'tool.py' in files and os.path.basename(root) in self.available_tools: # NOTE
                 file = 'tool.py'
                 module_path = os.path.join(root, file)
                 module_name = os.path.splitext(file)[0]

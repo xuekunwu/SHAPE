@@ -22,6 +22,8 @@ from octotools.models.memory import Memory
 from octotools.models.executor import Executor
 from octotools.models.utils import make_json_serializable
 
+from utils import save_feedback
+
 
 class Solver:
     def __init__(
@@ -36,7 +38,6 @@ class Solver:
         verbose: bool = True,
         max_steps: int = 10,
         max_time: int = 60,
-        output_json_dir: str = "results",
         root_cache_dir: str = "cache"
     ):
         self.planner = planner
@@ -48,7 +49,6 @@ class Solver:
         self.verbose = verbose
         self.max_steps = max_steps
         self.max_time = max_time
-        self.output_json_dir = output_json_dir
         self.root_cache_dir = root_cache_dir
 
         self.output_types = output_types.lower().split(',')
@@ -72,14 +72,16 @@ class Solver:
             # img_bytes = img_bytes_io.getvalue()  # Get bytes
             
             # Use image paths instead of bytes,
-            os.makedirs(os.path.join(self.root_cache_dir, 'images'), exist_ok=True)
-            img_path = os.path.join(self.root_cache_dir, 'images', str(uuid.uuid4()) + '.jpg')
+            # os.makedirs(os.path.join(self.root_cache_dir, 'images'), exist_ok=True)
+            # img_path = os.path.join(self.root_cache_dir, 'images', str(uuid.uuid4()) + '.jpg')
+
+            img_path = os.path.join(self.root_cache_dir, 'query_image.jpg')
             user_image.save(img_path)
         else:
             img_path = None
 
-        # Set query cache
-        _cache_dir = os.path.join(self.root_cache_dir)
+        # Set tool cache directory
+        _cache_dir = os.path.join(self.root_cache_dir, "tool_cache") # NOTE: This is the directory for tool cache
         self.executor.set_query_cache_dir(_cache_dir)
         
         # Step 1: Display the received inputs
@@ -178,9 +180,11 @@ class Solver:
             yield messages
 
         # Step 8: Completion Message
-        messages.append(ChatMessage(role="assistant", content="✅ Problem-solving process complete."))
+        messages.append(ChatMessage(role="assistant", content="✅ Problem-solving process completed."))
         yield messages
             
+
+
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Run the OctoTools demo with specified parameters.")
@@ -196,8 +200,10 @@ def parse_arguments():
     )
     parser.add_argument("--enabled_tools", default="Generalist_Solution_Generator_Tool", help="List of enabled tools.")
     parser.add_argument("--root_cache_dir", default="demo_solver_cache", help="Path to solver cache directory.")
-    parser.add_argument("--output_json_dir", default="demo_results", help="Path to output JSON directory.")
     parser.add_argument("--verbose", type=bool, default=True, help="Enable verbose output.")
+
+    # NOTE: Add new arguments
+    parser.add_argument("--openai_api_source", default="we_provided", choices=["we_provided", "user_provided"], help="Source of OpenAI API key.")
     return parser.parse_args()
 
 
@@ -206,6 +212,15 @@ def solve_problem_gradio(user_query, user_image, max_steps=10, max_time=60, api_
     Wrapper function to connect the solver to Gradio.
     Streams responses from `solver.stream_solve_user_problem` for real-time UI updates.
     """
+
+    # Generate shorter ID (Date and first 8 characters of UUID)
+    query_id = time.strftime("%Y%m%d_%H%M%S") + "_" + str(uuid.uuid4())[:8] # e.g, 20250217_612f2474
+    print(f"Query ID: {query_id}")
+
+    # Create a directory for the query ID
+    query_dir = os.path.join(args.root_cache_dir, query_id)
+    os.makedirs(query_dir, exist_ok=True)
+    args.root_cache_dir = query_dir
 
     if api_key is None:
         return [["assistant", "⚠️ Error: OpenAI API Key is required."]]
@@ -237,7 +252,7 @@ def solve_problem_gradio(user_query, user_image, max_steps=10, max_time=60, api_
     # Instantiate Executor
     executor = Executor(
         llm_engine_name=llm_model_engine,
-        root_cache_dir=args.root_cache_dir,
+        root_cache_dir=args.root_cache_dir, # NOTE
         enable_signal=False,
         api_key=api_key
     )
@@ -253,8 +268,7 @@ def solve_problem_gradio(user_query, user_image, max_steps=10, max_time=60, api_
         verbose=args.verbose,
         max_steps=max_steps,
         max_time=max_time,
-        output_json_dir=args.output_json_dir,
-        root_cache_dir=args.root_cache_dir
+        root_cache_dir=args.root_cache_dir # NOTE
     )
 
     if solver is None:
@@ -352,23 +366,47 @@ def main(args):
                     # Right column for the output
                     with gr.Column(scale=3):
                         chatbot_output = gr.Chatbot(type="messages", label="Step-wise Problem-Solving Output (Deep Thinking)", height=500)
-                        # chatbot_output.like(lambda x: print(f"User liked: {x}"))
 
                         # TODO: Add actions to the buttons
                         with gr.Row(elem_id="buttons") as button_row:
-                            upvote_btn = gr.Button(value="👍  Upvote", interactive=True, variant="primary")
-                            downvote_btn = gr.Button(value="👎  Downvote", interactive=True, variant="primary")
-                            stop_btn = gr.Button(value="⛔️  Stop", interactive=True)
-                            clear_btn = gr.Button(value="🗑️  Clear history", interactive=True)
+                            upvote_btn = gr.Button(value="👍  Upvote", interactive=True, variant="primary") # TODO
+                            downvote_btn = gr.Button(value="👎  Downvote", interactive=True, variant="primary") # TODO
+                            stop_btn = gr.Button(value="⛔️  Stop", interactive=True) # TODO
+                            clear_btn = gr.Button(value="🗑️  Clear history", interactive=True) # TODO
 
+                        # TODO: Add comment textbox
                         with gr.Row():
                             comment_textbox = gr.Textbox(value="", 
                                                         placeholder="Feel free to add any comments here. Thanks for using OctoTools!",
-                                                        label="💬 Comment", interactive=True)
+                                                        label="💬 Comment (Type and press Enter to submit.)", interactive=True) # TODO
                             
+                        # Update the button click handlers
+                        upvote_btn.click(
+                            fn=lambda: save_feedback(args.root_cache_dir, "upvote"),
+                            inputs=[],
+                            outputs=[]
+                        )
+                        
+                        downvote_btn.click(
+                            fn=lambda: save_feedback(args.root_cache_dir, "downvote"),
+                            inputs=[],
+                            outputs=[]
+                        )
+
+                        # Add handler for comment submission
+                        comment_textbox.submit(
+                            fn=lambda comment: save_feedback(args.root_cache_dir, comment),
+                            inputs=[comment_textbox],
+                            outputs=[]
+                        )
+
                 # Bottom row for examples
                 with gr.Row():
                     with gr.Column(scale=5):
+                        gr.Markdown("")
+                        gr.Markdown("""
+                                    ## 💡 Try these examples with suggested tools.
+                                    """)
                         gr.Examples(
                             examples=[
                                 [ None, "Who is the president of the United States?", ["Google_Search_Tool"]],
@@ -383,7 +421,7 @@ def main(args):
 
                             ],
                             inputs=[user_image, user_query, enabled_tools],
-                            label="Try these examples with suggested tools."
+                            # label="Try these examples with suggested tools."
                         )
 
         # Link button click to function
@@ -410,8 +448,8 @@ if __name__ == "__main__":
 
         "Image_Captioner_Tool",
         "Object_Detector_Tool",
-        "Text_Detector_Tool",
         "Relevant_Patch_Zoomer_Tool",
+        "Text_Detector_Tool",
 
         "Python_Code_Generator_Tool",
 
