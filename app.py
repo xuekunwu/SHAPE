@@ -291,10 +291,11 @@ def main(args):
                     
         [Website](https://octotools.github.io/) | 
         [Github](https://github.com/octotools/octotools) | 
-        [arXiv](https://github.com/octotools/octotools/assets/paper.pdf) | 
-        [Paper](https://github.com/octotools/octotools/assets/paper.pdf) | 
+        [arXiv](https://arxiv.org/abs/2502.xxxxx) | 
+        [Paper](https://arxiv.org/pdf/2502.xxxxx) | 
         [Tool Cards](https://octotools.github.io/#tool-cards) | 
-        [Example Visualizations](https://octotools.github.io/#visualization)
+        [Example Visualizations](https://octotools.github.io/#visualization) | 
+        [Discord](https://discord.gg/NMJx66DC)
         """)
 
         with gr.Row():
