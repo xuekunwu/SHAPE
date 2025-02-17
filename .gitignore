@@ -174,5 +174,5 @@ tool_cache/
 detected_objects/
 
 # [Gradio]
-# demo_solver_cache/
+demo_solver_cache/
 backups/

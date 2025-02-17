@@ -25,6 +25,40 @@ from octotools.models.utils import make_json_serializable
 from utils import save_feedback
 
 
+########### Test Huggingface Dataset ###########
+from pathlib import Path
+from huggingface_hub import CommitScheduler
+
+# Add these near the top of the file with other constants
+DATASET_DIR = Path("feedback_dataset")
+DATASET_DIR.mkdir(parents=True, exist_ok=True)
+DATASET_PATH = DATASET_DIR / f"feedback-{time.strftime('%Y%m%d_%H%M%S')}.json"
+
+# Get Huggingface token from environment variable
+HF_TOKEN = os.getenv("HUGGINGFACE_TOKEN")
+
+scheduler = CommitScheduler(
+    repo_id="lupantech/OctoTools-Gradio-Demo-User-Data",
+    repo_type="dataset",
+    folder_path=DATASET_DIR,
+    path_in_repo="data",
+    token=HF_TOKEN
+)
+
+def save_feedback(root_cache_dir: str, feedback_type: str, comment: str = None) -> None:
+    """Save user feedback to Huggingface dataset"""
+    with scheduler.lock:
+        with DATASET_PATH.open("a") as f:
+            feedback_data = {
+                "query_id": os.path.basename(root_cache_dir),
+                "feedback_type": feedback_type,
+                "comment": comment,
+                "datetime": time.strftime("%Y%m%d_%H%M%S")
+            }
+            json.dump(feedback_data, f)
+            f.write("\n")
+########### End of Test Huggingface Dataset ###########
+
 class Solver:
     def __init__(
         self,
