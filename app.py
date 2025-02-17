@@ -210,11 +210,12 @@ def solve_problem_gradio(user_query, user_image, max_steps=10, max_time=60, api_
     if api_key is None:
         return [["assistant", "⚠️ Error: OpenAI API Key is required."]]
     
-    # Initialize Tools
-    enabled_tools = args.enabled_tools.split(",") if args.enabled_tools else []
+    # # Initialize Tools
+    # enabled_tools = args.enabled_tools.split(",") if args.enabled_tools else []
 
-    # Hack enabled_tools
-    enabled_tools = ["Generalist_Solution_Generator_Tool"]
+    # # Hack enabled_tools
+    # enabled_tools = ["Generalist_Solution_Generator_Tool"]
+
     # Instantiate Initializer
     initializer = Initializer(
         enabled_tools=enabled_tools,
@@ -304,35 +305,52 @@ def main(args):
                     max_time = gr.Slider(value=180, minimum=60, maximum=300, step=30, label="Max Time (seconds)")
 
                 with gr.Row():
-                    enabled_tools = gr.CheckboxGroup(
-                        choices=all_tools,
-                        value=all_tools,
-                        label="Enabled Tools",
-                    )
-                    
+                    # Container for tools section
+                    with gr.Column():
+                        # First row for buttons
+                        with gr.Row():
+                            enable_all_btn = gr.Button("Select All Tools")
+                            disable_all_btn = gr.Button("Clear All Tools")
+                        
+                        # Second row for checkbox group
+                        enabled_tools = gr.CheckboxGroup(
+                            choices=all_tools,
+                            value=all_tools,
+                            label="Selected Tools",
+                        )
+
+                        # Add click handlers for the buttons
+                        enable_all_btn.click(
+                            lambda: all_tools,
+                            outputs=enabled_tools
+                        )
+                        disable_all_btn.click(
+                            lambda: [],
+                            outputs=enabled_tools
+                        )
+
             with gr.Column(scale=5):
                 
                 with gr.Row():
-
                     # Middle column for the query
                     with gr.Column(scale=2):
-                        user_image = gr.Image(type="pil", label="Upload an image (optional)", height=500)  # Accepts multiple formats
+                        user_image = gr.Image(type="pil", label="Upload An Image (Optional)", height=500)  # Accepts multiple formats
                         
                         with gr.Row():
-                            user_query = gr.Textbox( placeholder="Type your question here...", label="Question")
+                            user_query = gr.Textbox( placeholder="Type your question here...", label="Question (Required)")
 
                         with gr.Row():
-                            run_button = gr.Button("Run")  # Run button
+                            run_button = gr.Button("Submit and Run", variant="primary")  # Run button with blue color
 
                     # Right column for the output
                     with gr.Column(scale=3):
-                        chatbot_output = gr.Chatbot(type="messages", label="Step-wise problem-solving output (Deep Thinking)", height=500)
+                        chatbot_output = gr.Chatbot(type="messages", label="Step-Wise Problem-Solving Output (Deep Thinking)", height=500)
                         # chatbot_output.like(lambda x: print(f"User liked: {x}"))
 
                         # TODO: Add actions to the buttons
                         with gr.Row(elem_id="buttons") as button_row:
-                            upvote_btn = gr.Button(value="👍  Upvote", interactive=True)
-                            downvote_btn = gr.Button(value="👎  Downvote", interactive=True)
+                            upvote_btn = gr.Button(value="👍  Upvote", interactive=True, variant="primary")
+                            downvote_btn = gr.Button(value="👎  Downvote", interactive=True, variant="primary")
                             clear_btn = gr.Button(value="🗑️  Clear history", interactive=True)
 
                         with gr.Row():
@@ -345,11 +363,19 @@ def main(args):
                     with gr.Column(scale=5):
                         gr.Examples(
                             examples=[
-                                [ "examples/baseball.png", "How many baseballs are there?"],
-                                [ "examples/baseball.png", "How many buckets are there?"],
-                                [ None, "Who is the president of the United States?"]
+                                [ None, "Who is the president of the United States?", ["Google_Search_Tool"]],
+
+                                [ "examples/baseball.png", "How many baseballs are there?", ["Object_Detector_Tool"]],
+
+                                [ None, "Using the numbers [1, 1, 6, 9], create an expression that equals 24. You must use basic arithmetic operations (+, -, ×, /) and parentheses. For example, one solution for [1, 2, 3, 4] is (1+2+3)×4.", ["Python_Code_Generator_Tool"]],
+
+                                [None, "What are the research trends in tool agents with large language models for scientific discovery? Please consider the latest literature from ArXiv, PubMed, Nature, and news sources.", ["ArXiv_Paper_Searcher_Tool", "Pubmed_Search_Tool", "Nature_News_Fetcher_Tool"]],
+
+                                [ "examples/rotting_kiwi.png", "You are given a 3 x 3 grid in which each cell can contain either no kiwi, one fresh kiwi, or one rotten kiwi. Every minute, any fresh kiwi that is 4-directionally adjacent to a rotten kiwi also becomes rotten. What is the minimum number of minutes that must elapse until no cell has a fresh kiwi?", ["Image_Captioner_Tool"]],
+
+                                ["examples/lung.jpg", "What is the organ on the left side of this image?", ["Image_Captioner_Tool"]],
                             ],
-                            inputs=[user_image, user_query],
+                            inputs=[user_image, user_query, enabled_tools],
                             label="Try these examples"
                         )
 

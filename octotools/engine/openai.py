@@ -41,8 +41,8 @@ class ChatOpenAI(EngineLM, CachedEngine):
         model_string="gpt-4o-mini-2024-07-18",
         system_prompt=DEFAULT_SYSTEM_PROMPT,
         is_multimodal: bool=False,
-        # enable_cache: bool=True,
-        enable_cache: bool=False, # NOTE: disable cache for now
+        enable_cache: bool=True,
+        # enable_cache: bool=False, # NOTE: disable cache for now
         api_key: str=None,
         **kwargs):
         """
