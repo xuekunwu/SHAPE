@@ -267,7 +267,8 @@ def solve_problem_gradio(user_query, user_image, max_steps=10, max_time=60, api_
 
 def main(args):
     #################### Gradio Interface ####################
-    with gr.Blocks(theme=gr.themes.Soft()) as demo:
+    with gr.Blocks() as demo:
+    # with gr.Blocks(theme=gr.themes.Soft()) as demo:
         # Theming https://www.gradio.app/guides/theming-guide
 
         gr.Markdown("# 🐙 Chat with OctoTools: An Agentic Framework for Complex Reasoning")  # Title
@@ -357,7 +358,7 @@ def main(args):
                         with gr.Row(elem_id="buttons") as button_row:
                             upvote_btn = gr.Button(value="👍  Upvote", interactive=True, variant="primary")
                             downvote_btn = gr.Button(value="👎  Downvote", interactive=True, variant="primary")
-                            stop_btn = gr.Button(value="⛔️  Stop", interactive=True, variant="primary")
+                            stop_btn = gr.Button(value="⛔️  Stop", interactive=True")
                             clear_btn = gr.Button(value="🗑️  Clear history", interactive=True)
 
                         with gr.Row():
@@ -378,9 +379,7 @@ def main(args):
 
                                 [None, "What are the research trends in tool agents with large language models for scientific discovery? Please consider the latest literature from ArXiv, PubMed, Nature, and news sources.", ["ArXiv_Paper_Searcher_Tool", "Pubmed_Search_Tool", "Nature_News_Fetcher_Tool"]],
 
-                                [ "examples/rotting_kiwi.png", "You are given a 3 x 3 grid in which each cell can contain either no kiwi, one fresh kiwi, or one rotten kiwi. Every minute, any fresh kiwi that is 4-directionally adjacent to a rotten kiwi also becomes rotten. What is the minimum number of minutes that must elapse until no cell has a fresh kiwi?", ["Image_Captioner_Tool"]],
-
-                                ["examples/lung.jpg", "What is the organ on the left side of this image?", ["Image_Captioner_Tool"]],
+                                [ "examples/rotting_kiwi.png", "You are given a 3 x 3 grid in which each cell can contain either no kiwi, one fresh kiwi, or one rotten kiwi. Every minute, any fresh kiwi that is 4-directionally adjacent to a rotten kiwi also becomes rotten. What is the minimum number of minutes that must elapse until no cell has a fresh kiwi?", ["Image_Captioner_Tool"]]
 
                             ],
                             inputs=[user_image, user_query, enabled_tools],
