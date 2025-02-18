@@ -22,41 +22,125 @@ from octotools.models.memory import Memory
 from octotools.models.executor import Executor
 from octotools.models.utils import make_json_serializable
 
-from utils import save_feedback
 
-
-########### Test Huggingface Dataset ###########
 from pathlib import Path
 from huggingface_hub import CommitScheduler
 
-# Add these near the top of the file with other constants
-DATASET_DIR = Path("feedback_dataset")
-DATASET_DIR.mkdir(parents=True, exist_ok=True)
-DATASET_PATH = DATASET_DIR / f"feedback-{time.strftime('%Y%m%d_%H%M%S')}.json"
-
 # Get Huggingface token from environment variable
 HF_TOKEN = os.getenv("HUGGINGFACE_TOKEN")
+
+########### Test Huggingface Dataset ###########
+# Update the HuggingFace dataset constants
+DATASET_DIR = Path("solver_cache")  # the directory to save the dataset
+DATASET_DIR.mkdir(parents=True, exist_ok=True) 
+
+global QUERY_ID
+QUERY_ID = None
 
 scheduler = CommitScheduler(
     repo_id="lupantech/OctoTools-Gradio-Demo-User-Data",
     repo_type="dataset",
     folder_path=DATASET_DIR,
-    path_in_repo="data",
+    path_in_repo="solver_cache",  # Update path in repo
     token=HF_TOKEN
 )
 
-def save_feedback(root_cache_dir: str, feedback_type: str, comment: str = None) -> None:
-    """Save user feedback to Huggingface dataset"""
-    with scheduler.lock:
-        with DATASET_PATH.open("a") as f:
-            feedback_data = {
-                "query_id": os.path.basename(root_cache_dir),
-                "feedback_type": feedback_type,
-                "comment": comment,
-                "datetime": time.strftime("%Y%m%d_%H%M%S")
-            }
-            json.dump(feedback_data, f)
-            f.write("\n")
+
+def save_query_data(query_id: str, query: str, image_path: str) -> None:
+    """Save query data to Huggingface dataset"""
+    # Save query metadata
+    query_cache_dir = DATASET_DIR / query_id
+    query_cache_dir.mkdir(parents=True, exist_ok=True)
+    query_file = query_cache_dir / "query_metadata.json"
+
+    query_metadata = {
+        "query_id": query_id,
+        "query_text": query,
+        "datetime": time.strftime("%Y%m%d_%H%M%S"),
+        "image_path": image_path if image_path else None
+    }
+    
+    print(f"Saving query metadata to {query_file}")
+    with query_file.open("w") as f:
+        json.dump(query_metadata, f, indent=4)
+    
+    # # NOTE: As we are using the same name for the query cache directory as the dataset directory,
+    # # NOTE: we don't need to copy the content from the query cache directory to the query directory.
+    # # Copy all content from root_cache_dir to query_dir
+    # import shutil
+    # shutil.copytree(args.root_cache_dir, query_data_dir, dirs_exist_ok=True)
+
+
+def save_feedback(query_id: str, feedback_type: str, feedback_text: str = None) -> None:
+    """
+    Save user feedback to the query directory.
+    
+    Args:
+        query_id: Unique identifier for the query
+        feedback_type: Type of feedback ('upvote', 'downvote', or 'comment')
+        feedback_text: Optional text feedback from user
+    """
+
+    feedback_data_dir = DATASET_DIR / query_id
+    feedback_data_dir.mkdir(parents=True, exist_ok=True)
+    
+    feedback_data = {
+        "query_id": query_id,
+        "feedback_type": feedback_type,
+        "feedback_text": feedback_text,
+        "datetime": time.strftime("%Y%m%d_%H%M%S")
+    }
+    
+    # Save feedback in the query directory
+    feedback_file = feedback_data_dir / "feedback.json"
+    print(f"Saving feedback to {feedback_file}")
+    
+    # If feedback file exists, update it
+    if feedback_file.exists():
+        with feedback_file.open("r") as f:
+            existing_feedback = json.load(f)
+            # Convert to list if it's a single feedback entry
+            if not isinstance(existing_feedback, list):
+                existing_feedback = [existing_feedback]
+            existing_feedback.append(feedback_data)
+            feedback_data = existing_feedback
+    
+    # Write feedback data
+    with feedback_file.open("w") as f:
+        json.dump(feedback_data, f, indent=4)
+
+
+def save_steps_data(query_id: str, memory: Memory) -> None:
+    """Save steps data to Huggingface dataset"""
+    steps_file = DATASET_DIR / query_id / "all_steps.json"
+
+    memory_actions = memory.get_actions()
+    memory_actions = make_json_serializable(memory_actions) # NOTE: make the memory actions serializable
+    print("Memory actions: ", memory_actions)
+
+    with steps_file.open("w") as f:
+        json.dump(memory_actions, f, indent=4)
+
+    
+def save_module_data(query_id: str, key: str, value: Any) -> None:
+    """Save module data to Huggingface dataset"""
+    try:
+        key = key.replace(" ", "_").lower()
+        module_file = DATASET_DIR / query_id / f"{key}.json"
+        value = make_json_serializable(value)  # NOTE: make the value serializable
+        with module_file.open("a") as f:
+            json.dump(value, f, indent=4)
+    except Exception as e:
+        print(f"Warning: Failed to save as JSON: {e}")
+        # Fallback to saving as text file
+        text_file = DATASET_DIR / query_id / f"{key}.txt"
+        try:
+            with text_file.open("a") as f:
+                f.write(str(value) + "\n")
+            print(f"Successfully saved as text file: {text_file}")
+        except Exception as e:
+            print(f"Error: Failed to save as text file: {e}")
+
 ########### End of Test Huggingface Dataset ###########
 
 class Solver:
@@ -72,7 +156,7 @@ class Solver:
         verbose: bool = True,
         max_steps: int = 10,
         max_time: int = 60,
-        root_cache_dir: str = "cache"
+        query_cache_dir: str = "solver_cache"
     ):
         self.planner = planner
         self.memory = memory
@@ -83,7 +167,7 @@ class Solver:
         self.verbose = verbose
         self.max_steps = max_steps
         self.max_time = max_time
-        self.root_cache_dir = root_cache_dir
+        self.query_cache_dir = query_cache_dir
 
         self.output_types = output_types.lower().split(',')
         assert all(output_type in ["base", "final", "direct"] for output_type in self.output_types), "Invalid output type. Supported types are 'base', 'final', 'direct'."
@@ -109,14 +193,14 @@ class Solver:
             # os.makedirs(os.path.join(self.root_cache_dir, 'images'), exist_ok=True)
             # img_path = os.path.join(self.root_cache_dir, 'images', str(uuid.uuid4()) + '.jpg')
 
-            img_path = os.path.join(self.root_cache_dir, 'query_image.jpg')
+            img_path = os.path.join(self.query_cache_dir,  'query_image.jpg')
             user_image.save(img_path)
         else:
             img_path = None
 
         # Set tool cache directory
-        _cache_dir = os.path.join(self.root_cache_dir, "tool_cache") # NOTE: This is the directory for tool cache
-        self.executor.set_query_cache_dir(_cache_dir)
+        _tool_cache_dir = os.path.join(self.query_cache_dir, "tool_cache") # NOTE: This is the directory for tool cache
+        self.executor.set_query_cache_dir(_tool_cache_dir) # NOTE: set query cache directory
         
         # Step 1: Display the received inputs
         if user_image:
@@ -145,6 +229,13 @@ class Solver:
                                     metadata={"title": "🔍 Query Analysis"}))
         yield messages
 
+        # Save the query analysis data
+        query_analysis_data = {
+            "query_analysis": query_analysis,
+            "time": round(time.time() - start_time, 5)
+        }
+        save_module_data(QUERY_ID, "step_0_query_analysis", query_analysis_data)
+
         # Step 5: Execution loop (similar to your step-by-step solver)
         while step_count < self.max_steps and (time.time() - start_time) < self.max_time:
             step_count += 1
@@ -158,6 +249,14 @@ class Solver:
                 user_query, img_path, query_analysis, self.memory, step_count, self.max_steps
             )
             context, sub_goal, tool_name = self.planner.extract_context_subgoal_and_tool(next_step)
+            step_data = {
+                "step_count": step_count,
+                "context": context,
+                "sub_goal": sub_goal,
+                "tool_name": tool_name,
+                "time": round(time.time() - start_time, 5)
+            }
+            save_module_data(QUERY_ID, f"step_{step_count}_action_prediction", step_data)
 
             # Display the step information
             messages.append(ChatMessage(
@@ -183,6 +282,21 @@ class Solver:
             result = self.executor.execute_tool_command(tool_name, command)
             result = make_json_serializable(result)
 
+            # Save the command generation data
+            command_generation_data = {
+                "explanation": explanation,
+                "command": command,
+                "time": round(time.time() - start_time, 5)
+            }
+            save_module_data(QUERY_ID, f"step_{step_count}_command_generation", command_generation_data)
+            
+            # Save the command execution data
+            command_execution_data = {
+                "result": result,
+                "time": round(time.time() - start_time, 5)
+            }
+            save_module_data(QUERY_ID, f"step_{step_count}_command_execution", command_execution_data)
+
             messages.append(ChatMessage(
                 role="assistant", 
                 content=f"{json.dumps(result, indent=4)}",
@@ -193,6 +307,14 @@ class Solver:
             self.memory.add_action(step_count, tool_name, sub_goal, tool_command, result)
             stop_verification = self.planner.verificate_memory(user_query, img_path, query_analysis, self.memory)
             conclusion = self.planner.extract_conclusion(stop_verification)
+
+            # Save the context verification data
+            context_verification_data = {
+                "stop_verification": stop_verification,
+                "conclusion": conclusion,
+                "time": round(time.time() - start_time, 5)
+            }
+            save_module_data(QUERY_ID, f"step_{step_count}_context_verification", context_verification_data)    
 
             messages.append(ChatMessage(
                 role="assistant", 
@@ -208,15 +330,29 @@ class Solver:
             messages.append(ChatMessage(role="assistant", content=f"🎯 Final Output:\n{final_output}"))
             yield messages
 
+            # Save the final output data
+            final_output_data = {
+                "final_output": final_output,
+                "time": round(time.time() - start_time, 5)
+            }
+            save_module_data(QUERY_ID, "final_output", final_output_data)
+
         if 'direct' in self.output_types:
             direct_output = self.planner.generate_direct_output(user_query, img_path, self.memory)
             messages.append(ChatMessage(role="assistant", content=f"🔹 Direct Output:\n{direct_output}"))
             yield messages
 
+            # Save the direct output data
+            direct_output_data = {
+                "direct_output": direct_output,
+                "time": round(time.time() - start_time, 5)
+            }
+            save_module_data(QUERY_ID, "direct_output", direct_output_data)
+
         # Step 8: Completion Message
         messages.append(ChatMessage(role="assistant", content="✅ Problem-solving process completed."))
         yield messages
-            
+        
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Run the OctoTools demo with specified parameters.")
@@ -230,7 +366,8 @@ def parse_arguments():
         help="Comma-separated list of required outputs (base,final,direct)"
     )
     parser.add_argument("--enabled_tools", default="Generalist_Solution_Generator_Tool", help="List of enabled tools.")
-    parser.add_argument("--root_cache_dir", default="demo_solver_cache", help="Path to solver cache directory.")
+    parser.add_argument("--root_cache_dir", default="solver_cache", help="Path to solver cache directory.")
+    parser.add_argument("--query_id", default=None, help="Query ID.")
     parser.add_argument("--verbose", type=bool, default=True, help="Enable verbose output.")
 
     # NOTE: Add new arguments
@@ -245,18 +382,28 @@ def solve_problem_gradio(user_query, user_image, max_steps=10, max_time=60, api_
     Streams responses from `solver.stream_solve_user_problem` for real-time UI updates.
     """
 
-    # Generate shorter ID (Date and first 8 characters of UUID)
+    # Generate Unique Query ID (Date and first 8 characters of UUID)
     query_id = time.strftime("%Y%m%d_%H%M%S") + "_" + str(uuid.uuid4())[:8] # e.g, 20250217_062225_612f2474
     print(f"Query ID: {query_id}")
 
+    # NOTE: update the global variable to save the query ID
+    global QUERY_ID
+    QUERY_ID = query_id
+
     # Create a directory for the query ID
-    query_dir = os.path.join(args.root_cache_dir, query_id)
-    os.makedirs(query_dir, exist_ok=True)
-    args.root_cache_dir = query_dir
+    query_cache_dir = os.path.join(DATASET_DIR.name, query_id) # NOTE
+    os.makedirs(query_cache_dir, exist_ok=True)
 
     if api_key is None:
         return [["assistant", "⚠️ Error: OpenAI API Key is required."]]
     
+    # Save the query data
+    save_query_data(
+        query_id=query_id,
+        query=user_query,
+        image_path=os.path.join(query_cache_dir, 'query_image.jpg') if user_image else None
+    )
+
     # # Initialize Tools
     # enabled_tools = args.enabled_tools.split(",") if args.enabled_tools else []
 
@@ -284,7 +431,7 @@ def solve_problem_gradio(user_query, user_image, max_steps=10, max_time=60, api_
     # Instantiate Executor
     executor = Executor(
         llm_engine_name=llm_model_engine,
-        root_cache_dir=args.root_cache_dir, # NOTE
+        query_cache_dir=query_cache_dir, # NOTE
         enable_signal=False,
         api_key=api_key
     )
@@ -300,15 +447,22 @@ def solve_problem_gradio(user_query, user_image, max_steps=10, max_time=60, api_
         verbose=args.verbose,
         max_steps=max_steps,
         max_time=max_time,
-        root_cache_dir=args.root_cache_dir # NOTE
+        query_cache_dir=query_cache_dir # NOTE
     )
 
     if solver is None:
         return [["assistant", "⚠️ Error: Solver is not initialized. Please restart the application."]]
 
+
     messages = []  # Initialize message list
     for message_batch in solver.stream_solve_user_problem(user_query, user_image, api_key, messages):
         yield [msg for msg in message_batch]  # Ensure correct format for Gradio Chatbot
+
+    # Save steps
+    save_steps_data(
+        query_id=query_id,
+        memory=memory
+    )
 
 
 def main(args):
@@ -325,8 +479,8 @@ def main(args):
                     
         [Website](https://octotools.github.io/) | 
         [Github](https://github.com/octotools/octotools) | 
-        [arXiv](https://arxiv.org/abs/2502.xxxxx) | 
-        [Paper](https://arxiv.org/pdf/2502.xxxxx) | 
+        [arXiv](https://arxiv.org/abs/2502.11271) | 
+        [Paper](https://arxiv.org/pdf/2502.11271) | 
         [Tool Cards](https://octotools.github.io/#tool-cards) | 
         [Example Visualizations](https://octotools.github.io/#visualization) | 
         [Discord](https://discord.gg/NMJx66DC)
@@ -424,20 +578,20 @@ def main(args):
                             
                         # Update the button click handlers
                         upvote_btn.click(
-                            fn=lambda: save_feedback(args.root_cache_dir, "upvote"),
+                            fn=lambda: save_feedback(QUERY_ID, "upvote"),
                             inputs=[],
                             outputs=[]
                         )
                         
                         downvote_btn.click(
-                            fn=lambda: save_feedback(args.root_cache_dir, "downvote"),
+                            fn=lambda: save_feedback(QUERY_ID, "downvote"),
                             inputs=[],
                             outputs=[]
                         )
 
                         # Add handler for comment submission
                         comment_textbox.submit(
-                            fn=lambda comment: save_feedback(args.root_cache_dir, comment),
+                            fn=lambda comment: save_feedback(QUERY_ID, "comment", comment),
                             inputs=[comment_textbox],
                             outputs=[]
                         )
@@ -481,9 +635,6 @@ def main(args):
 if __name__ == "__main__":
     args = parse_arguments()
 
-    # Manually set enabled tools
-    # args.enabled_tools = "Generalist_Solution_Generator_Tool"
-
     # All tools
     all_tools = [
         "Generalist_Solution_Generator_Tool",
@@ -504,5 +655,7 @@ if __name__ == "__main__":
     ]
     args.enabled_tools = ",".join(all_tools)
 
+    # NOTE: Use the same name for the query cache directory as the dataset directory
+    args.root_cache_dir = DATASET_DIR.name
     main(args)
 

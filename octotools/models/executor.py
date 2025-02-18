@@ -18,9 +18,9 @@ def timeout_handler(signum, frame):
     raise TimeoutError("Function execution timed out")
 
 class Executor:
-    def __init__(self, llm_engine_name: str, root_cache_dir: str = "solver_cache",  num_threads: int = 1, max_time: int = 120, max_output_length: int = 100000, enable_signal: bool = True, api_key: str = None):
+    def __init__(self, llm_engine_name: str, query_cache_dir: str = "solver_cache",  num_threads: int = 1, max_time: int = 120, max_output_length: int = 100000, enable_signal: bool = True, api_key: str = None):
         self.llm_engine_name = llm_engine_name
-        self.root_cache_dir = root_cache_dir
+        self.query_cache_dir = query_cache_dir
         self.num_threads = num_threads
         self.max_time = max_time
         self.max_output_length = max_output_length
@@ -32,7 +32,7 @@ class Executor:
             self.query_cache_dir = query_cache_dir
         else:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            self.query_cache_dir = os.path.join(self.root_cache_dir, timestamp)
+            self.query_cache_dir = os.path.join(self.query_cache_dir, timestamp)
         os.makedirs(self.query_cache_dir, exist_ok=True)
     
     def generate_tool_command(self, question: str, image: str, context: str, sub_goal: str, tool_name: str, tool_metadata: Dict[str, Any], bytes_mode:bool = False) -> ToolCommand:

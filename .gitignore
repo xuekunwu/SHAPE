@@ -175,4 +175,6 @@ detected_objects/
 
 # [Gradio]
 demo_solver_cache/
+solver_cache/
 backups/
+data/
