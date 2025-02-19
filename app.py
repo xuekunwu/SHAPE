@@ -619,7 +619,7 @@ def main(args):
                                  ["Generalist_Solution_Generator_Tool", "Google_Search_Tool", "Wikipedia_Knowledge_Searcher_Tool", "URL_Text_Extractor_Tool"], 
                                  "Apple's February 19, 2025, event may feature the iPhone SE 4, new iPads, accessories, and rumored iPhone 17 and Apple Watch Series 10."],
 
-                                [ "Mathematical Reasoning", 
+                                [ "Arithmetic Reasoning", 
                                  None, 
                                  "Which is bigger, 9.11 or 9.9?", 
                                  ["Generalist_Solution_Generator_Tool", "Python_Code_Generator_Tool"], 
