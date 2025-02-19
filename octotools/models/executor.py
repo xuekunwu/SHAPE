@@ -151,9 +151,10 @@ Remember: Your <command> field MUST be valid Python code including any necessary
             # Remove leading and trailing whitespace and triple backticks
             return re.sub(r'^```python\s*', '', code).rstrip('```').strip()
         
+        analysis = response.analysis.strip() # NOTE: added this line
         explanation = response.explanation.strip()
         command = normarlize_code(response.command.strip())
-        return explanation, command
+        return analysis, explanation, command
 
     def execute_tool_command(self, tool_name: str, command: str) -> Any:
         """

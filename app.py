@@ -204,9 +204,9 @@ class Solver:
         
         # Step 1: Display the received inputs
         if user_image:
-            messages.append(ChatMessage(role="assistant", content=f"📝 Received Query: {user_query}\n🖼️ Image Uploaded"))
+            messages.append(ChatMessage(role="assistant", content=f"### 📝 Received Query:\n{user_query}\n### 🖼️ Image Uploaded"))
         else:
-            messages.append(ChatMessage(role="assistant", content=f"📝 Received Query: {user_query}"))
+            messages.append(ChatMessage(role="assistant", content=f"### 📝 Received Query:\n{user_query}"))
         yield messages
 
         # # Step 2: Add "thinking" status while processing
@@ -216,17 +216,25 @@ class Solver:
         #     metadata={"title": "⏳ Thinking: Processing input..."}
         # ))
 
-        # Step 3: Initialize problem-solving state
+        # [Step 3] Initialize problem-solving state
         start_time = time.time()
         step_count = 0
         json_data = {"query": user_query, "image": "Image received as bytes"}
 
-        # Step 4: Query Analysis
+        messages.append(ChatMessage(role="assistant", content="<br>"))
+        messages.append(ChatMessage(role="assistant", content="### 🐙 Reasoning Steps from OctoTools (Deep Thinking...)"))
+        yield messages
+
+        # [Step 4] Query Analysis
         query_analysis = self.planner.analyze_query(user_query, img_path)
         json_data["query_analysis"] = query_analysis
+        query_analysis = query_analysis.replace("Consice Summary:", "**Consice Summary:**\n")
+        query_analysis = query_analysis.replace("Required Skills:", "**Required Skills:**\n")
+        query_analysis = query_analysis.replace("Relevant Tools:", "**Relevant Tools:**\n")
+        query_analysis = query_analysis.replace("Additional Considerations:", "**Additional Considerations:**\n")
         messages.append(ChatMessage(role="assistant", 
-                                    content=f"{query_analysis}", 
-                                    metadata={"title": "🔍 Query Analysis"}))
+                                    content=f"{query_analysis}",
+                                    metadata={"title": "### 🔍 Step 0: Query Analysis"}))
         yield messages
 
         # Save the query analysis data
@@ -236,15 +244,17 @@ class Solver:
         }
         save_module_data(QUERY_ID, "step_0_query_analysis", query_analysis_data)
 
-        # Step 5: Execution loop (similar to your step-by-step solver)
+
+
+        # Execution loop (similar to your step-by-step solver)
         while step_count < self.max_steps and (time.time() - start_time) < self.max_time:
             step_count += 1
-            # messages.append(ChatMessage(role="assistant", 
-            #                             content=f"Generating next step...",
-            #                             metadata={"title": f"🔄 Step {step_count}"}))
+            messages.append(ChatMessage(role="OctoTools", 
+                                        content=f"Generating the {step_count}-th step...",
+                                        metadata={"title": f"🔄 Step {step_count}"}))
             yield messages
 
-            # Generate the next step
+            # [Step 5] Generate the next step
             next_step = self.planner.generate_next_step(
                 user_query, img_path, query_analysis, self.memory, step_count, self.max_steps
             )
@@ -261,9 +271,8 @@ class Solver:
             # Display the step information
             messages.append(ChatMessage(
                 role="assistant",
-                content=f"- Context: {context}\n- Sub-goal: {sub_goal}\n- Tool: {tool_name}",
-                metadata={"title": f"📌 Step {step_count}: {tool_name}"}
-            ))
+                content=f"**Context:** {context}\n\n**Sub-goal:** {sub_goal}\n\n**Tool:** `{tool_name}`",
+                metadata={"title": f"### 🎯 Step {step_count}: Action Prediction ({tool_name})"}))
             yield messages
 
             # Handle tool execution or errors
@@ -274,22 +283,38 @@ class Solver:
                 yield messages
                 continue
 
-            # Execute the tool command
+            # [Step 6-7] Generate and execute the tool command
             tool_command = self.executor.generate_tool_command(
                 user_query, img_path, context, sub_goal, tool_name, self.planner.toolbox_metadata[tool_name]
             )
-            explanation, command = self.executor.extract_explanation_and_command(tool_command)
+            analysis, explanation, command = self.executor.extract_explanation_and_command(tool_command)
             result = self.executor.execute_tool_command(tool_name, command)
             result = make_json_serializable(result)
 
+            # Display the ommand generation information
+            messages.append(ChatMessage(
+                role="assistant",
+                content=f"**Analysis:** {analysis}\n\n**Explanation:** {explanation}\n\n**Command:**\n```python\n{command}\n```",
+                metadata={"title": f"### 📝 Step {step_count}: Command Generation ({tool_name})"}))
+            yield messages
+
             # Save the command generation data
             command_generation_data = {
+                "analysis": analysis,
                 "explanation": explanation,
                 "command": command,
                 "time": round(time.time() - start_time, 5)
             }
             save_module_data(QUERY_ID, f"step_{step_count}_command_generation", command_generation_data)
             
+            # Display the command execution result
+            messages.append(ChatMessage(
+                role="assistant",
+                content=f"**Result:**\n```json\n{json.dumps(result, indent=4)}\n```",
+                # content=f"**Result:**\n```json\n{result}\n```",
+                metadata={"title": f"### 🛠️ Step {step_count}: Command Execution ({tool_name})"}))
+            yield messages
+
             # Save the command execution data
             command_execution_data = {
                 "result": result,
@@ -297,13 +322,7 @@ class Solver:
             }
             save_module_data(QUERY_ID, f"step_{step_count}_command_execution", command_execution_data)
 
-            messages.append(ChatMessage(
-                role="assistant", 
-                content=f"{json.dumps(result, indent=4)}",
-                metadata={"title": f"✅ Step {step_count} Result: {tool_name}"}))
-            yield messages
-
-            # Step 6: Memory update and stopping condition
+            # [Step 8] Memory update and stopping condition
             self.memory.add_action(step_count, tool_name, sub_goal, tool_command, result)
             stop_verification = self.planner.verificate_memory(user_query, img_path, query_analysis, self.memory)
             conclusion = self.planner.extract_conclusion(stop_verification)
@@ -316,9 +335,12 @@ class Solver:
             }
             save_module_data(QUERY_ID, f"step_{step_count}_context_verification", context_verification_data)    
 
+            # Display the context verification result
+            conclusion_emoji = "✅" if conclusion == 'STOP' else "🛑"
             messages.append(ChatMessage(
                 role="assistant", 
-                content=f"🛑 Step {step_count} Conclusion: {conclusion}"))
+                content=f"**Analysis:** {analysis}\n\n**Conclusion:** `{conclusion}` {conclusion_emoji}",
+                metadata={"title": f"### 🤖 Step {step_count}: Context Verification"}))
             yield messages
 
             if conclusion == 'STOP':
@@ -326,8 +348,9 @@ class Solver:
 
         # Step 7: Generate Final Output (if needed)
         if 'direct' in self.output_types:
+            messages.append(ChatMessage(role="assistant", content="<br>"))
             direct_output = self.planner.generate_direct_output(user_query, img_path, self.memory)
-            messages.append(ChatMessage(role="assistant", content=f"🔹 Direct Output:\n{direct_output}"))
+            messages.append(ChatMessage(role="assistant", content=f"### 🐙 Final Answer:\n{direct_output}"))
             yield messages
 
             # Save the direct output data
@@ -351,7 +374,9 @@ class Solver:
             save_module_data(QUERY_ID, "final_output", final_output_data)
 
         # Step 8: Completion Message
-        messages.append(ChatMessage(role="assistant", content="✅ Problem-solving process completed."))
+        messages.append(ChatMessage(role="assistant", content="<br>"))
+        messages.append(ChatMessage(role="assistant", content="### ✅ Query Solved!"))
+        messages.append(ChatMessage(role="assistant", content="How do you like the output from OctoTools 🐙? Please give us your feedback below. \n\n👍 If the answer is correct or the reasoning steps are helpful, please upvote the output. \n👎 If it is incorrect or the reasoning steps are not helpful, please downvote the output. \n💬 If you have any suggestions or comments, please leave them below.\n\nThank you for using OctoTools! 🐙"))
         yield messages
         
 
@@ -501,7 +526,7 @@ def main(args):
                             # container=False
                         )
                     else:
-                        print(f"Using local API key from environment variable: {os.getenv('OPENAI_API_KEY')[:4]}...")
+                        print(f"Using local API key from environment variable: ...{os.getenv('OPENAI_API_KEY')[-4:]}")
                         api_key = gr.Textbox(
                             value=os.getenv("OPENAI_API_KEY"),
                             visible=False,
@@ -516,10 +541,10 @@ def main(args):
                         label="LLM Model"
                     )
                 with gr.Row():
-                    max_steps = gr.Slider(value=5, minimum=1, maximum=10, step=1, label="Max Steps")
+                    max_steps = gr.Slider(value=8, minimum=1, maximum=10, step=1, label="Max Steps")
                 
                 with gr.Row():
-                    max_time = gr.Slider(value=180, minimum=60, maximum=300, step=30, label="Max Time (seconds)")
+                    max_time = gr.Slider(value=240, minimum=60, maximum=300, step=30, label="Max Time (seconds)")
 
                 with gr.Row():
                     # Container for tools section
@@ -562,7 +587,7 @@ def main(args):
 
                     # Right column for the output
                     with gr.Column(scale=3):
-                        chatbot_output = gr.Chatbot(type="messages", label="Step-wise Problem-Solving Output (Deep Thinking)", height=500)
+                        chatbot_output = gr.Chatbot(type="messages", label="Step-wise Problem-Solving Output", height=500)
 
                         # TODO: Add actions to the buttons
                         with gr.Row(elem_id="buttons") as button_row:
@@ -659,7 +684,7 @@ def main(args):
                                  "Need expert insights."],
 
                             ],
-                            inputs=[gr.Textbox(label="Category"), user_image, user_query, enabled_tools, gr.Textbox(label="Reference Answer")],
+                            inputs=[gr.Textbox(label="Category", visible=False), user_image, user_query, enabled_tools, gr.Textbox(label="Reference Answer", visible=False)],
                             # label="Try these examples with suggested tools."
                         )
 
