@@ -622,11 +622,6 @@ def main(args):
                                  ["Generalist_Solution_Generator_Tool", "Python_Code_Generator_Tool"], 
                                  "9.9"],
 
-                                [ "examples/baseball.png", 
-                                 "How many baseballs are there?", 
-                                 ["Object_Detector_Tool"], 
-                                 "20"],
-
                                 [ None, 
                                  "Using the numbers [1, 1, 6, 9], create an expression that equals 24. You must use basic arithmetic operations (+, -, ×, /) and parentheses. For example, one solution for [1, 2, 3, 4] is (1+2+3)×4.", ["Python_Code_Generator_Tool"], 
                                  "((1 + 1) * 9) + 6"],
@@ -634,6 +629,11 @@ def main(args):
                                 [None, 
                                  "What are the research trends in tool agents with large language models for scientific discovery? Please consider the latest literature from ArXiv, PubMed, Nature, and news sources.", ["ArXiv_Paper_Searcher_Tool", "Pubmed_Search_Tool", "Nature_News_Fetcher_Tool"],
                                  "Open-ended question. No reference answer."],
+
+                                [ "examples/baseball.png", 
+                                 "How many baseballs are there?", 
+                                 ["Object_Detector_Tool"], 
+                                 "20"],
 
                                 [ "examples/rotting_kiwi.png", 
                                  "You are given a 3 x 3 grid in which each cell can contain either no kiwi, one fresh kiwi, or one rotten kiwi. Every minute, any fresh kiwi that is 4-directionally adjacent to a rotten kiwi also becomes rotten. What is the minimum number of minutes that must elapse until no cell has a fresh kiwi?", ["Image_Captioner_Tool"], 
