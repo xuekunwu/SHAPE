@@ -652,6 +652,12 @@ def main(args):
                                  ["Image_Captioner_Tool", "Relevant_Patch_Zoomer_Tool"],
                                  "Lung"],
 
+                                [ "Pathology Diagnosis",
+                                 "examples/pathology.jpg", 
+                                 "What are the cell types in this image?", 
+                                 ["Generalist_Solution_Generator_Tool", "Image_Captioner_Tool", "Relevant_Patch_Zoomer_Tool"],
+                                 "Need expert insights."],
+
                             ],
                             inputs=[gr.Textbox(label="Category"), user_image, user_query, enabled_tools, gr.Textbox(label="Reference Answer")],
                             # label="Try these examples with suggested tools."
