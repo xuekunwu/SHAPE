@@ -41,8 +41,8 @@ class ChatOpenAI(EngineLM, CachedEngine):
         model_string="gpt-4o-mini-2024-07-18",
         system_prompt=DEFAULT_SYSTEM_PROMPT,
         is_multimodal: bool=False,
-        enable_cache: bool=True,
-        # enable_cache: bool=False, # NOTE: disable cache for now
+        # enable_cache: bool=True,
+        enable_cache: bool=False, # NOTE: disable cache for now
         api_key: str=None,
         **kwargs):
         """
@@ -124,7 +124,7 @@ class ChatOpenAI(EngineLM, CachedEngine):
             }
         
     def _generate_text(
-        self, prompt, system_prompt=None, temperature=0, max_tokens=4000, top_p=0.99, response_format=None
+        self, prompt, system_prompt=None, temperature=0.5, max_tokens=4000, top_p=0.99, response_format=None
     ):
 
         sys_prompt_arg = system_prompt if system_prompt else self.system_prompt
@@ -210,7 +210,7 @@ class ChatOpenAI(EngineLM, CachedEngine):
         return formatted_content
 
     def _generate_multimodal(
-        self, content: List[Union[str, bytes]], system_prompt=None, temperature=0, max_tokens=4000, top_p=0.99, response_format=None
+        self, content: List[Union[str, bytes]], system_prompt=None, temperature=0.5, max_tokens=4000, top_p=0.99, response_format=None
     ):
         sys_prompt_arg = system_prompt if system_prompt else self.system_prompt
         formatted_content = self._format_content(content)

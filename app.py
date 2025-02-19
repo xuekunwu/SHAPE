@@ -325,18 +325,6 @@ class Solver:
                 break
 
         # Step 7: Generate Final Output (if needed)
-        if 'final' in self.output_types:
-            final_output = self.planner.generate_final_output(user_query, img_path, self.memory)
-            messages.append(ChatMessage(role="assistant", content=f"🎯 Final Output:\n{final_output}"))
-            yield messages
-
-            # Save the final output data
-            final_output_data = {
-                "final_output": final_output,
-                "time": round(time.time() - start_time, 5)
-            }
-            save_module_data(QUERY_ID, "final_output", final_output_data)
-
         if 'direct' in self.output_types:
             direct_output = self.planner.generate_direct_output(user_query, img_path, self.memory)
             messages.append(ChatMessage(role="assistant", content=f"🔹 Direct Output:\n{direct_output}"))
@@ -348,6 +336,19 @@ class Solver:
                 "time": round(time.time() - start_time, 5)
             }
             save_module_data(QUERY_ID, "direct_output", direct_output_data)
+
+
+        if 'final' in self.output_types:
+            final_output = self.planner.generate_final_output(user_query, img_path, self.memory) # Disabled visibility for now
+            # messages.append(ChatMessage(role="assistant", content=f"🎯 Final Output:\n{final_output}"))
+            # yield messages
+
+            # Save the final output data
+            final_output_data = {
+                "final_output": final_output,
+                "time": round(time.time() - start_time, 5)
+            }
+            save_module_data(QUERY_ID, "final_output", final_output_data)
 
         # Step 8: Completion Message
         messages.append(ChatMessage(role="assistant", content="✅ Problem-solving process completed."))
@@ -605,18 +606,46 @@ def main(args):
                                     """)
                         gr.Examples(
                             examples=[
-                                [ None, "Who is the president of the United States?", ["Google_Search_Tool"]],
+                                # [ None, "Who is the president of the United States?", ["Google_Search_Tool"]],
+                                [ None, 
+                                 "How many r letters are in the word strawberry?", 
+                                 ["Generalist_Solution_Generator_Tool", "Python_Code_Generator_Tool"], 
+                                 "3"],
 
-                                [ "examples/baseball.png", "How many baseballs are there?", ["Object_Detector_Tool"]],
+                                [ None, 
+                                 "What's up with the upcoming Apple Launch? Any rumors?", 
+                                 ["Generalist_Solution_Generator_Tool", "Google_Search_Tool", "Wikipedia_Knowledge_Searcher_Tool", "URL_Text_Extractor_Tool"], 
+                                 "Apple's February 19, 2025, event may feature the iPhone SE 4, new iPads, accessories, and rumored iPhone 17 and Apple Watch Series 10."],
 
-                                [ None, "Using the numbers [1, 1, 6, 9], create an expression that equals 24. You must use basic arithmetic operations (+, -, ×, /) and parentheses. For example, one solution for [1, 2, 3, 4] is (1+2+3)×4.", ["Python_Code_Generator_Tool"]],
+                                [ None, 
+                                 "Which is bigger, 9.11 or 9.9?", 
+                                 ["Generalist_Solution_Generator_Tool", "Python_Code_Generator_Tool"], 
+                                 "9.9"],
 
-                                [None, "What are the research trends in tool agents with large language models for scientific discovery? Please consider the latest literature from ArXiv, PubMed, Nature, and news sources.", ["ArXiv_Paper_Searcher_Tool", "Pubmed_Search_Tool", "Nature_News_Fetcher_Tool"]],
+                                [ "examples/baseball.png", 
+                                 "How many baseballs are there?", 
+                                 ["Object_Detector_Tool"], 
+                                 "20"],
 
-                                [ "examples/rotting_kiwi.png", "You are given a 3 x 3 grid in which each cell can contain either no kiwi, one fresh kiwi, or one rotten kiwi. Every minute, any fresh kiwi that is 4-directionally adjacent to a rotten kiwi also becomes rotten. What is the minimum number of minutes that must elapse until no cell has a fresh kiwi?", ["Image_Captioner_Tool"]]
+                                [ None, 
+                                 "Using the numbers [1, 1, 6, 9], create an expression that equals 24. You must use basic arithmetic operations (+, -, ×, /) and parentheses. For example, one solution for [1, 2, 3, 4] is (1+2+3)×4.", ["Python_Code_Generator_Tool"], 
+                                 "((1 + 1) * 9) + 6"],
+
+                                [None, 
+                                 "What are the research trends in tool agents with large language models for scientific discovery? Please consider the latest literature from ArXiv, PubMed, Nature, and news sources.", ["ArXiv_Paper_Searcher_Tool", "Pubmed_Search_Tool", "Nature_News_Fetcher_Tool"],
+                                 "Open-ended question. No reference answer."],
+
+                                [ "examples/rotting_kiwi.png", 
+                                 "You are given a 3 x 3 grid in which each cell can contain either no kiwi, one fresh kiwi, or one rotten kiwi. Every minute, any fresh kiwi that is 4-directionally adjacent to a rotten kiwi also becomes rotten. What is the minimum number of minutes that must elapse until no cell has a fresh kiwi?", ["Image_Captioner_Tool"], 
+                                 "4 minutes"],
+
+                                [ "examples/lung.jpg", 
+                                 "What is the organ on the left side of this image?", 
+                                 ["Image_Captioner_Tool", "Relevant_Patch_Zoomer_Tool"],
+                                 "Lung"],
 
                             ],
-                            inputs=[user_image, user_query, enabled_tools],
+                            inputs=[user_image, user_query, enabled_tools, gr.Textbox(label="Reference Answer")],
                             # label="Try these examples with suggested tools."
                         )
 

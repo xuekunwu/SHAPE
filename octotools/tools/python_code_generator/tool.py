@@ -6,11 +6,10 @@ import sys
 from io import StringIO
 import contextlib
 
-
 from octotools.tools.base import BaseTool
 from octotools.engine.openai import ChatOpenAI
 
-import signal
+import threading
 from contextlib import contextmanager
 
 # Custom exception for code execution timeout
@@ -20,19 +19,12 @@ class TimeoutException(Exception):
 # Custom context manager for code execution timeout
 @contextmanager
 def timeout(seconds):
-    def timeout_handler(signum, frame):
-        raise TimeoutException("Code execution timed out")
-
-    # Set the timeout handler
-    original_handler = signal.signal(signal.SIGALRM, timeout_handler)
-    signal.alarm(seconds)
-    
+    timer = threading.Timer(seconds, lambda: (_ for _ in ()).throw(TimeoutException("Code execution timed out")))
+    timer.start()
     try:
         yield
     finally:
-        # Restore the original handler and disable the alarm
-        signal.alarm(0)
-        signal.signal(signal.SIGALRM, original_handler)
+        timer.cancel()
 
 
 class Python_Code_Generator_Tool(BaseTool):
