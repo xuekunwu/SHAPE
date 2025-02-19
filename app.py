@@ -472,7 +472,7 @@ def main(args):
     # with gr.Blocks(theme=gr.themes.Soft()) as demo:
         # Theming https://www.gradio.app/guides/theming-guide
 
-        gr.Markdown("# 🐙 Chat with OctoTools: An Agentic Framework for Complex Reasoning")  # Title
+        gr.Markdown("# 🐙 Chat with OctoTools: An Agentic Framework with Extensive Tools for Complex Reasoning")  # Title
         # gr.Markdown("[![OctoTools](https://img.shields.io/badge/OctoTools-Agentic%20Framework%20for%20Complex%20Reasoning-blue)](https://octotools.github.io/)")  # Title
         gr.Markdown("""
         **OctoTools** is a training-free, user-friendly, and easily extensible open-source agentic framework designed to tackle complex reasoning across diverse domains. 
@@ -607,45 +607,53 @@ def main(args):
                         gr.Examples(
                             examples=[
                                 # [ None, "Who is the president of the United States?", ["Google_Search_Tool"]],
-                                [ None, 
+                                [ "Logical Reasoning",
+                                 None,                             
                                  "How many r letters are in the word strawberry?", 
                                  ["Generalist_Solution_Generator_Tool", "Python_Code_Generator_Tool"], 
                                  "3"],
 
-                                [ None, 
+                                [ "Web Search", 
+                                 None, 
                                  "What's up with the upcoming Apple Launch? Any rumors?", 
                                  ["Generalist_Solution_Generator_Tool", "Google_Search_Tool", "Wikipedia_Knowledge_Searcher_Tool", "URL_Text_Extractor_Tool"], 
                                  "Apple's February 19, 2025, event may feature the iPhone SE 4, new iPads, accessories, and rumored iPhone 17 and Apple Watch Series 10."],
 
-                                [ None, 
+                                [ "Mathematical Reasoning", 
+                                 None, 
                                  "Which is bigger, 9.11 or 9.9?", 
                                  ["Generalist_Solution_Generator_Tool", "Python_Code_Generator_Tool"], 
                                  "9.9"],
 
-                                [ None, 
+                                [ "Multi-step Reasoning", 
+                                 None, 
                                  "Using the numbers [1, 1, 6, 9], create an expression that equals 24. You must use basic arithmetic operations (+, -, ×, /) and parentheses. For example, one solution for [1, 2, 3, 4] is (1+2+3)×4.", ["Python_Code_Generator_Tool"], 
                                  "((1 + 1) * 9) + 6"],
 
-                                [None, 
+                                [ "Scientific Research",
+                                 None, 
                                  "What are the research trends in tool agents with large language models for scientific discovery? Please consider the latest literature from ArXiv, PubMed, Nature, and news sources.", ["ArXiv_Paper_Searcher_Tool", "Pubmed_Search_Tool", "Nature_News_Fetcher_Tool"],
                                  "Open-ended question. No reference answer."],
 
-                                [ "examples/baseball.png", 
+                                [ "Visual Perception", 
+                                 "examples/baseball.png", 
                                  "How many baseballs are there?", 
                                  ["Object_Detector_Tool"], 
                                  "20"],
 
-                                [ "examples/rotting_kiwi.png", 
+                                [ "Visual Reasoning",  
+                                 "examples/rotting_kiwi.png", 
                                  "You are given a 3 x 3 grid in which each cell can contain either no kiwi, one fresh kiwi, or one rotten kiwi. Every minute, any fresh kiwi that is 4-directionally adjacent to a rotten kiwi also becomes rotten. What is the minimum number of minutes that must elapse until no cell has a fresh kiwi?", ["Image_Captioner_Tool"], 
                                  "4 minutes"],
 
-                                [ "examples/lung.jpg", 
+                                [ "Medical Image Analysis",
+                                 "examples/lung.jpg", 
                                  "What is the organ on the left side of this image?", 
                                  ["Image_Captioner_Tool", "Relevant_Patch_Zoomer_Tool"],
                                  "Lung"],
 
                             ],
-                            inputs=[user_image, user_query, enabled_tools, gr.Textbox(label="Reference Answer")],
+                            inputs=[gr.Textbox(label="Category"), user_image, user_query, enabled_tools, gr.Textbox(label="Reference Answer")],
                             # label="Try these examples with suggested tools."
                         )
 
