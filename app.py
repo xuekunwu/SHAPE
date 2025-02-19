@@ -507,8 +507,10 @@ def main(args):
         [Github](https://github.com/octotools/octotools) | 
         [arXiv](https://arxiv.org/abs/2502.11271) | 
         [Paper](https://arxiv.org/pdf/2502.11271) | 
+        [Daily Paper](https://huggingface.co/papers/2502.11271) | 
         [Tool Cards](https://octotools.github.io/#tool-cards) | 
         [Example Visualizations](https://octotools.github.io/#visualization) | 
+        [Coverage](https://x.com/lupantech/status/1892260474320015861) | 
         [Discord](https://discord.gg/NMJx66DC)
         """)
 
