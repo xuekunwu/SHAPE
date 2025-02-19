@@ -228,10 +228,10 @@ class Solver:
         # [Step 4] Query Analysis
         query_analysis = self.planner.analyze_query(user_query, img_path)
         json_data["query_analysis"] = query_analysis
-        query_analysis = query_analysis.replace("Consice Summary:", "**Consice Summary:**\n")
-        query_analysis = query_analysis.replace("Required Skills:", "**Required Skills:**\n")
-        query_analysis = query_analysis.replace("Relevant Tools:", "**Relevant Tools:**\n")
-        query_analysis = query_analysis.replace("Additional Considerations:", "**Additional Considerations:**\n")
+        query_analysis = query_analysis.replace("Concise Summary:", "**Concise Summary:**\n")
+        query_analysis = query_analysis.replace("Required Skills:", "**Required Skills:**")
+        query_analysis = query_analysis.replace("Relevant Tools:", "**Relevant Tools:**")
+        query_analysis = query_analysis.replace("Additional Considerations:", "**Additional Considerations:**")
         messages.append(ChatMessage(role="assistant", 
                                     content=f"{query_analysis}",
                                     metadata={"title": "### 🔍 Step 0: Query Analysis"}))

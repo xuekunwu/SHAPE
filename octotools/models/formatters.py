@@ -9,7 +9,7 @@ class QueryAnalysis(BaseModel):
 
     def __str__(self):
         return f"""
-Consice Summary: {self.consice_summary}
+Concise Summary: {self.consice_summary}
 
 Required Skills:
 {self.required_skills}
