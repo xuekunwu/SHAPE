@@ -700,7 +700,7 @@ def main(args):
     #################### Gradio Interface ####################
 
     # Launch the Gradio app
-    demo.launch()
+    demo.launch(ssr_mode=False)
 
 
 if __name__ == "__main__":
