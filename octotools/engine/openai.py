@@ -30,7 +30,7 @@ class DefaultFormat(BaseModel):
     response: str
 
 # Define global constant for structured models
-OPENAI_STRUCTURED_MODELS = ['gpt-4o', 'gpt-4o-2024-08-06','gpt-4o-mini',  'gpt-4o-mini-2024-07-18']
+OPENAI_STRUCTURED_MODELS = ['gpt-4o', 'gpt-4o-2024-08-06','gpt-4o-mini',  'gpt-4o-mini-2024-07-18','deepseek']
 
 
 class ChatOpenAI(EngineLM, CachedEngine):
