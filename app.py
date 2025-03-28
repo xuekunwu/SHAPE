@@ -512,7 +512,7 @@ def main(args):
         [Example Visualizations](https://octotools.github.io/#visualization) | 
         [YouTube](https://www.youtube.com/watch?v=4828sGfx7dk&t=1176s&ab_channel=DiscoverAI) | 
         [Coverage](https://x.com/lupantech/status/1892260474320015861) | 
-        [Discord](https://discord.gg/JQjpHDSM)
+        [Discord](https://discord.gg/F4x9m7Cf)
         """)
 
         with gr.Row():
