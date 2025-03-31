@@ -700,8 +700,8 @@ def main(args):
     #################### Gradio Interface ####################
 
     # Launch the Gradio app
-    demo.launch(ssr_mode=False)
-
+    # demo.launch(ssr_mode=False)
+    demo.launch(ssr_mode=False, share=True)  # Added share=True parameter
 
 if __name__ == "__main__":
     args = parse_arguments()
