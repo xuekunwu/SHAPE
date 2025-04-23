@@ -257,10 +257,12 @@ Response Format:
         return stop_verification
 
     def extract_conclusion(self, response: MemoryVerification) -> str:
-        if response.stop_signal:
-            return 'STOP'
+        analysis = response.analysis
+        stop_signal = response.stop_signal
+        if stop_signal:
+            return analysis, 'STOP'
         else:
-            return 'CONTINUE'
+            return analysis, 'CONTINUE'
 
     def generate_final_output(self, question: str, image: str, memory: Memory, bytes_mode: bool = False) -> str:
         if bytes_mode:

@@ -325,11 +325,11 @@ class Solver:
             # [Step 8] Memory update and stopping condition
             self.memory.add_action(step_count, tool_name, sub_goal, tool_command, result)
             stop_verification = self.planner.verificate_memory(user_query, img_path, query_analysis, self.memory)
-            conclusion = self.planner.extract_conclusion(stop_verification)
+            context_verification, conclusion = self.planner.extract_conclusion(stop_verification)
 
             # Save the context verification data
             context_verification_data = {
-                "stop_verification": stop_verification,
+                "stop_verification": context_verification,
                 "conclusion": conclusion,
                 "time": round(time.time() - start_time, 5)
             }
@@ -339,7 +339,7 @@ class Solver:
             conclusion_emoji = "✅" if conclusion == 'STOP' else "🛑"
             messages.append(ChatMessage(
                 role="assistant", 
-                content=f"**Analysis:** {analysis}\n\n**Conclusion:** `{conclusion}` {conclusion_emoji}",
+                content=f"**Analysis:**\n{context_verification}\n\n**Conclusion:** `{conclusion}` {conclusion_emoji}",
                 metadata={"title": f"### 🤖 Step {step_count}: Context Verification"}))
             yield messages
 
@@ -506,13 +506,14 @@ def main(args):
         [Website](https://octotools.github.io/) | 
         [Github](https://github.com/octotools/octotools) | 
         [arXiv](https://arxiv.org/abs/2502.11271) | 
+        [PyPI](https://pypi.org/project/octotoolkit/) | 
         [Paper](https://arxiv.org/pdf/2502.11271) | 
         [Daily Paper](https://huggingface.co/papers/2502.11271) | 
         [Tool Cards](https://octotools.github.io/#tool-cards) | 
         [Example Visualizations](https://octotools.github.io/#visualization) | 
         [YouTube](https://www.youtube.com/watch?v=4828sGfx7dk&t=1176s&ab_channel=DiscoverAI) | 
         [Coverage](https://x.com/lupantech/status/1892260474320015861) | 
-        [Discord](https://discord.gg/F4x9m7Cf)
+        [Slack](https://join.slack.com/t/octotools/shared_invite/zt-3485ikfas-zMTbFbuodJmET~R6KXHEGw)
         """)
 
         with gr.Row():
@@ -594,8 +595,8 @@ def main(args):
 
                         # TODO: Add actions to the buttons
                         with gr.Row(elem_id="buttons") as button_row:
-                            upvote_btn = gr.Button(value="👍  Upvote", interactive=True, variant="primary") # TODO
-                            downvote_btn = gr.Button(value="👎  Downvote", interactive=True, variant="primary") # TODO
+                            upvote_btn = gr.Button(value="👍  Upvote", interactive=True, variant="primary")
+                            downvote_btn = gr.Button(value="👎  Downvote", interactive=True, variant="primary")
                             # stop_btn = gr.Button(value="⛔️  Stop", interactive=True) # TODO
                             # clear_btn = gr.Button(value="🗑️  Clear history", interactive=True) # TODO
 
@@ -604,25 +605,25 @@ def main(args):
                             comment_textbox = gr.Textbox(value="", 
                                                         placeholder="Feel free to add any comments here. Thanks for using OctoTools!",
                                                         label="💬 Comment (Type and press Enter to submit.)", interactive=True) # TODO
-                            
+
                         # Update the button click handlers
                         upvote_btn.click(
-                            fn=lambda: save_feedback(QUERY_ID, "upvote"),
+                            fn=lambda: (save_feedback(QUERY_ID, "upvote"), gr.Info("Thank you for your upvote! 👍")),
                             inputs=[],
                             outputs=[]
                         )
                         
                         downvote_btn.click(
-                            fn=lambda: save_feedback(QUERY_ID, "downvote"),
+                            fn=lambda: (save_feedback(QUERY_ID, "downvote"), gr.Info("Thank you for your feedback. We'll work to improve! 👎")),
                             inputs=[],
                             outputs=[]
                         )
 
                         # Add handler for comment submission
                         comment_textbox.submit(
-                            fn=lambda comment: save_feedback(QUERY_ID, "comment", comment),
+                            fn=lambda comment: (save_feedback(QUERY_ID, "comment", comment), gr.Info("Thank you for your comment! 💬")),
                             inputs=[comment_textbox],
-                            outputs=[]
+                            outputs=[comment_textbox]  # Clear the textbox after submission
                         )
 
                 # Bottom row for examples
