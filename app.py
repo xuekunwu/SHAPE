@@ -623,7 +623,7 @@ def main(args):
                         comment_textbox.submit(
                             fn=lambda comment: (save_feedback(QUERY_ID, "comment", comment), gr.Info("Thank you for your comment! 💬")),
                             inputs=[comment_textbox],
-                            outputs=[comment_textbox]  # Clear the textbox after submission
+                            outputs=[]
                         )
 
                 # Bottom row for examples
