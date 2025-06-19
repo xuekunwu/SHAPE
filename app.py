@@ -175,6 +175,7 @@ class Solver:
     def stream_solve_user_problem(self, user_query: str, user_image, api_key: str, messages: List[ChatMessage]) -> Iterator:
         visual_output_files = []
         
+        # Handle image input - simplified logic based on original OctoTools
         if user_image:
             # Handle different image input formats from Gradio
             if isinstance(user_image, dict):
@@ -185,34 +186,11 @@ class Solver:
                     # Try to get the first value if it's a dict
                     user_image = list(user_image.values())[0] if user_image else None
             
-            if user_image and hasattr(user_image, 'format'):
-                # It's a PIL Image object
-                try:
-                    original_format = (user_image.format() if callable(user_image.format) else user_image.format or 'PNG').upper()
-                except:
-                    original_format = 'PNG'
-                    
-                if original_format in ['TIFF', 'TIF']:
-                    img_ext = 'query_image.tif'
-                    img_path = os.path.join(self.query_cache_dir, img_ext)
-                    tiff_write(img_path, np.array(user_image))
-                else:
-                    img_ext = 'query_image.png'
-                    img_path = os.path.join(self.query_cache_dir, img_ext)
-                    user_image.save(img_path)
-            elif user_image:
-                # It's a numpy array or other format
-                img_ext = 'query_image.png'
-                img_path = os.path.join(self.query_cache_dir, img_ext)
-                if isinstance(user_image, np.ndarray):
-                    from PIL import Image
-                    Image.fromarray(user_image).save(img_path)
-                else:
-                    # Try to save as is
-                    try:
-                        user_image.save(img_path)
-                    except:
-                        img_path = None
+            # Now user_image should be a PIL Image object or None
+            if user_image and hasattr(user_image, 'save'):
+                # It's a PIL Image object - save it like in original version
+                img_path = os.path.join(self.query_cache_dir, 'query_image.jpg')
+                user_image.save(img_path)
             else:
                 img_path = None
         else:
@@ -227,7 +205,7 @@ class Solver:
             messages.append(ChatMessage(role="assistant", content=f"### 📝 Received Query:\n{user_query}\n### 🖼️ Image Uploaded"))
         else:
             messages.append(ChatMessage(role="assistant", content=f"### 📝 Received Query:\n{user_query}"))
-        yield messages, [], None, None
+        yield messages, "", [], "**Progress**: Input received"
 
         # [Step 3] Initialize problem-solving state
         start_time = time.time()
@@ -235,10 +213,10 @@ class Solver:
         json_data = {"query": user_query, "image": "Image received as bytes"}
 
         messages.append(ChatMessage(role="assistant", content="<br>"))
-        messages.append(ChatMessage(role="assistant", content="### 🐙 Reasoning Steps"))
-        yield messages, [], None, None
+        messages.append(ChatMessage(role="assistant", content="### 🐙 Reasoning Steps from OctoTools (Deep Thinking...)"))
+        yield messages, "", [], "**Progress**: Starting analysis"
 
-        # [Step 4] Query Analysis
+        # [Step 4] Query Analysis - This is the key step that should happen first
         print(f"Debug - Starting query analysis for: {user_query}")
         try:
             query_analysis = self.planner.analyze_query(user_query, img_path)
@@ -251,7 +229,7 @@ class Solver:
             messages.append(ChatMessage(role="assistant", 
                                         content=f"{query_analysis}",
                                         metadata={"title": "### 🔍 Step 0: Query Analysis"}))
-            yield messages, [], None, None
+            yield messages, query_analysis, [], "**Progress**: Query analysis completed"
 
             # Save the query analysis data
             query_analysis_data = {"query_analysis": query_analysis, "time": round(time.time() - start_time, 5)}
@@ -262,7 +240,7 @@ class Solver:
             messages.append(ChatMessage(role="assistant", 
                                         content=error_msg,
                                         metadata={"title": "### 🔍 Step 0: Query Analysis (Error)"}))
-            yield messages, [], None, None
+            yield messages, error_msg, [], "**Progress**: Error in query analysis"
             return
 
         # Execution loop (similar to your step-by-step solver)
@@ -271,7 +249,7 @@ class Solver:
             messages.append(ChatMessage(role="OctoTools", 
                                         content=f"Generating the {step_count}-th step...",
                                         metadata={"title": f"🔄 Step {step_count}"}))
-            yield messages, [], None, None
+            yield messages, query_analysis, visual_output_files, f"**Progress**: Step {step_count}"
 
             # [Step 5] Generate the next step
             next_step = self.planner.generate_next_step(user_query, img_path, query_analysis, self.memory, step_count, self.max_steps)
@@ -284,20 +262,21 @@ class Solver:
                 role="assistant",
                 content=f"**Context:** {context}\n\n**Sub-goal:** {sub_goal}\n\n**Tool:** `{tool_name}`",
                 metadata={"title": f"### 🎯 Step {step_count}: Action Prediction ({tool_name})"}))
-            yield messages, [], None, None
+            yield messages, query_analysis, visual_output_files, f"**Progress**: Step {step_count} - Action predicted"
 
             # Handle tool execution or errors
             if tool_name not in self.planner.available_tools:
                 messages.append(ChatMessage(
                     role="assistant", 
                     content=f"⚠️ Error: Tool '{tool_name}' is not available."))
-                yield messages, [], None, None
+                yield messages, query_analysis, visual_output_files, f"**Progress**: Step {step_count} - Tool not available"
                 continue
 
             # [Step 6-7] Generate and execute the tool command
             tool_command = self.executor.generate_tool_command(user_query, img_path, context, sub_goal, tool_name, self.planner.toolbox_metadata[tool_name])
             analysis, explanation, command = self.executor.extract_explanation_and_command(tool_command)
             result = self.executor.execute_tool_command(tool_name, command)
+            result = make_json_serializable(result)
             print(f"Tool '{tool_name}' result:", result)
             if isinstance(result, dict):
                 if "visual_outputs" in result:
@@ -308,7 +287,7 @@ class Solver:
                 role="assistant",
                 content=f"**Analysis:** {analysis}\n\n**Explanation:** {explanation}\n\n**Command:**\n```python\n{command}\n```",
                 metadata={"title": f"### 📝 Step {step_count}: Command Generation ({tool_name})"}))
-            yield messages, [], None, None
+            yield messages, query_analysis, visual_output_files, f"**Progress**: Step {step_count} - Command generated"
 
             # Save the command generation data
             command_generation_data = {
@@ -324,7 +303,7 @@ class Solver:
                 role="assistant",
                 content=f"**Result:**\n```json\n{json.dumps(result, indent=4)}\n```",
                 metadata={"title": f"### 🛠️ Step {step_count}: Command Execution ({tool_name})"}))
-            yield messages, [], None, None
+            yield messages, query_analysis, visual_output_files, f"**Progress**: Step {step_count} - Command executed"
 
             # Save the command execution data
             command_execution_data = {
@@ -352,7 +331,7 @@ class Solver:
                 role="assistant", 
                 content=f"**Analysis:**\n{context_verification}\n\n**Conclusion:** `{conclusion}` {conclusion_emoji}",
                 metadata={"title": f"### 🤖 Step {step_count}: Context Verification"}))
-            yield messages, [], None, None
+            yield messages, query_analysis, visual_output_files, f"**Progress**: Step {step_count} - Context verified"
 
             if conclusion == 'STOP':
                 break
@@ -362,7 +341,7 @@ class Solver:
             messages.append(ChatMessage(role="assistant", content="<br>"))
             direct_output = self.planner.generate_direct_output(user_query, img_path, self.memory)
             messages.append(ChatMessage(role="assistant", content=f"### 🐙 Final Answer:\n{direct_output}"))
-            yield messages, [], None, None
+            yield messages, direct_output, visual_output_files, "**Progress**: Final answer generated"
 
             # Save the direct output data
             direct_output_data = {
@@ -372,7 +351,7 @@ class Solver:
             save_module_data(QUERY_ID, "direct_output", direct_output_data)
 
         if 'final' in self.output_types:
-            final_output = self.planner.generate_final_output(user_query, img_path, self.memory)
+            final_output = self.planner.generate_final_output(user_query, img_path, self.memory) # Disabled visibility for now
             # messages.append(ChatMessage(role="assistant", content=f"🎯 Final Output:\n{final_output}"))
             # yield messages
 
@@ -387,8 +366,8 @@ class Solver:
         messages.append(ChatMessage(role="assistant", content="<br>"))
         messages.append(ChatMessage(role="assistant", content="### ✅ Query Solved!"))
         messages.append(ChatMessage(role="assistant", content="How do you like the output from OctoTools 🐙? Please give us your feedback below. \n\n👍 If the answer is correct or the reasoning steps are helpful, please upvote the output. \n👎 If it is incorrect or the reasoning steps are not helpful, please downvote the output. \n💬 If you have any suggestions or comments, please leave them below.\n\nThank you for using OctoTools! 🐙"))
-        yield messages, [], None, None
-        
+        yield messages, "Analysis completed successfully", visual_output_files, "**Progress**: Analysis completed"
+
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Run the OctoTools demo with specified parameters.")
@@ -586,17 +565,14 @@ def main(args):
                     "Generalist_Solution_Generator_Tool",
                     "Python_Code_Generator_Tool",
                     "ArXiv_Paper_Searcher_Tool",
-                    "Pubmed_Search_Tool"
+                    "Pubmed_Search_Tool",
+                    "Nature_News_Fetcher_Tool",
+                    "Google_Search_Tool",
+                    "Wikipedia_Knowledge_Searcher_Tool",
+                    "URL_Text_Extractor_Tool"
                 ]
                 
-                # Specialized cell analysis tools (reserved)
-                specialized_tools = [
-                    "Nuclei_Segmenter_Tool",
-                    "Cell_Morphology_Analyzer_Tool", 
-                    "Fibroblast_Activation_Detector_Tool"
-                ]
-                
-                all_tools = cell_analysis_tools + general_tools + specialized_tools
+                all_tools = cell_analysis_tools + general_tools
                 
                 enabled_tools = gr.CheckboxGroup(
                     choices=all_tools, 
@@ -783,7 +759,6 @@ if __name__ == "__main__":
         # General analysis tools
         "Generalist_Solution_Generator_Tool",  # Comprehensive analysis generation
         "Python_Code_Generator_Tool",          # Code generation
-        "Image_Preprocessing_Tool",            # Image preprocessing
         
         # Research literature tools
         "ArXiv_Paper_Searcher_Tool",      # arXiv paper search
@@ -792,11 +767,6 @@ if __name__ == "__main__":
         "Google_Search_Tool",             # Google search
         "Wikipedia_Knowledge_Searcher_Tool",  # Wikipedia search
         "URL_Text_Extractor_Tool",        # URL text extraction
-        
-        # Specialized cell analysis tools (reserved)
-        "Nuclei_Segmenter_Tool",          # Nuclei segmentation
-        "Cell_Morphology_Analyzer_Tool",  # Cell morphology analyzer
-        "Fibroblast_Activation_Detector_Tool",  # Fibroblast activation detector
     ]
     args.enabled_tools = all_tools
 
