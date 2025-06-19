@@ -508,8 +508,8 @@ def main(args):
                 llm_model_engine = gr.Dropdown(
                     choices=["gpt-4o"], value="gpt-4o", label="Language Model"
                 )
-                max_steps = gr.Slider(1, 15, value=10, label="Max Reasoning Steps", info="Recommended: 10-12 steps")
-                max_time = gr.Slider(60, 600, value=300, label="Max Analysis Time (seconds)", info="Recommended: 300s")
+                max_steps = gr.Slider(1, 15, value=10, label="Max Reasoning Steps")
+                max_time = gr.Slider(60, 600, value=300, label="Max Analysis Time (seconds)")
 
                 # Tool selection
                 gr.Markdown("#### 🛠️ Analysis Tools")
@@ -543,8 +543,7 @@ def main(args):
                 enabled_tools = gr.CheckboxGroup(
                     choices=all_tools, 
                     value=cell_analysis_tools, 
-                    label="Select Analysis Tools",
-                    info="Recommended: cell analysis tools"
+                    label="Select Analysis Tools"
                 )
                 
                 with gr.Row():
@@ -567,15 +566,13 @@ def main(args):
                         user_image = gr.Image(
                             label="Upload an Image", 
                             type="pil", 
-                            height=350,
-                            info="Supported formats: PNG, JPG, TIFF"
+                            height=350
                         )
                     with gr.Column(scale=1):
                         user_query = gr.Textbox(
                             label="Analysis Question", 
                             placeholder="Describe the cell features or states you want to analyze...", 
-                            lines=15,
-                            info="E.g.: Analyze the activation state of these fibroblasts, identify morphological features, etc."
+                            lines=15
                         )
                         
                 # Submit button
