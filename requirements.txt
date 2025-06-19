@@ -11,3 +11,9 @@ transformers==4.44.2
 pymed==0.8.9
 metapub==0.5.12
 gradio==5.23.1
+torch>=2.0.0
+numpy>=1.21.0
+tifffile>=2021.0.0
+huggingface-hub>=0.19.0
+requests>=2.25.0
+matplotlib>=3.5.0
