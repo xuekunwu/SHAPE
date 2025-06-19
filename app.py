@@ -187,7 +187,11 @@ class Solver:
             
             if user_image and hasattr(user_image, 'format'):
                 # It's a PIL Image object
-                original_format = (user_image.format or 'PNG').upper()
+                try:
+                    original_format = (user_image.format() if callable(user_image.format) else user_image.format or 'PNG').upper()
+                except:
+                    original_format = 'PNG'
+                    
                 if original_format in ['TIFF', 'TIF']:
                     img_ext = 'query_image.tif'
                     img_path = os.path.join(self.query_cache_dir, img_ext)
@@ -504,19 +508,9 @@ def main(args):
     #################### Gradio Interface ####################
     with gr.Blocks(theme=gr.themes.Soft()) as demo:
         
-        # Professional title and description
+        gr.Markdown("# Chat with FBagent: An augmented agentic approach to resolve fibroblast states at single-cell multimodal resolution")  # Title
         gr.Markdown("""
-        # 🔬 Fibroblast Activation State Analyzer
-        
-        **A professional AI-powered platform for fibroblast activation state analysis**
-        """)
-        
-        gr.Markdown("""
-        ### 🎯 Features
-        - **Activation State Recognition**: Automatically analyze the activation state of fibroblasts
-        - **Morphological Feature Extraction**: Identify cell shape, size, and arrangement patterns
-        - **Multi-modal Data Integration**: Integrate image, gene expression, and other data
-        - **Professional Report Generation**: Generate detailed cell state analysis reports
+        **FB Agent** is an open-source assistant for interpreting cell images, powered by large language models and tool-based reasoning. It supports morphological reasoning, patch extraction, and multi-omic integration.
         """)
         
         with gr.Row():
