@@ -239,20 +239,31 @@ class Solver:
         yield messages, [], None, None
 
         # [Step 4] Query Analysis
-        query_analysis = self.planner.analyze_query(user_query, img_path)
-        json_data["query_analysis"] = query_analysis
-        query_analysis = query_analysis.replace("Concise Summary:", "**Concise Summary:**\n")
-        query_analysis = query_analysis.replace("Required Skills:", "**Required Skills:**")
-        query_analysis = query_analysis.replace("Relevant Tools:", "**Relevant Tools:**")
-        query_analysis = query_analysis.replace("Additional Considerations:", "**Additional Considerations:**")
-        messages.append(ChatMessage(role="assistant", 
-                                    content=f"{query_analysis}",
-                                    metadata={"title": "### 🔍 Step 0: Query Analysis"}))
-        yield messages, [], None, None
+        print(f"Debug - Starting query analysis for: {user_query}")
+        try:
+            query_analysis = self.planner.analyze_query(user_query, img_path)
+            print(f"Debug - Query analysis completed: {len(query_analysis)} characters")
+            json_data["query_analysis"] = query_analysis
+            query_analysis = query_analysis.replace("Concise Summary:", "**Concise Summary:**\n")
+            query_analysis = query_analysis.replace("Required Skills:", "**Required Skills:**")
+            query_analysis = query_analysis.replace("Relevant Tools:", "**Relevant Tools:**")
+            query_analysis = query_analysis.replace("Additional Considerations:", "**Additional Considerations:**")
+            messages.append(ChatMessage(role="assistant", 
+                                        content=f"{query_analysis}",
+                                        metadata={"title": "### 🔍 Step 0: Query Analysis"}))
+            yield messages, [], None, None
 
-        # Save the query analysis data
-        query_analysis_data = {"query_analysis": query_analysis, "time": round(time.time() - start_time, 5)}
-        save_module_data(QUERY_ID, "step_0_query_analysis", query_analysis_data)
+            # Save the query analysis data
+            query_analysis_data = {"query_analysis": query_analysis, "time": round(time.time() - start_time, 5)}
+            save_module_data(QUERY_ID, "step_0_query_analysis", query_analysis_data)
+        except Exception as e:
+            print(f"Error in query analysis: {e}")
+            error_msg = f"⚠️ Error during query analysis: {str(e)}"
+            messages.append(ChatMessage(role="assistant", 
+                                        content=error_msg,
+                                        metadata={"title": "### 🔍 Step 0: Query Analysis (Error)"}))
+            yield messages, [], None, None
+            return
 
         # Execution loop (similar to your step-by-step solver)
         while step_count < self.max_steps and (time.time() - start_time) < self.max_time:
@@ -422,6 +433,20 @@ def solve_problem_gradio(user_query, user_image, max_steps=10, max_time=60, api_
     if api_key is None:
         return [[gr.ChatMessage(role="assistant", content="⚠️ Error: OpenAI API Key is required.")]], "", []
     
+    # Debug: Print enabled_tools
+    print(f"Debug - enabled_tools: {enabled_tools}")
+    print(f"Debug - type of enabled_tools: {type(enabled_tools)}")
+    
+    # Ensure enabled_tools is a list
+    if enabled_tools is None:
+        enabled_tools = ["Generalist_Solution_Generator_Tool"]
+    elif isinstance(enabled_tools, str):
+        enabled_tools = [enabled_tools]
+    elif not isinstance(enabled_tools, list):
+        enabled_tools = list(enabled_tools) if hasattr(enabled_tools, '__iter__') else ["Generalist_Solution_Generator_Tool"]
+    
+    print(f"Debug - final enabled_tools: {enabled_tools}")
+    
     # Save the query data
     save_query_data(
         query_id=query_id,
@@ -429,26 +454,30 @@ def solve_problem_gradio(user_query, user_image, max_steps=10, max_time=60, api_
         image_path=os.path.join(query_cache_dir, 'query_image.jpg') if user_image else None
     )
 
-    # # Initialize Tools
-    # enabled_tools = args.enabled_tools.split(",") if args.enabled_tools else []
-
-    # # Hack enabled_tools
-    # enabled_tools = ["Generalist_Solution_Generator_Tool"]
-
     # Instantiate Initializer
-    initializer = Initializer(
-        enabled_tools=enabled_tools,
-        model_string=llm_model_engine,
-        api_key=api_key
-    )
+    try:
+        initializer = Initializer(
+            enabled_tools=enabled_tools,
+            model_string=llm_model_engine,
+            api_key=api_key
+        )
+        print(f"Debug - Initializer created successfully with {len(initializer.available_tools)} tools")
+    except Exception as e:
+        print(f"Error creating Initializer: {e}")
+        return [[gr.ChatMessage(role="assistant", content=f"⚠️ Error: Failed to initialize tools. {str(e)}")]], "", []
 
     # Instantiate Planner
-    planner = Planner(
-        llm_engine_name=llm_model_engine,
-        toolbox_metadata=initializer.toolbox_metadata,
-        available_tools=initializer.available_tools,
-        api_key=api_key
-    )
+    try:
+        planner = Planner(
+            llm_engine_name=llm_model_engine,
+            toolbox_metadata=initializer.toolbox_metadata,
+            available_tools=initializer.available_tools,
+            api_key=api_key
+        )
+        print(f"Debug - Planner created successfully")
+    except Exception as e:
+        print(f"Error creating Planner: {e}")
+        return [[gr.ChatMessage(role="assistant", content=f"⚠️ Error: Failed to initialize planner. {str(e)}")]], "", []
 
     # Instantiate Memory
     memory = Memory()
