@@ -190,11 +190,19 @@ class Solver:
             if user_image and hasattr(user_image, 'save'):
                 # It's a PIL Image object - save it like in original version
                 img_path = os.path.join(self.query_cache_dir, 'query_image.jpg')
-                user_image.save(img_path)
+                try:
+                    user_image.save(img_path)
+                    print(f"Debug - Image saved successfully to: {img_path}")
+                except Exception as e:
+                    print(f"Debug - Error saving image: {e}")
+                    img_path = None
             else:
+                print(f"Debug - user_image is not a PIL Image: {type(user_image)}")
                 img_path = None
         else:
             img_path = None
+
+        print(f"Debug - final img_path: {img_path}")
 
         # Set tool cache directory
         _tool_cache_dir = os.path.join(self.query_cache_dir, "tool_cache") # NOTE: This is the directory for tool cache
@@ -213,11 +221,12 @@ class Solver:
         json_data = {"query": user_query, "image": "Image received as bytes"}
 
         messages.append(ChatMessage(role="assistant", content="<br>"))
-        messages.append(ChatMessage(role="assistant", content="### 🐙 Reasoning Steps from OctoTools (Deep Thinking...)"))
+        messages.append(ChatMessage(role="assistant", content="### 🐙 Deep Thinking:"))
         yield messages, "", [], "**Progress**: Starting analysis"
 
         # [Step 4] Query Analysis - This is the key step that should happen first
         print(f"Debug - Starting query analysis for: {user_query}")
+        print(f"Debug - img_path for query analysis: {img_path}")
         try:
             query_analysis = self.planner.analyze_query(user_query, img_path)
             print(f"Debug - Query analysis completed: {len(query_analysis)} characters")
@@ -365,7 +374,6 @@ class Solver:
         # Step 8: Completion Message
         messages.append(ChatMessage(role="assistant", content="<br>"))
         messages.append(ChatMessage(role="assistant", content="### ✅ Query Solved!"))
-        messages.append(ChatMessage(role="assistant", content="How do you like the output from OctoTools 🐙? Please give us your feedback below. \n\n👍 If the answer is correct or the reasoning steps are helpful, please upvote the output. \n👎 If it is incorrect or the reasoning steps are not helpful, please downvote the output. \n💬 If you have any suggestions or comments, please leave them below.\n\nThank you for using OctoTools! 🐙"))
         yield messages, "Analysis completed successfully", visual_output_files, "**Progress**: Analysis completed"
 
 
@@ -514,7 +522,9 @@ def solve_problem_gradio(user_query, user_image, max_steps=10, max_time=60, api_
 
 def main(args):
     #################### Gradio Interface ####################
-    with gr.Blocks(theme=gr.themes.Soft()) as demo:
+    with gr.Blocks() as demo:
+    # with gr.Blocks(theme=gr.themes.Soft()) as demo:
+        # Theming https://www.gradio.app/guides/theming-guide
         
         gr.Markdown("# Chat with FBagent: An augmented agentic approach to resolve fibroblast states at single-cell multimodal resolution")  # Title
         gr.Markdown("""
@@ -524,7 +534,7 @@ def main(args):
         with gr.Row():
             # Left control panel
             with gr.Column(scale=1, min_width=250):
-                gr.Markdown("### ⚙️ Analysis Settings")
+                gr.Markdown("### ⚙️ Model Configuration")
                 
                 # API Key
                 if args.openai_api_source == "user_provided":
@@ -541,7 +551,6 @@ def main(args):
                     )
 
                 # Model and limits
-                gr.Markdown("#### 🤖 AI Model Configuration")
                 llm_model_engine = gr.Dropdown(
                     choices=["gpt-4o"], value="gpt-4o", label="Language Model"
                 )
@@ -549,7 +558,7 @@ def main(args):
                 max_time = gr.Slider(60, 600, value=300, label="Max Analysis Time (seconds)")
 
                 # Tool selection
-                gr.Markdown("#### 🛠️ Analysis Tools")
+                gr.Markdown("#### 🛠️ Available Tools")
                 
                 # Cell analysis tools
                 cell_analysis_tools = [
