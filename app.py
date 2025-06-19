@@ -172,19 +172,45 @@ class Solver:
         assert all(output_type in ["base", "final", "direct"] for output_type in self.output_types), "Invalid output type. Supported types are 'base', 'final', 'direct'."
 
 
-    def stream_solve_user_problem(self, user_query: str, user_image: Image.Image, api_key: str, messages: List[ChatMessage]) -> Iterator:
+    def stream_solve_user_problem(self, user_query: str, user_image, api_key: str, messages: List[ChatMessage]) -> Iterator:
         visual_output_files = []
         
         if user_image:
-            original_format = (user_image.format or 'PNG').upper()
-            if original_format in ['TIFF', 'TIF']:
-                img_ext = 'query_image.tif'
-                img_path = os.path.join(self.query_cache_dir, img_ext)
-                tiff_write(img_path, np.array(user_image))
-            else:
+            # Handle different image input formats from Gradio
+            if isinstance(user_image, dict):
+                # Gradio Image component returns dict with 'image' key
+                if 'image' in user_image:
+                    user_image = user_image['image']
+                else:
+                    # Try to get the first value if it's a dict
+                    user_image = list(user_image.values())[0] if user_image else None
+            
+            if user_image and hasattr(user_image, 'format'):
+                # It's a PIL Image object
+                original_format = (user_image.format or 'PNG').upper()
+                if original_format in ['TIFF', 'TIF']:
+                    img_ext = 'query_image.tif'
+                    img_path = os.path.join(self.query_cache_dir, img_ext)
+                    tiff_write(img_path, np.array(user_image))
+                else:
+                    img_ext = 'query_image.png'
+                    img_path = os.path.join(self.query_cache_dir, img_ext)
+                    user_image.save(img_path)
+            elif user_image:
+                # It's a numpy array or other format
                 img_ext = 'query_image.png'
                 img_path = os.path.join(self.query_cache_dir, img_ext)
-                user_image.save(img_path)
+                if isinstance(user_image, np.ndarray):
+                    from PIL import Image
+                    Image.fromarray(user_image).save(img_path)
+                else:
+                    # Try to save as is
+                    try:
+                        user_image.save(img_path)
+                    except:
+                        img_path = None
+            else:
+                img_path = None
         else:
             img_path = None
 
@@ -462,7 +488,16 @@ def solve_problem_gradio(user_query, user_image, max_steps=10, max_time=60, api_
             
     except Exception as e:
         print(f"Error in solve_problem_gradio: {e}")
-        return [[gr.ChatMessage(role="assistant", content=f"⚠️ Internal Error: {repr(e)}")]], "", []
+        import traceback
+        error_traceback = traceback.format_exc()
+        print(f"Full traceback: {error_traceback}")
+        
+        # Create error message for UI
+        error_message = f"⚠️ Error occurred during analysis:\n\n**Error Type:** {type(e).__name__}\n**Error Message:** {str(e)}\n\nPlease check your input and try again."
+        
+        # Return error message in the expected format
+        error_messages = [gr.ChatMessage(role="assistant", content=error_message)]
+        yield error_messages, "", [], "**Progress**: Error occurred"
 
 
 def main(args):
