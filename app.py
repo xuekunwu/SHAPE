@@ -5,11 +5,16 @@ import argparse
 import time
 import io
 import uuid
+import torch
 from PIL import Image
+import numpy as np
+from tifffile import imwrite as tiff_write
 from typing import List, Dict, Any, Iterator
-
+import matplotlib.pyplot as plt
 import gradio as gr
 from gradio import ChatMessage
+from pathlib import Path
+from huggingface_hub import CommitScheduler
 
 # Add the project root to the Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -22,28 +27,22 @@ from octotools.models.memory import Memory
 from octotools.models.executor import Executor
 from octotools.models.utils import make_json_serializable
 
-
-from pathlib import Path
-from huggingface_hub import CommitScheduler
-
 # Get Huggingface token from environment variable
 HF_TOKEN = os.getenv("HUGGINGFACE_TOKEN")
-
-########### Test Huggingface Dataset ###########
-# Update the HuggingFace dataset constants
+IS_SPACES = os.getenv('SPACE_ID') is not None
 DATASET_DIR = Path("solver_cache")  # the directory to save the dataset
 DATASET_DIR.mkdir(parents=True, exist_ok=True) 
-
 global QUERY_ID
 QUERY_ID = None
 
-scheduler = CommitScheduler(
-    repo_id="lupantech/OctoTools-Gradio-Demo-User-Data",
-    repo_type="dataset",
-    folder_path=DATASET_DIR,
-    path_in_repo="solver_cache",  # Update path in repo
-    token=HF_TOKEN
-)
+# Comment out problematic CommitScheduler to avoid permission issues
+# scheduler = CommitScheduler(
+#     repo_id="lupantech/OctoTools-Gradio-Demo-User-Data",
+#     repo_type="dataset",
+#     folder_path=DATASET_DIR,
+#     path_in_repo="solver_cache",  # Update path in repo
+#     token=HF_TOKEN
+# )
 
 
 def save_query_data(query_id: str, query: str, image_path: str) -> None:
@@ -173,28 +172,19 @@ class Solver:
         assert all(output_type in ["base", "final", "direct"] for output_type in self.output_types), "Invalid output type. Supported types are 'base', 'final', 'direct'."
 
 
-    def stream_solve_user_problem(self, user_query: str, user_image: Image.Image, api_key: str, messages: List[ChatMessage]) -> Iterator[List[ChatMessage]]:
-        """
-        Streams intermediate thoughts and final responses for the problem-solving process based on user input.
+    def stream_solve_user_problem(self, user_query: str, user_image: Image.Image, api_key: str, messages: List[ChatMessage]) -> Iterator:
+        visual_output_files = []
         
-        Args:
-            user_query (str): The text query input from the user.
-            user_image (Image.Image): The uploaded image from the user (PIL Image object).
-            messages (list): A list of ChatMessage objects to store the streamed responses.
-        """
-
         if user_image:
-            # # Convert PIL Image to bytes (for processing)
-            # img_bytes_io = io.BytesIO()
-            # user_image.save(img_bytes_io, format="PNG")  # Convert image to PNG bytes
-            # img_bytes = img_bytes_io.getvalue()  # Get bytes
-            
-            # Use image paths instead of bytes,
-            # os.makedirs(os.path.join(self.root_cache_dir, 'images'), exist_ok=True)
-            # img_path = os.path.join(self.root_cache_dir, 'images', str(uuid.uuid4()) + '.jpg')
-
-            img_path = os.path.join(self.query_cache_dir,  'query_image.jpg')
-            user_image.save(img_path)
+            original_format = (user_image.format or 'PNG').upper()
+            if original_format in ['TIFF', 'TIF']:
+                img_ext = 'query_image.tif'
+                img_path = os.path.join(self.query_cache_dir, img_ext)
+                tiff_write(img_path, np.array(user_image))
+            else:
+                img_ext = 'query_image.png'
+                img_path = os.path.join(self.query_cache_dir, img_ext)
+                user_image.save(img_path)
         else:
             img_path = None
 
@@ -207,14 +197,7 @@ class Solver:
             messages.append(ChatMessage(role="assistant", content=f"### 📝 Received Query:\n{user_query}\n### 🖼️ Image Uploaded"))
         else:
             messages.append(ChatMessage(role="assistant", content=f"### 📝 Received Query:\n{user_query}"))
-        yield messages
-
-        # # Step 2: Add "thinking" status while processing
-        # messages.append(ChatMessage(
-        #     role="assistant",
-        #     content="",
-        #     metadata={"title": "⏳ Thinking: Processing input..."}
-        # ))
+        yield messages, [], None, None
 
         # [Step 3] Initialize problem-solving state
         start_time = time.time()
@@ -222,8 +205,8 @@ class Solver:
         json_data = {"query": user_query, "image": "Image received as bytes"}
 
         messages.append(ChatMessage(role="assistant", content="<br>"))
-        messages.append(ChatMessage(role="assistant", content="### 🐙 Reasoning Steps from OctoTools (Deep Thinking...)"))
-        yield messages
+        messages.append(ChatMessage(role="assistant", content="### 🐙 Reasoning Steps"))
+        yield messages, [], None, None
 
         # [Step 4] Query Analysis
         query_analysis = self.planner.analyze_query(user_query, img_path)
@@ -235,16 +218,11 @@ class Solver:
         messages.append(ChatMessage(role="assistant", 
                                     content=f"{query_analysis}",
                                     metadata={"title": "### 🔍 Step 0: Query Analysis"}))
-        yield messages
+        yield messages, [], None, None
 
         # Save the query analysis data
-        query_analysis_data = {
-            "query_analysis": query_analysis,
-            "time": round(time.time() - start_time, 5)
-        }
+        query_analysis_data = {"query_analysis": query_analysis, "time": round(time.time() - start_time, 5)}
         save_module_data(QUERY_ID, "step_0_query_analysis", query_analysis_data)
-
-
 
         # Execution loop (similar to your step-by-step solver)
         while step_count < self.max_steps and (time.time() - start_time) < self.max_time:
@@ -252,20 +230,12 @@ class Solver:
             messages.append(ChatMessage(role="OctoTools", 
                                         content=f"Generating the {step_count}-th step...",
                                         metadata={"title": f"🔄 Step {step_count}"}))
-            yield messages
+            yield messages, [], None, None
 
             # [Step 5] Generate the next step
-            next_step = self.planner.generate_next_step(
-                user_query, img_path, query_analysis, self.memory, step_count, self.max_steps
-            )
+            next_step = self.planner.generate_next_step(user_query, img_path, query_analysis, self.memory, step_count, self.max_steps)
             context, sub_goal, tool_name = self.planner.extract_context_subgoal_and_tool(next_step)
-            step_data = {
-                "step_count": step_count,
-                "context": context,
-                "sub_goal": sub_goal,
-                "tool_name": tool_name,
-                "time": round(time.time() - start_time, 5)
-            }
+            step_data = {"step_count": step_count, "context": context, "sub_goal": sub_goal, "tool_name": tool_name, "time": round(time.time() - start_time, 5)}
             save_module_data(QUERY_ID, f"step_{step_count}_action_prediction", step_data)
 
             # Display the step information
@@ -273,30 +243,31 @@ class Solver:
                 role="assistant",
                 content=f"**Context:** {context}\n\n**Sub-goal:** {sub_goal}\n\n**Tool:** `{tool_name}`",
                 metadata={"title": f"### 🎯 Step {step_count}: Action Prediction ({tool_name})"}))
-            yield messages
+            yield messages, [], None, None
 
             # Handle tool execution or errors
             if tool_name not in self.planner.available_tools:
                 messages.append(ChatMessage(
                     role="assistant", 
                     content=f"⚠️ Error: Tool '{tool_name}' is not available."))
-                yield messages
+                yield messages, [], None, None
                 continue
 
             # [Step 6-7] Generate and execute the tool command
-            tool_command = self.executor.generate_tool_command(
-                user_query, img_path, context, sub_goal, tool_name, self.planner.toolbox_metadata[tool_name]
-            )
+            tool_command = self.executor.generate_tool_command(user_query, img_path, context, sub_goal, tool_name, self.planner.toolbox_metadata[tool_name])
             analysis, explanation, command = self.executor.extract_explanation_and_command(tool_command)
             result = self.executor.execute_tool_command(tool_name, command)
-            result = make_json_serializable(result)
+            print(f"Tool '{tool_name}' result:", result)
+            if isinstance(result, dict):
+                if "visual_outputs" in result:
+                    visual_output_files = result["visual_outputs"]  # Use the processed image paths directly
 
-            # Display the ommand generation information
+            # Display the command generation information
             messages.append(ChatMessage(
                 role="assistant",
                 content=f"**Analysis:** {analysis}\n\n**Explanation:** {explanation}\n\n**Command:**\n```python\n{command}\n```",
                 metadata={"title": f"### 📝 Step {step_count}: Command Generation ({tool_name})"}))
-            yield messages
+            yield messages, [], None, None
 
             # Save the command generation data
             command_generation_data = {
@@ -311,9 +282,8 @@ class Solver:
             messages.append(ChatMessage(
                 role="assistant",
                 content=f"**Result:**\n```json\n{json.dumps(result, indent=4)}\n```",
-                # content=f"**Result:**\n```json\n{result}\n```",
                 metadata={"title": f"### 🛠️ Step {step_count}: Command Execution ({tool_name})"}))
-            yield messages
+            yield messages, [], None, None
 
             # Save the command execution data
             command_execution_data = {
@@ -341,7 +311,7 @@ class Solver:
                 role="assistant", 
                 content=f"**Analysis:**\n{context_verification}\n\n**Conclusion:** `{conclusion}` {conclusion_emoji}",
                 metadata={"title": f"### 🤖 Step {step_count}: Context Verification"}))
-            yield messages
+            yield messages, [], None, None
 
             if conclusion == 'STOP':
                 break
@@ -351,7 +321,7 @@ class Solver:
             messages.append(ChatMessage(role="assistant", content="<br>"))
             direct_output = self.planner.generate_direct_output(user_query, img_path, self.memory)
             messages.append(ChatMessage(role="assistant", content=f"### 🐙 Final Answer:\n{direct_output}"))
-            yield messages
+            yield messages, [], None, None
 
             # Save the direct output data
             direct_output_data = {
@@ -360,9 +330,8 @@ class Solver:
             }
             save_module_data(QUERY_ID, "direct_output", direct_output_data)
 
-
         if 'final' in self.output_types:
-            final_output = self.planner.generate_final_output(user_query, img_path, self.memory) # Disabled visibility for now
+            final_output = self.planner.generate_final_output(user_query, img_path, self.memory)
             # messages.append(ChatMessage(role="assistant", content=f"🎯 Final Output:\n{final_output}"))
             # yield messages
 
@@ -377,7 +346,7 @@ class Solver:
         messages.append(ChatMessage(role="assistant", content="<br>"))
         messages.append(ChatMessage(role="assistant", content="### ✅ Query Solved!"))
         messages.append(ChatMessage(role="assistant", content="How do you like the output from OctoTools 🐙? Please give us your feedback below. \n\n👍 If the answer is correct or the reasoning steps are helpful, please upvote the output. \n👎 If it is incorrect or the reasoning steps are not helpful, please downvote the output. \n💬 If you have any suggestions or comments, please leave them below.\n\nThank you for using OctoTools! 🐙"))
-        yield messages
+        yield messages, [], None, None
         
 
 def parse_arguments():
@@ -421,7 +390,7 @@ def solve_problem_gradio(user_query, user_image, max_steps=10, max_time=60, api_
     os.makedirs(query_cache_dir, exist_ok=True)
 
     if api_key is None:
-        return [["assistant", "⚠️ Error: OpenAI API Key is required."]]
+        return [[gr.ChatMessage(role="assistant", content="⚠️ Error: OpenAI API Key is required.")]], "", []
     
     # Save the query data
     save_query_data(
@@ -477,153 +446,175 @@ def solve_problem_gradio(user_query, user_image, max_steps=10, max_time=60, api_
     )
 
     if solver is None:
-        return [["assistant", "⚠️ Error: Solver is not initialized. Please restart the application."]]
+        return [[gr.ChatMessage(role="assistant", content="⚠️ Error: Failed to initialize solver.")]], "", []
 
-
-    messages = []  # Initialize message list
-    for message_batch in solver.stream_solve_user_problem(user_query, user_image, api_key, messages):
-        yield [msg for msg in message_batch]  # Ensure correct format for Gradio Chatbot
-
-    # Save steps
-    save_steps_data(
-        query_id=query_id,
-        memory=memory
-    )
+    # Initialize messages list
+    messages = []
+    
+    try:
+        # Stream the solution
+        for messages, text_output, gallery_output, progress_md in solver.stream_solve_user_problem(user_query, user_image, api_key, messages):
+            # Save steps data
+            save_steps_data(query_id, memory)
+            
+            # Return the current state
+            yield messages, text_output, gallery_output, progress_md
+            
+    except Exception as e:
+        print(f"Error in solve_problem_gradio: {e}")
+        return [[gr.ChatMessage(role="assistant", content=f"⚠️ Internal Error: {repr(e)}")]], "", []
 
 
 def main(args):
     #################### Gradio Interface ####################
-    with gr.Blocks() as demo:
-    # with gr.Blocks(theme=gr.themes.Soft()) as demo:
-        # Theming https://www.gradio.app/guides/theming-guide
-
-        gr.Markdown("# 🐙 Chat with OctoTools: An Agentic Framework with Extensive Tools for Complex Reasoning")  # Title
-        # gr.Markdown("[![OctoTools](https://img.shields.io/badge/OctoTools-Agentic%20Framework%20for%20Complex%20Reasoning-blue)](https://octotools.github.io/)")  # Title
+    with gr.Blocks(theme=gr.themes.Soft()) as demo:
+        
+        # Professional title and description
         gr.Markdown("""
-        **OctoTools** is a training-free, user-friendly, and easily extensible open-source agentic framework designed to tackle complex reasoning across diverse domains. 
-        It introduces standardized **tool cards** to encapsulate tool functionality, a **planner** for both high-level and low-level planning, and an **executor** to carry out tool usage. 
-                    
-        [Website](https://octotools.github.io/) | 
-        [Github](https://github.com/octotools/octotools) | 
-        [arXiv](https://arxiv.org/abs/2502.11271) | 
-        [PyPI](https://pypi.org/project/octotoolkit/) | 
-        [Paper](https://arxiv.org/pdf/2502.11271) | 
-        [Daily Paper](https://huggingface.co/papers/2502.11271) | 
-        [Tool Cards](https://octotools.github.io/#tool-cards) | 
-        [Example Visualizations](https://octotools.github.io/#visualization) | 
-        [YouTube](https://www.youtube.com/watch?v=4828sGfx7dk&t=1176s&ab_channel=DiscoverAI) | 
-        [Coverage](https://x.com/lupantech/status/1892260474320015861) | 
-        [Slack](https://join.slack.com/t/octotools/shared_invite/zt-3485ikfas-zMTbFbuodJmET~R6KXHEGw)
+        # 🔬 Fibroblast Activation State Analyzer
+        
+        **A professional AI-powered platform for fibroblast activation state analysis**
         """)
-
+        
+        gr.Markdown("""
+        ### 🎯 Features
+        - **Activation State Recognition**: Automatically analyze the activation state of fibroblasts
+        - **Morphological Feature Extraction**: Identify cell shape, size, and arrangement patterns
+        - **Multi-modal Data Integration**: Integrate image, gene expression, and other data
+        - **Professional Report Generation**: Generate detailed cell state analysis reports
+        """)
+        
         with gr.Row():
-            # Left column for settings
-            with gr.Column(scale=1):
-                with gr.Row():
-                    if args.openai_api_source == "user_provided":
-                        print("Using API key from user input.")
-                        api_key = gr.Textbox(
-                            show_label=True,
-                            placeholder="Your API key will not be stored in any way.",
-                            type="password", 
-                            label="OpenAI API Key",
-                            # container=False
-                        )
-                    else:
-                        print(f"Using local API key from environment variable: ...{os.getenv('OPENAI_API_KEY')[-4:]}")
-                        api_key = gr.Textbox(
-                            value=os.getenv("OPENAI_API_KEY"),
-                            visible=False,
-                            interactive=False
-                        )
-
-                with gr.Row():
-                    llm_model_engine = gr.Dropdown(
-                        choices=["gpt-4o", "gpt-4o-2024-11-20", "gpt-4o-2024-08-06", "gpt-4o-2024-05-13",
-                                "gpt-4o-mini", "gpt-4o-mini-2024-07-18"], 
-                        value="gpt-4o", 
-                        label="LLM Model"
+            # Left control panel
+            with gr.Column(scale=1, min_width=250):
+                gr.Markdown("### ⚙️ Analysis Settings")
+                
+                # API Key
+                if args.openai_api_source == "user_provided":
+                    api_key = gr.Textbox(
+                        placeholder="Enter your OpenAI API key",
+                        type="password",
+                        label="🔑 API Key"
                     )
-                with gr.Row():
-                    max_steps = gr.Slider(value=8, minimum=1, maximum=10, step=1, label="Max Steps")
+                else:
+                    api_key = gr.Textbox(
+                        value=os.getenv("OPENAI_API_KEY"),
+                        visible=False,
+                        interactive=False
+                    )
+
+                # Model and limits
+                gr.Markdown("#### 🤖 AI Model Configuration")
+                llm_model_engine = gr.Dropdown(
+                    choices=["gpt-4o"], value="gpt-4o", label="Language Model"
+                )
+                max_steps = gr.Slider(1, 15, value=10, label="Max Reasoning Steps", info="Recommended: 10-12 steps")
+                max_time = gr.Slider(60, 600, value=300, label="Max Analysis Time (seconds)", info="Recommended: 300s")
+
+                # Tool selection
+                gr.Markdown("#### 🛠️ Analysis Tools")
+                
+                # Cell analysis tools
+                cell_analysis_tools = [
+                    "Object_Detector_Tool",
+                    "Image_Captioner_Tool", 
+                    "Relevant_Patch_Zoomer_Tool",
+                    "Text_Detector_Tool",
+                    "Advanced_Object_Detector_Tool"
+                ]
+                
+                # General tools
+                general_tools = [
+                    "Generalist_Solution_Generator_Tool",
+                    "Python_Code_Generator_Tool",
+                    "ArXiv_Paper_Searcher_Tool",
+                    "Pubmed_Search_Tool"
+                ]
+                
+                # Specialized cell analysis tools (reserved)
+                specialized_tools = [
+                    "Nuclei_Segmenter_Tool",
+                    "Cell_Morphology_Analyzer_Tool", 
+                    "Fibroblast_Activation_Detector_Tool"
+                ]
+                
+                all_tools = cell_analysis_tools + general_tools + specialized_tools
+                
+                enabled_tools = gr.CheckboxGroup(
+                    choices=all_tools, 
+                    value=cell_analysis_tools, 
+                    label="Select Analysis Tools",
+                    info="Recommended: cell analysis tools"
+                )
                 
                 with gr.Row():
-                    max_time = gr.Slider(value=240, minimum=60, maximum=300, step=30, label="Max Time (seconds)")
+                    gr.Button("Select Cell Analysis Tools", size="sm").click(
+                        lambda: cell_analysis_tools, outputs=enabled_tools
+                    )
+                    gr.Button("Select All Tools", size="sm").click(
+                        lambda: all_tools, outputs=enabled_tools
+                    )
+                    gr.Button("Clear Selection", size="sm").click(
+                        lambda: [], outputs=enabled_tools
+                    )
 
-                with gr.Row():
-                    # Container for tools section
-                    with gr.Column():
-
-                        # First row for checkbox group
-                        enabled_tools = gr.CheckboxGroup(
-                            choices=all_tools,
-                            value=all_tools,
-                            label="Selected Tools",
-                        )
-
-                        # Second row for buttons
-                        with gr.Row():
-                            enable_all_btn = gr.Button("Select All Tools")
-                            disable_all_btn = gr.Button("Clear All Tools")
-                        
-                        # Add click handlers for the buttons
-                        enable_all_btn.click(
-                            lambda: all_tools,
-                            outputs=enabled_tools
-                        )
-                        disable_all_btn.click(
-                            lambda: [],
-                            outputs=enabled_tools
-                        )
-
+            # Main interface
             with gr.Column(scale=5):
-                
+                # Input area
+                gr.Markdown("### 📤 Data Input")
                 with gr.Row():
-                    # Middle column for the query
+                    with gr.Column(scale=1):
+                        user_image = gr.Image(
+                            label="Upload an Image", 
+                            type="pil", 
+                            height=350,
+                            info="Supported formats: PNG, JPG, TIFF"
+                        )
+                    with gr.Column(scale=1):
+                        user_query = gr.Textbox(
+                            label="Analysis Question", 
+                            placeholder="Describe the cell features or states you want to analyze...", 
+                            lines=15,
+                            info="E.g.: Analyze the activation state of these fibroblasts, identify morphological features, etc."
+                        )
+                        
+                # Submit button
+                with gr.Row():
+                    with gr.Column(scale=6):
+                        run_button = gr.Button("🚀 Start Analysis", variant="primary", size="lg")
+                        progress_md = gr.Markdown("**Progress**: Ready")
+
+                # Output area - three columns
+                gr.Markdown("### 📊 Analysis Results")
+                with gr.Row():
+                    # Reasoning steps
                     with gr.Column(scale=2):
-                        user_image = gr.Image(type="pil", label="Upload an Image (Optional)", height=500)  # Accepts multiple formats
-                        
-                        with gr.Row():
-                            user_query = gr.Textbox( placeholder="Type your question here...", label="Question (Required)")
-
-                        with gr.Row():
-                            run_button = gr.Button("🐙 Submit and Run", variant="primary")  # Run button with blue color
-
-                    # Right column for the output
-                    with gr.Column(scale=3):
-                        chatbot_output = gr.Chatbot(type="messages", label="Step-wise Problem-Solving Output", height=500)
-
-                        # TODO: Add actions to the buttons
-                        with gr.Row(elem_id="buttons") as button_row:
-                            upvote_btn = gr.Button(value="👍  Upvote", interactive=True, variant="primary")
-                            downvote_btn = gr.Button(value="👎  Downvote", interactive=True, variant="primary")
-                            # stop_btn = gr.Button(value="⛔️  Stop", interactive=True) # TODO
-                            # clear_btn = gr.Button(value="🗑️  Clear history", interactive=True) # TODO
-
-                        # TODO: Add comment textbox
-                        with gr.Row():
-                            comment_textbox = gr.Textbox(value="", 
-                                                        placeholder="Feel free to add any comments here. Thanks for using OctoTools!",
-                                                        label="💬 Comment (Type and press Enter to submit.)", interactive=True) # TODO
-
-                        # Update the button click handlers
-                        upvote_btn.click(
-                            fn=lambda: (save_feedback(QUERY_ID, "upvote"), gr.Info("Thank you for your upvote! 👍")),
-                            inputs=[],
-                            outputs=[]
-                        )
-                        
-                        downvote_btn.click(
-                            fn=lambda: (save_feedback(QUERY_ID, "downvote"), gr.Info("Thank you for your feedback. We'll work to improve! 👎")),
-                            inputs=[],
-                            outputs=[]
+                        gr.Markdown("#### 🔍 Reasoning Steps")
+                        chatbot_output = gr.Chatbot(
+                            type="messages", 
+                            height=450,
+                            show_label=False
                         )
 
-                        # Add handler for comment submission
-                        comment_textbox.submit(
-                            fn=lambda comment: (save_feedback(QUERY_ID, "comment", comment), gr.Info("Thank you for your comment! 💬")),
-                            inputs=[comment_textbox],
-                            outputs=[]
+                    # Text report
+                    with gr.Column(scale=2):
+                        gr.Markdown("#### 📝 Analysis Report")
+                        text_output = gr.Textbox(
+                            interactive=False,
+                            lines=20,
+                            placeholder="The analysis report will appear here...",
+                            show_label=False
+                        )
+
+                    # Visual output
+                    with gr.Column(scale=2):
+                        gr.Markdown("#### 🖼️ Visual Output")
+                        gallery_output = gr.Gallery(
+                            label=None, 
+                            show_label=False,
+                            height=450,
+                            columns=2,
+                            rows=3
                         )
 
                 # Bottom row for examples
@@ -692,42 +683,78 @@ def main(args):
                             # label="Try these examples with suggested tools."
                         )
 
-        # Link button click to function
+        # Button click event
         run_button.click(
-            fn=solve_problem_gradio, 
-            inputs=[user_query, user_image, max_steps, max_time, api_key, llm_model_engine, enabled_tools], 
-            outputs=chatbot_output
+            fn=solve_problem_gradio,
+            inputs=[user_query, user_image, max_steps, max_time, api_key, llm_model_engine, enabled_tools],
+            outputs=[chatbot_output, text_output, gallery_output, progress_md],
+            preprocess=False,
+            queue=True,
+            show_progress=True
         )
+
     #################### Gradio Interface ####################
 
-    # Launch the Gradio app
-    # demo.launch(ssr_mode=False)
-    demo.launch(ssr_mode=False, share=True)  # Added share=True parameter
+    # Launch configuration
+    if IS_SPACES:
+        # HuggingFace Spaces config
+        demo.launch(
+            server_name="0.0.0.0",
+            server_port=7860,
+            share=False,
+            debug=False
+        )
+    else:
+        # Local development config
+        demo.launch(
+            server_name="0.0.0.0",
+            server_port=1019,
+            debug=True,
+            share=False
+        )
 
 if __name__ == "__main__":
     args = parse_arguments()
 
-    # All tools
+    # All available tools
     all_tools = [
-        "Generalist_Solution_Generator_Tool",
-
-        "Image_Captioner_Tool",
-        "Object_Detector_Tool",
-        "Relevant_Patch_Zoomer_Tool",
-        "Text_Detector_Tool",
-
-        "Python_Code_Generator_Tool",
-
-        "ArXiv_Paper_Searcher_Tool",
-        "Google_Search_Tool",
-        "Nature_News_Fetcher_Tool",
-        "Pubmed_Search_Tool",
-        "URL_Text_Extractor_Tool",
-        "Wikipedia_Knowledge_Searcher_Tool"
+        # Cell analysis tools
+        "Object_Detector_Tool",           # Cell detection and counting
+        "Image_Captioner_Tool",           # Cell morphology description
+        "Relevant_Patch_Zoomer_Tool",     # Cell region zoom analysis
+        "Text_Detector_Tool",             # Text recognition in images
+        "Advanced_Object_Detector_Tool",  # Advanced cell detection
+        
+        # General analysis tools
+        "Generalist_Solution_Generator_Tool",  # Comprehensive analysis generation
+        "Python_Code_Generator_Tool",          # Code generation
+        "Image_Preprocessing_Tool",            # Image preprocessing
+        
+        # Research literature tools
+        "ArXiv_Paper_Searcher_Tool",      # arXiv paper search
+        "Pubmed_Search_Tool",             # PubMed literature search
+        "Nature_News_Fetcher_Tool",       # Nature news fetching
+        "Google_Search_Tool",             # Google search
+        "Wikipedia_Knowledge_Searcher_Tool",  # Wikipedia search
+        "URL_Text_Extractor_Tool",        # URL text extraction
+        
+        # Specialized cell analysis tools (reserved)
+        "Nuclei_Segmenter_Tool",          # Nuclei segmentation
+        "Cell_Morphology_Analyzer_Tool",  # Cell morphology analyzer
+        "Fibroblast_Activation_Detector_Tool",  # Fibroblast activation detector
     ]
-    args.enabled_tools = ",".join(all_tools)
+    args.enabled_tools = all_tools
 
     # NOTE: Use the same name for the query cache directory as the dataset directory
     args.root_cache_dir = DATASET_DIR.name
+    
+    # Print environment information
+    print("\n=== Environment Information ===")
+    print(f"Running in HuggingFace Spaces: {IS_SPACES}")
+    print(f"CUDA Available: {torch.cuda.is_available()}")
+    if torch.cuda.is_available():
+        print(f"CUDA Device: {torch.cuda.get_device_name(0)}")
+    print("==============================\n")
+    
     main(args)
 
