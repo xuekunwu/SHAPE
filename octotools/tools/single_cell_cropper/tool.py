@@ -13,7 +13,7 @@ class Single_Cell_Cropper_Tool(BaseTool):
     def __init__(self):
         super().__init__(
             tool_name="Single_Cell_Cropper_Tool",
-            tool_description="Generates individual cell crops from nuclei segmentation results for single-cell analysis. Creates masks and crops each detected nucleus with configurable margins.",
+            tool_description="Generates individual cell crops from nuclei segmentation results for single-cell analysis. Creates masks and crops each detected nucleus with configurable margins. Automatically handles image dimension mismatches by resizing masks.",
             tool_version="1.0.0",
             input_types={
                 "original_image": "str - Path to the original image (brightfield/phase contrast).",
@@ -35,7 +35,7 @@ class Single_Cell_Cropper_Tool(BaseTool):
             ],
             user_metadata={
                 "limitation": "Requires nuclei segmentation results as input. May generate overlapping crops if nuclei are close together. Performance depends on image quality and segmentation accuracy.",
-                "best_practice": "Use with Nuclei_Segmenter_Tool for optimal results. Adjust min_area and margin based on cell size and analysis requirements. Ensure original image and nuclei mask have same dimensions."
+                "best_practice": "Use with Nuclei_Segmenter_Tool for optimal results. Adjust min_area and margin based on cell size and analysis requirements. Automatically handles dimension mismatches between original image and nuclei mask."
             }
         )
 
@@ -104,10 +104,16 @@ class Single_Cell_Cropper_Tool(BaseTool):
             
             # Check image dimensions match
             if original_img.shape != mask.shape:
-                return {
-                    "error": f"Image dimensions mismatch: original {original_img.shape} vs mask {mask.shape}",
-                    "summary": "Image and mask dimensions do not match"
-                }
+                print(f"Image dimensions mismatch: original {original_img.shape} vs mask {mask.shape}")
+                print("Resizing mask to match original image dimensions...")
+                
+                # Resize mask to match original image dimensions
+                mask = cv2.resize(mask, (original_img.shape[1], original_img.shape[0]), interpolation=cv2.INTER_NEAREST)
+                
+                # Ensure mask is still binary after resizing
+                mask = (mask > 0).astype(np.uint8) * 255
+                
+                print(f"Mask resized to: {mask.shape}")
             
             # Generate individual cell crops
             cell_crops, cell_metadata = self._generate_cell_crops(
