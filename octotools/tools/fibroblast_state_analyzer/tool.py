@@ -31,39 +31,18 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class DinoV2Classifier(nn.Module):
-    """DINOv2-based classifier for fibroblast state analysis."""
-    
-    def __init__(self, backbone, num_classes, feat_dim):
+    """
+    Wrapper for the DINOv2 model with a custom classifier head.
+    This matches the architecture used in the training notebook.
+    """
+    def __init__(self, backbone, num_classes):
         super().__init__()
         self.backbone = backbone
-        self.classifier = nn.Linear(feat_dim, num_classes)
+        self.num_classes = num_classes
         
     def forward(self, x):
-        # Get features from backbone
-        with torch.no_grad():
-            # Use the correct DINOv2 API
-            features = self.backbone(x)
-            
-            # Handle different DINOv2 output formats
-            if isinstance(features, dict):
-                # Handle different DINOv2 output formats
-                if 'last_hidden_state' in features:
-                    features = features['last_hidden_state']
-                elif 'x_norm_clstoken' in features:
-                    features = features['x_norm_clstoken']
-                else:
-                    # Take the first key if it's a dict
-                    features = list(features.values())[0]
-            
-            # If features is a tensor with multiple dimensions, take the CLS token
-            if len(features.shape) == 3:  # [batch_size, seq_len, feat_dim]
-                features = features[:, 0, :]  # Take CLS token
-            elif len(features.shape) == 2:  # [batch_size, feat_dim]
-                features = features
-            else:
-                raise ValueError(f"Unexpected features shape: {features.shape}")
-        
-        return self.classifier(features)
+        # The forward pass now directly returns the output of the backbone's head
+        return self.backbone(x)
 
 class Fibroblast_State_Analyzer_Tool(BaseTool):
     """
@@ -71,7 +50,7 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
     Processes individual cell crops to determine their activation state.
     """
     
-    def __init__(self, model_path=None, backbone_size="small", confidence_threshold=0.5):
+    def __init__(self, model_path=None, backbone_size="large", confidence_threshold=0.5):
         super().__init__(
             tool_name="Fibroblast_State_Analyzer_Tool",
             tool_description="Analyzes fibroblast cell states using deep learning to classify individual cells into different activation states.",
@@ -122,99 +101,80 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
     def _initialize_model(self):
         """Initialize the DINOv2 model and classifier with finetuned weights."""
         try:
-            logger.info("Initializing DINOv2 model...")
+            logger.info("Initializing DINOv2 model (torch.hub)...")
             
-            # Import transformers here to avoid dependency issues
-            from transformers import AutoModel
-            
-            # Load backbone
-            backbone = AutoModel.from_pretrained(f"facebook/dinov2-{self.backbone_size}")
-            backbone.eval()
-            
-            # Create classifier with correct feature dimension based on backbone size
-            feat_dim_map = {
-                "small": 384,
-                "base": 768, 
-                "large": 1024,
-                "giant": 1536
+            # Define backbone architecture based on size
+            backbone_archs = {
+                "small": "vits14", "base": "vitb14", "large": "vitl14", "giant": "vitg14"
             }
-            feat_dim = feat_dim_map.get(self.backbone_size, 768)
+            feat_dim_map = {
+                "vits14": 384, "vitb14": 768, "vitl14": 1024, "vitg14": 1536
+            }
+            backbone_arch = backbone_archs.get(self.backbone_size, "vitl14")
+            backbone_name = f"dinov2_{backbone_arch}"
+
+            # Load the DINOv2 backbone using torch.hub to match the training environment
+            backbone_model = torch.hub.load(repo_or_dir="facebookresearch/dinov2", model=backbone_name)
+            backbone_model.eval() # Keep backbone frozen
             
-            logger.info(f"Using {self.backbone_size} backbone with {feat_dim} feature dimensions")
-            
+            # Create the model wrapper
             self.model = DinoV2Classifier(
-                backbone=backbone,
-                num_classes=len(self.class_names),
-                feat_dim=feat_dim
-            )
+                backbone=backbone_model,
+                num_classes=len(self.class_names)
+            ).to(self.device)
+
+            # Re-create the classifier head exactly as in the training notebook
+            feat_dim = feat_dim_map[backbone_arch]
+            hidden_dim = feat_dim // 2
+            self.model.backbone.head = nn.Sequential(
+                nn.Linear(feat_dim, hidden_dim),
+                nn.ReLU(inplace=True),
+                nn.Dropout(p=0),
+                nn.Linear(hidden_dim, len(self.class_names))
+            ).to(self.device)
             
-            # Load finetuned weights from HuggingFace Hub
-            try:
-                logger.info("Downloading finetuned weights from HuggingFace Hub...")
-                
-                # Download model weights from the specified repository with authentication
-                model_weights_path = hf_hub_download(
-                    repo_id="5xuekun/fb-classifier-model",
-                    filename="model.pt",
-                    cache_dir=None,  # Use default cache
-                    token=os.getenv("HUGGINGFACE_TOKEN")  # Add authentication token
-                )
-                
-                logger.info(f"Downloaded model weights to: {model_weights_path}")
-                
-                # Load the weights
-                state_dict = torch.load(model_weights_path, map_location=self.device)
-                
-                # Handle different state dict formats
-                if 'model_state_dict' in state_dict:
-                    # If it's a checkpoint with model_state_dict
-                    self.model.load_state_dict(state_dict['model_state_dict'])
-                    logger.info("Loaded model_state_dict from checkpoint")
-                elif 'state_dict' in state_dict:
-                    # If it's a checkpoint with state_dict
-                    self.model.load_state_dict(state_dict['state_dict'])
-                    logger.info("Loaded state_dict from checkpoint")
-                else:
-                    # If it's just the state dict directly
-                    self.model.load_state_dict(state_dict)
-                    logger.info("Loaded state dict directly")
-                
-                logger.info("Successfully loaded finetuned weights from HuggingFace Hub")
-                
-            except Exception as e:
-                logger.warning(f"Failed to load finetuned weights from HuggingFace Hub: {str(e)}")
-                
-                # Check if it's an authentication error
-                if "401" in str(e) or "authentication" in str(e).lower() or "token" in str(e).lower():
-                    logger.warning("Authentication error detected. Please set HUGGINGFACE_TOKEN environment variable.")
-                    logger.warning("You can get a token from: https://huggingface.co/settings/tokens")
-                    logger.warning("Example: export HUGGINGFACE_TOKEN=your_token_here")
-                elif "Repository Not Found" in str(e):
-                    logger.warning("Repository not found. The model may be private or the repository ID may be incorrect.")
-                    logger.warning("Please check the repository access or contact the model owner.")
-                
-                logger.warning("Using untrained classifier - results may not be accurate")
-                logger.warning("For best results, please provide a local model path or set up HuggingFace authentication")
-                
-                # Try to load from local path if provided
-                if self.model_path and os.path.exists(self.model_path):
+            logger.info(f"Using {backbone_name} backbone with a custom {hidden_dim}-hidden-dim head.")
+            
+            # Load finetuned weights from HuggingFace Hub or local path
+            model_loaded = False
+            if self.model_path and os.path.exists(self.model_path):
+                try:
                     logger.info(f"Attempting to load from local path: {self.model_path}")
-                    try:
-                        state_dict = torch.load(self.model_path, map_location=self.device)
-                        if 'model_state_dict' in state_dict:
-                            self.model.load_state_dict(state_dict['model_state_dict'])
-                        else:
-                            self.model.load_state_dict(state_dict)
-                        logger.info("Successfully loaded from local path")
-                    except Exception as local_e:
-                        logger.error(f"Failed to load from local path: {str(local_e)}")
-                else:
-                    logger.info("No local model path provided. Using untrained classifier.")
-                    logger.info("To use a trained model, either:")
-                    logger.info("1. Set HUGGINGFACE_TOKEN environment variable for remote access")
-                    logger.info("2. Provide a local model_path parameter")
+                    state_dict = torch.load(self.model_path, map_location=self.device, weights_only=True)
+                    if 'model_state_dict' in state_dict:
+                        self.model.load_state_dict(state_dict['model_state_dict'])
+                    else:
+                        self.model.load_state_dict(state_dict)
+                    logger.info("Successfully loaded model from local path")
+                    model_loaded = True
+                except Exception as local_e:
+                    logger.error(f"Failed to load from local path: {str(local_e)}")
             
-            self.model = self.model.to(self.device)
+            if not model_loaded:
+                try:
+                    logger.info("Downloading finetuned weights from HuggingFace Hub...")
+                    model_weights_path = hf_hub_download(
+                        repo_id="5xuekun/fb-classifier-model",
+                        filename="model.pt", # Or large_best_model.pth if the name is different
+                        token=os.getenv("HUGGINGFACE_TOKEN")
+                    )
+                    logger.info(f"Downloaded model weights to: {model_weights_path}")
+                    
+                    # Load the state dict
+                    checkpoint_data = torch.load(model_weights_path, map_location=self.device, weights_only=True)
+                    if 'model_state_dict' in checkpoint_data:
+                        self.model.load_state_dict(checkpoint_data['model_state_dict'])
+                    else:
+                        self.model.load_state_dict(checkpoint_data)
+                    logger.info("Successfully loaded finetuned weights from HuggingFace Hub")
+                    model_loaded = True
+
+                except Exception as e:
+                    logger.warning(f"Failed to load weights from HuggingFace Hub: {str(e)}")
+
+            if not model_loaded:
+                logger.warning("Could not load any trained weights. Using untrained classifier.")
+
             self.model.eval()
             
             # Define transforms for preprocessing
@@ -233,18 +193,10 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
     def _is_model_trained(self) -> bool:
         """Check if the model has been trained by examining classifier weights."""
         try:
-            # Check if classifier weights are initialized with non-zero values
-            classifier_weights = self.model.classifier.weight.data
-            classifier_bias = self.model.classifier.bias.data
-            
-            # If weights are all close to zero, the model is likely untrained
-            weights_norm = torch.norm(classifier_weights).item()
-            bias_norm = torch.norm(classifier_bias).item()
-            
-            # Threshold for considering weights as "trained"
-            threshold = 0.1
-            return weights_norm > threshold or bias_norm > threshold
-            
+            # Check the norm of the last layer's weights
+            final_layer_weights = self.model.backbone.head[-1].weight.data
+            weights_norm = torch.norm(final_layer_weights).item()
+            return weights_norm > 0.1 # A simple heuristic
         except Exception as e:
             logger.warning(f"Could not determine if model is trained: {str(e)}")
             return False
