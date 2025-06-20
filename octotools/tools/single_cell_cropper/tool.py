@@ -44,98 +44,74 @@ class Single_Cell_Cropper_Tool(BaseTool):
         Execute single-cell cropping from nuclei segmentation results.
         
         Args:
-            original_image (str): Path to the original brightfield/phase contrast image
-            nuclei_mask (str): Path to nuclei segmentation mask or mask array
-            min_area (int): Minimum area threshold for valid nuclei
-            margin (int): Margin around each nucleus for cropping
-            output_format (str): Output format for crops
-            query_cache_dir (str): Directory to save outputs
+            original_image: Path to original brightfield image
+            nuclei_mask: Path to nuclei segmentation mask
+            min_area: Minimum area threshold for valid nuclei
+            margin: Margin around each nucleus for cropping
+            output_format: Output image format ('tif', 'png', 'jpg')
+            query_cache_dir: Directory for caching results
             
         Returns:
-            dict: Cropping results with individual cell images and metadata
+            dict: Cropping results with cell crops and metadata
         """
         try:
+            # Load original image
+            original_img = cv2.imread(original_image, cv2.IMREAD_GRAYSCALE)
+            if original_img is None:
+                return {
+                    "error": f"Failed to load original image: {original_image}",
+                    "summary": "Image loading failed"
+                }
+            
+            # Load nuclei mask
+            mask = cv2.imread(nuclei_mask, cv2.IMREAD_GRAYSCALE)
+            if mask is None:
+                return {
+                    "error": f"Failed to load nuclei mask: {nuclei_mask}",
+                    "summary": "Mask loading failed"
+                }
+            
             # Setup output directory
             if query_cache_dir is None:
                 query_cache_dir = "solver_cache/temp"
             tool_cache_dir = os.path.join(query_cache_dir, "tool_cache")
             os.makedirs(tool_cache_dir, exist_ok=True)
             
-            # Load original image
-            if isinstance(original_image, str):
-                original_img = cv2.imread(original_image, cv2.IMREAD_GRAYSCALE)
-                if original_img is None:
-                    return {
-                        "error": f"Failed to load original image: {original_image}",
-                        "summary": "Original image loading failed"
-                    }
-            else:
-                original_img = np.array(original_image)
-                if len(original_img.shape) == 3:
-                    original_img = cv2.cvtColor(original_img, cv2.COLOR_RGB2GRAY)
-            
-            # Load nuclei mask
-            if isinstance(nuclei_mask, str):
-                if nuclei_mask.endswith('.png') or nuclei_mask.endswith('.jpg') or nuclei_mask.endswith('.tif'):
-                    # Load mask image
-                    mask_img = cv2.imread(nuclei_mask, cv2.IMREAD_GRAYSCALE)
-                    if mask_img is None:
-                        return {
-                            "error": f"Failed to load nuclei mask: {nuclei_mask}",
-                            "summary": "Nuclei mask loading failed"
-                        }
-                    # Convert to binary mask (assuming non-zero values are nuclei)
-                    mask = (mask_img > 0).astype(np.uint8) * 255
-                else:
-                    return {
-                        "error": f"Unsupported mask format: {nuclei_mask}",
-                        "summary": "Mask format not supported"
-                    }
-            else:
-                # Assume nuclei_mask is already a numpy array
-                mask = np.array(nuclei_mask)
-                if mask.dtype != np.uint8:
-                    mask = mask.astype(np.uint8)
-            
-            # Ensure mask is binary
-            if len(np.unique(mask)) > 2:
-                # If mask has multiple values, convert to binary
-                mask = (mask > 0).astype(np.uint8) * 255
-            
-            # Check image dimensions match
-            if original_img.shape != mask.shape:
-                print(f"Image dimensions mismatch: original {original_img.shape} vs mask {mask.shape}")
-                print("Resizing mask to match original image dimensions...")
-                
-                # Resize mask to match original image dimensions
-                mask = cv2.resize(mask, (original_img.shape[1], original_img.shape[0]), interpolation=cv2.INTER_NEAREST)
-                
-                # Ensure mask is still binary after resizing
-                mask = (mask > 0).astype(np.uint8) * 255
-                
-                print(f"Mask resized to: {mask.shape}")
-            
-            # Generate individual cell crops
+            # Generate cell crops
             cell_crops, cell_metadata = self._generate_cell_crops(
                 original_img, mask, min_area, margin, tool_cache_dir, output_format
             )
             
-            # Create visualization of all crops
-            visualization_path = self._create_crops_visualization(
-                cell_crops, cell_metadata, tool_cache_dir
-            )
+            if not cell_crops:
+                return {
+                    "summary": "No valid cell crops generated.",
+                    "cell_count": 0,
+                    "cell_crops": [],
+                    "cell_metadata": [],
+                    "visual_outputs": [],
+                    "parameters": {
+                        "min_area": min_area,
+                        "margin": margin,
+                        "output_format": output_format
+                    }
+                }
             
             # Save metadata
             metadata_path = os.path.join(tool_cache_dir, f"cell_crops_metadata_{uuid4().hex[:8]}.json")
             with open(metadata_path, 'w') as f:
                 json.dump(cell_metadata, f, indent=2)
             
+            # Create a summary visualization instead of individual crop display
+            summary_viz_path = self._create_summary_visualization(
+                cell_crops, cell_metadata, tool_cache_dir
+            )
+            
             return {
-                "summary": f"Successfully generated {len(cell_crops)} single-cell crops.",
+                "summary": f"Successfully generated {len(cell_crops)} single-cell crops for downstream analysis.",
                 "cell_count": len(cell_crops),
                 "cell_crops": cell_crops,
                 "cell_metadata": cell_metadata,
-                "visual_outputs": [visualization_path, metadata_path],
+                "visual_outputs": [summary_viz_path, metadata_path] if summary_viz_path else [metadata_path],
                 "parameters": {
                     "min_area": min_area,
                     "margin": margin,
@@ -294,9 +270,9 @@ class Single_Cell_Cropper_Tool(BaseTool):
         
         return cell_crops, cell_metadata
 
-    def _create_crops_visualization(self, cell_crops, cell_metadata, output_dir):
+    def _create_summary_visualization(self, cell_crops, cell_metadata, output_dir):
         """
-        Create a visualization showing all generated cell crops.
+        Create a summary visualization showing statistics of generated cell crops.
         
         Args:
             cell_crops: List of crop file paths
@@ -304,72 +280,86 @@ class Single_Cell_Cropper_Tool(BaseTool):
             output_dir: Output directory
             
         Returns:
-            str: Path to visualization image
+            str: Path to summary visualization image
         """
         if not cell_crops:
             return None
         
         try:
-            # Validate crop files exist
-            valid_crops = []
-            valid_metadata = []
-            for crop_path, metadata in zip(cell_crops, cell_metadata):
-                if os.path.exists(crop_path) and os.path.getsize(crop_path) > 0:
-                    valid_crops.append(crop_path)
-                    valid_metadata.append(metadata)
-                else:
-                    print(f"Warning: Crop file not found or empty: {crop_path}")
+            # Create a summary figure with statistics
+            fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(15, 12))
             
-            if not valid_crops:
-                print("No valid crop files found for visualization")
-                return None
+            # 1. Cell count and area distribution
+            areas = [meta.get('area', 0) for meta in cell_metadata]
+            ax1.hist(areas, bins=20, alpha=0.7, color='skyblue', edgecolor='black')
+            ax1.set_xlabel('Cell Area (pixels)')
+            ax1.set_ylabel('Number of Cells')
+            ax1.set_title(f'Cell Area Distribution\n(Total: {len(cell_crops)} cells)')
+            ax1.grid(True, alpha=0.3)
             
-            # Calculate grid layout
-            n_crops = len(valid_crops)
-            cols = min(5, n_crops)  # Max 5 columns
-            rows = (n_crops + cols - 1) // cols
+            # 2. Crop size distribution
+            crop_sizes = [meta.get('crop_size', (0, 0)) for meta in cell_metadata]
+            crop_widths = [size[1] for size in crop_sizes if len(size) >= 2]
+            crop_heights = [size[0] for size in crop_sizes if len(size) >= 2]
             
-            fig, axes = plt.subplots(rows, cols, figsize=(15, 3*rows))
-            if rows == 1:
-                axes = axes.reshape(1, -1)
-            elif cols == 1:
-                axes = axes.reshape(-1, 1)
+            ax2.scatter(crop_widths, crop_heights, alpha=0.6, color='green')
+            ax2.set_xlabel('Crop Width (pixels)')
+            ax2.set_ylabel('Crop Height (pixels)')
+            ax2.set_title('Crop Size Distribution')
+            ax2.grid(True, alpha=0.3)
             
-            for idx, (crop_path, metadata) in enumerate(zip(valid_crops, valid_metadata)):
-                row = idx // cols
-                col = idx % cols
+            # 3. Sample of first few crops (max 9)
+            sample_size = min(9, len(cell_crops))
+            if sample_size > 0:
+                cols = 3
+                rows = (sample_size + cols - 1) // cols
                 
-                try:
-                    # Load crop image with error handling
-                    crop_img = cv2.imread(crop_path, cv2.IMREAD_GRAYSCALE)
-                    if crop_img is None:
-                        print(f"Warning: Failed to load crop image: {crop_path}")
+                for idx in range(sample_size):
+                    row = idx // cols
+                    col = idx % cols
+                    
+                    try:
+                        # Load sample crop
+                        crop_img = cv2.imread(cell_crops[idx], cv2.IMREAD_GRAYSCALE)
+                        if crop_img is not None:
+                            ax3.imshow(crop_img, cmap='gray')
+                            ax3.set_title(f'Sample {idx+1}')
+                            ax3.axis('off')
+                    except Exception as e:
+                        print(f"Error loading sample crop {cell_crops[idx]}: {e}")
                         continue
-                    
-                    # Validate image data
-                    if crop_img.size == 0 or np.isnan(crop_img).any():
-                        print(f"Warning: Invalid image data in crop: {crop_path}")
-                        continue
-                    
-                    # Display crop
-                    axes[row, col].imshow(crop_img, cmap='gray')
-                    axes[row, col].set_title(f"Cell {metadata['cell_id']}\nArea: {metadata['area']}")
-                    axes[row, col].axis('off')
-                    
-                except Exception as e:
-                    print(f"Error processing crop {crop_path}: {e}")
-                    continue
+                
+                # Hide empty subplots
+                for idx in range(sample_size, rows * cols):
+                    row = idx // cols
+                    col = idx % cols
+                    ax3.axis('off')
             
-            # Hide empty subplots
-            for idx in range(n_crops, rows * cols):
-                row = idx // cols
-                col = idx % cols
-                axes[row, col].axis('off')
+            # 4. Statistics summary
+            ax4.axis('off')
+            stats_text = f"""
+Single-Cell Cropping Summary
+
+Total Cells: {len(cell_crops)}
+Average Area: {np.mean(areas):.1f} pixels
+Min Area: {np.min(areas) if areas else 0} pixels
+Max Area: {np.max(areas) if areas else 0} pixels
+
+Crop Parameters:
+- Min Area Threshold: {cell_metadata[0].get('min_area', 'N/A') if cell_metadata else 'N/A'}
+- Margin: {cell_metadata[0].get('margin', 'N/A') if cell_metadata else 'N/A'}
+- Output Format: {cell_metadata[0].get('output_format', 'N/A') if cell_metadata else 'N/A'}
+
+Status: Ready for downstream analysis
+"""
+            ax4.text(0.1, 0.9, stats_text, transform=ax4.transAxes, fontsize=12,
+                    verticalalignment='top', fontfamily='monospace',
+                    bbox=dict(boxstyle="round,pad=0.3", facecolor="lightgray", alpha=0.8))
             
             plt.tight_layout()
             
             # Save visualization with enhanced error handling
-            viz_path = os.path.join(output_dir, f"cell_crops_overview_{uuid4().hex[:8]}.png")
+            viz_path = os.path.join(output_dir, f"cell_crops_summary_{uuid4().hex[:8]}.png")
             
             try:
                 # Save with multiple fallback options
@@ -406,7 +396,7 @@ class Single_Cell_Cropper_Tool(BaseTool):
                 
                 # Verify the saved file
                 if not os.path.exists(viz_path) or os.path.getsize(viz_path) == 0:
-                    print("Warning: Visualization file not saved properly")
+                    print("Warning: Summary visualization file not saved properly")
                     return None
                 
                 # Test loading the saved image
@@ -414,20 +404,20 @@ class Single_Cell_Cropper_Tool(BaseTool):
                     test_image = Image.open(viz_path)
                     test_image.verify()
                     test_image.close()
-                    print(f"Successfully saved visualization: {viz_path}")
+                    print(f"Successfully saved summary visualization: {viz_path}")
                 except Exception as e:
-                    print(f"Warning: Visualization verification failed: {e}")
+                    print(f"Warning: Summary visualization verification failed: {e}")
                     return None
                 
                 return viz_path
                 
             except Exception as e:
-                print(f"Error in visualization saving: {e}")
+                print(f"Error in summary visualization saving: {e}")
                 plt.close()
                 return None
                 
         except Exception as e:
-            print(f"Error creating visualization: {e}")
+            print(f"Error creating summary visualization: {e}")
             return None
 
     def get_metadata(self):
