@@ -500,6 +500,7 @@ class Solver:
         detected_count = sum(1 for _, label in visual_outputs if "detected" in label.lower())
         zoomed_count = sum(1 for _, label in visual_outputs if "zoomed" in label.lower())
         cropped_count = sum(1 for _, label in visual_outputs if "crop" in label.lower())
+        analyzed_count = sum(1 for _, label in visual_outputs if "analysis" in label.lower() or "distribution" in label.lower())
         
         # Generate tool-specific descriptions
         tool_descriptions = {
@@ -511,7 +512,8 @@ class Solver:
             "Nuclei_Segmenter_Tool": f"*Showing {segmented_count} segmentation result(s) with identified nuclei regions.*",
             "Single_Cell_Cropper_Tool": f"*Displaying {cropped_count} single-cell crop(s) generated from nuclei segmentation results.*",
             "Cell_Morphology_Analyzer_Tool": "*Displaying cell morphology analysis results with detailed structural insights.*",
-            "Fibroblast_Activation_Detector_Tool": "*Showing fibroblast activation state analysis with morphological indicators.*"
+            "Fibroblast_Activation_Detector_Tool": "*Showing fibroblast activation state analysis with morphological indicators.*",
+            "Fibroblast_State_Analyzer_Tool": f"*Displaying {analyzed_count} fibroblast state analysis result(s) with cell state distributions and statistics.*"
         }
         
         # Return tool-specific description or generic one
@@ -733,7 +735,8 @@ def main(args):
                     "Advanced_Object_Detector_Tool",
                     "Image_Preprocessor_Tool",
                     "Nuclei_Segmenter_Tool",
-                    "Single_Cell_Cropper_Tool"
+                    "Single_Cell_Cropper_Tool",
+                    "Fibroblast_State_Analyzer_Tool"
                 ]
                 
                 # General tools
@@ -840,13 +843,13 @@ def main(args):
                                  "examples/A5_01_1_1_Phase Contrast_001.png",
                                  "Segment and count the nuclei in this fibroblast image.", 
                                  ["Image_Preprocessor_Tool", "Nuclei_Segmenter_Tool"],
-                                 "Nuclei count and segmentation results with visualization."],
+                                 "There are 605 cells in this image, and the nuclei are segmented."],
 
-                                [ "Single Cell Cropping",
-                                 "examples/fibroblast.png",
-                                 "Generate individual cell crops from nuclei segmentation for single-cell analysis.", 
-                                 ["Image_Preprocessor_Tool", "Nuclei_Segmenter_Tool", "Single_Cell_Cropper_Tool"],
-                                 "Individual cell crops with metadata for single-cell analysis."],
+                                [ "Fibroblast State Analysis",
+                                 "examples/A5_01_1_1_Phase Contrast_001.png",
+                                 "Analyze fibroblast cell states from individual cell crops.", 
+                                 ["Image_Preprocessor_Tool", "Nuclei_Segmenter_Tool", "Single_Cell_Cropper_Tool", "Fibroblast_State_Analyzer_Tool"],
+                                 "There are 605 cells in this image. The fibroblast state is analyzed."],
 
                                 [ "Medical Image Analysis",
                                  "examples/lung.jpg", 
@@ -913,6 +916,7 @@ if __name__ == "__main__":
         "Image_Preprocessor_Tool",        # Image preprocessing and enhancement
         "Nuclei_Segmenter_Tool",          # Nuclei segmentation
         "Single_Cell_Cropper_Tool",        # Single cell cropping
+        "Fibroblast_State_Analyzer_Tool",  # Fibroblast state analysis
         
         # General analysis tools
         "Generalist_Solution_Generator_Tool",  # Comprehensive analysis generation
