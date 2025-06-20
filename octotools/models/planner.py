@@ -1,437 +1,376 @@
-#!/usr/bin/env python3
-"""
-Fibroblast State Analyzer Tool - Analyzes cell state of individual fibroblast crops.
-"""
-
 import os
-import sys
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from torchvision import transforms
+import re
 from PIL import Image
-import numpy as np
-import json
-import logging
-from pathlib import Path
-from typing import List, Dict, Any, Optional, Tuple
-from uuid import uuid4
-import matplotlib.pyplot as plt
-from huggingface_hub import hf_hub_download
+from io import BytesIO
+from typing import Dict, Any, List, Tuple
 
-# Add the project root to the Python path
-current_dir = os.path.dirname(os.path.abspath(__file__))
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(current_dir))))
-sys.path.insert(0, project_root)
+from octotools.engine.openai import ChatOpenAI
+from octotools.models.memory import Memory
+from octotools.models.formatters import QueryAnalysis, NextStep, MemoryVerification
 
-from octotools.tools.base import BaseTool
+class Planner:
+    def __init__(self, llm_engine_name: str, toolbox_metadata: dict = None, available_tools: List = None, api_key: str = None):
+        self.llm_engine_name = llm_engine_name
+        self.llm_engine_mm = ChatOpenAI(model_string=llm_engine_name, is_multimodal=True, api_key=api_key)
+        self.llm_engine = ChatOpenAI(model_string=llm_engine_name, is_multimodal=False, api_key=api_key)
+        self.toolbox_metadata = toolbox_metadata if toolbox_metadata is not None else {}
+        self.available_tools = available_tools if available_tools is not None else []
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+    def get_image_info(self, image_path: str) -> Dict[str, Any]:
+        image_info = {}
+        if image_path and os.path.isfile(image_path):
+            image_info["image_path"] = image_path
+            try:
+                with Image.open(image_path) as img:
+                    width, height = img.size
+                image_info.update({
+                    "width": width,
+                    "height": height
+                })
+            except Exception as e:
+                print(f"Error processing image file: {str(e)}")
+        return image_info
+    
+    def get_image_info_bytes(self, bytes: str) -> Dict[str, Any]:
+        image_info = {}
+        if bytes:
+            try:
+                with Image.open(BytesIO(bytes)) as img:
+                    width, height = img.size
+                image_info.update({
+                    "image_path": 'image.jpg', # generic image name
+                    "width": width,
+                    "height": height
+                })
+            except Exception as e:
+                print(f"Error processing image bytes: {str(e)}")
+        return image_info
 
-class DinoV2Classifier(nn.Module):
-    """DINOv2-based classifier for fibroblast state analysis."""
-    
-    def __init__(self, backbone, num_classes, feat_dim):
-        super().__init__()
-        self.backbone = backbone
-        self.classifier = nn.Linear(feat_dim, num_classes)
-        
-    def forward(self, x):
-        # Get features from backbone
-        with torch.no_grad():
-            features = self.backbone.forward_features(x)
-            if isinstance(features, dict):
-                features = features['last_hidden_state']
-        return self.classifier(features)
+    def generate_base_response(self, question: str, image: str, max_tokens: str = 4000, bytes_mode: bool = False) -> str:
+        image_info = self.get_image_info(image)
 
-class Fibroblast_State_Analyzer_Tool(BaseTool):
-    """
-    Analyzes fibroblast cell states using a pre-trained DINOv2-based classifier.
-    Processes individual cell crops to determine their activation state.
-    """
-    
-    def __init__(self, model_path=None, backbone_size="small", confidence_threshold=0.5):
-        super().__init__(
-            tool_name="Fibroblast_State_Analyzer_Tool",
-            tool_description="Analyzes fibroblast cell states using deep learning to classify individual cells into different activation states.",
-            tool_version="1.0.0",
-            input_types={
-                "cell_crops": "List[str] - Paths to individual cell crop images",
-                "cell_metadata": "List[dict] - Metadata for each cell crop",
-                "confidence_threshold": "float - Minimum confidence threshold for classification (default: 0.5)",
-                "batch_size": "int - Batch size for processing (default: 16)",
-                "query_cache_dir": "str - Directory for caching results"
-            },
-            output_type="dict - Analysis results with cell state classifications and statistics",
-            demo_commands=[
-                {
-                    "command": 'execution = tool.execute(cell_crops=["cell_0001.png", "cell_0002.png"], cell_metadata=[{"cell_id": 1}, {"cell_id": 2}])',
-                    "description": "Analyze cell states for individual fibroblast crops"
-                }
-            ],
-            user_metadata={
-                "limitation": "Requires GPU for optimal performance. Model accuracy depends on image quality and cell visibility. May struggle with very small or overlapping cells.",
-                "best_practice": "Use with high-quality cell crops from Single_Cell_Cropper_Tool. Ensure cells are well-separated and clearly visible in crops.",
-                "cell_states": "Classifies cells into: dead, np-MyoFb (non-proliferative myofibroblast), p-MyoFb (proliferative myofibroblast), proto-MyoFb (proto-myofibroblast), q-Fb (quiescent fibroblast)"
-            }
-        )
-        
-        # Device configuration
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        logger.info(f"Fibroblast_State_Analyzer_Tool: Using device: {self.device}")
-        
-        # Model configuration
-        self.model_path = model_path
-        self.backbone_size = backbone_size
-        self.confidence_threshold = confidence_threshold
-        
-        # Cell state classes
-        self.class_names = ["dead", "np-MyoFb", "p-MyoFb", "proto-MyoFb", "q-Fb"]
-        self.class_descriptions = {
-            "dead": "Dead or dying cells",
-            "np-MyoFb": "Non-proliferative myofibroblasts",
-            "p-MyoFb": "Proliferative myofibroblasts", 
-            "proto-MyoFb": "Proto-myofibroblasts",
-            "q-Fb": "Quiescent fibroblasts"
-        }
-        
-        # Initialize model
-        self._initialize_model()
-        
-    def _initialize_model(self):
-        """Initialize the DINOv2 model and classifier."""
-        try:
-            logger.info("Initializing DINOv2 model...")
-            
-            # Import transformers here to avoid dependency issues
-            from transformers import AutoModel
-            
-            # Load backbone
-            backbone = AutoModel.from_pretrained(f"facebook/dinov2-{self.backbone_size}")
-            backbone.eval()
-            
-            # Create classifier
-            feat_dim = 1024 if self.backbone_size == "large" else 768
-            self.model = DinoV2Classifier(
-                backbone=backbone,
-                num_classes=len(self.class_names),
-                feat_dim=feat_dim
-            )
-            
-            # Load pre-trained weights if available
-            if self.model_path:
-                if os.path.exists(self.model_path):
-                    logger.info(f"Loading model from {self.model_path}")
-                    state_dict = torch.load(self.model_path, map_location=self.device)
-                    if 'model_state_dict' in state_dict:
-                        self.model.load_state_dict(state_dict['model_state_dict'])
-                    else:
-                        self.model.load_state_dict(state_dict)
-                else:
-                    logger.warning(f"Model path {self.model_path} not found, using untrained classifier")
-            
-            self.model = self.model.to(self.device)
-            self.model.eval()
-            
-            # Define transforms for preprocessing
-            self.transform = transforms.Compose([
-                transforms.Resize((224, 224)),
-                transforms.ToTensor(),
-                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-            ])
-            
-            logger.info("Model initialization completed successfully")
-            
-        except Exception as e:
-            logger.error(f"Error initializing model: {str(e)}")
-            raise
-    
-    def _preprocess_image(self, image_path: str) -> torch.Tensor:
-        """Preprocess a single image for model input."""
-        try:
-            # Load and convert to RGB
-            img = Image.open(image_path).convert("RGB")
-            
-            # Apply transforms
-            img_tensor = self.transform(img).unsqueeze(0)
-            return img_tensor.to(self.device)
-            
-        except Exception as e:
-            logger.error(f"Error preprocessing image {image_path}: {str(e)}")
-            raise
-    
-    def _classify_single_cell(self, image_path: str) -> Dict[str, Any]:
-        """Classify a single cell image."""
-        try:
-            # Preprocess image
-            img_tensor = self._preprocess_image(image_path)
-            
-            # Get predictions
-            with torch.no_grad():
-                logits = self.model(img_tensor)
-                probs = torch.softmax(logits, dim=1)
-                pred_idx = probs.argmax(dim=1).item()
-                confidence = probs[0][pred_idx].item()
-            
-            # Create result
-            result = {
-                "image_path": image_path,
-                "predicted_class": self.class_names[pred_idx],
-                "confidence": confidence,
-                "all_probabilities": {
-                    cls_name: prob.item() 
-                    for cls_name, prob in zip(self.class_names, probs[0])
-                }
-            }
-            
-            return result
-            
-        except Exception as e:
-            logger.error(f"Error classifying cell {image_path}: {str(e)}")
-            return {
-                "image_path": image_path,
-                "predicted_class": "unknown",
-                "confidence": 0.0,
-                "error": str(e)
-            }
-    
-    def execute(self, cell_crops: List[str], cell_metadata: Optional[List[Dict]] = None, 
-                confidence_threshold: Optional[float] = None, batch_size: int = 16, 
-                query_cache_dir: Optional[str] = None) -> Dict[str, Any]:
-        """
-        Execute fibroblast state analysis on cell crops.
-        
-        Args:
-            cell_crops: List of paths to cell crop images
-            cell_metadata: Optional metadata for each cell
-            confidence_threshold: Minimum confidence for classification
-            batch_size: Batch size for processing
-            query_cache_dir: Directory for caching results
-            
-        Returns:
-            Dict containing analysis results and statistics
-        """
-        try:
-            logger.info(f"Starting fibroblast state analysis for {len(cell_crops)} cells")
-            
-            # Use provided confidence threshold or default
-            threshold = confidence_threshold if confidence_threshold is not None else self.confidence_threshold
-            
-            # Setup output directory
-            if query_cache_dir is None:
-                query_cache_dir = "solver_cache/temp"
-            tool_cache_dir = os.path.join(query_cache_dir, "tool_cache")
-            os.makedirs(tool_cache_dir, exist_ok=True)
-            
-            # Process each cell
-            results = []
-            valid_results = []
-            failed_cells = []
-            
-            for i, crop_path in enumerate(cell_crops):
-                try:
-                    # Validate file exists
-                    if not os.path.exists(crop_path):
-                        logger.warning(f"Cell crop not found: {crop_path}")
-                        failed_cells.append({"path": crop_path, "error": "File not found"})
-                        continue
-                    
-                    # Classify cell
-                    result = self._classify_single_cell(crop_path)
-                    
-                    # Add metadata if available
-                    if cell_metadata and i < len(cell_metadata):
-                        result.update(cell_metadata[i])
-                    
-                    results.append(result)
-                    
-                    # Check confidence threshold
-                    if result.get("confidence", 0) >= threshold:
-                        valid_results.append(result)
-                    else:
-                        logger.warning(f"Low confidence ({result.get('confidence', 0):.3f}) for {crop_path}")
-                    
-                    # Progress logging
-                    if (i + 1) % 50 == 0:
-                        logger.info(f"Processed {i + 1}/{len(cell_crops)} cells")
-                        
-                except Exception as e:
-                    logger.error(f"Error processing cell {crop_path}: {str(e)}")
-                    failed_cells.append({"path": crop_path, "error": str(e)})
-                    continue
-            
-            # Calculate statistics
-            stats = self._calculate_statistics(valid_results)
-            
-            # Create visualizations
-            viz_paths = self._create_visualizations(valid_results, stats, tool_cache_dir)
-            
-            # Save detailed results
-            results_path = os.path.join(tool_cache_dir, f"fibroblast_analysis_results_{uuid4().hex[:8]}.json")
-            with open(results_path, 'w') as f:
-                json.dump({
-                    "all_results": results,
-                    "valid_results": valid_results,
-                    "statistics": stats,
-                    "failed_cells": failed_cells,
-                    "parameters": {
-                        "confidence_threshold": threshold,
-                        "total_cells": len(cell_crops),
-                        "valid_cells": len(valid_results),
-                        "failed_cells": len(failed_cells)
-                    }
-                }, f, indent=2)
-            
-            # Clear CUDA cache if using GPU
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-            
-            return {
-                "summary": f"Analyzed {len(valid_results)}/{len(cell_crops)} cells with confidence ≥ {threshold}",
-                "total_cells": len(cell_crops),
-                "valid_cells": len(valid_results),
-                "failed_cells": len(failed_cells),
-                "cell_state_distribution": stats["class_distribution"],
-                "average_confidence": stats["average_confidence"],
-                "visual_outputs": viz_paths + [results_path],
-                "parameters": {
-                    "confidence_threshold": threshold,
-                    "backbone_size": self.backbone_size,
-                    "model_path": self.model_path
-                }
-            }
-            
-        except Exception as e:
-            logger.error(f"Error in fibroblast state analysis: {str(e)}")
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-            return {
-                "error": f"Error during fibroblast state analysis: {str(e)}",
-                "summary": "Failed to analyze cell states"
-            }
-    
-    def _calculate_statistics(self, results: List[Dict]) -> Dict[str, Any]:
-        """Calculate statistics from classification results."""
-        if not results:
-            return {
-                "class_distribution": {},
-                "average_confidence": 0.0,
-                "total_cells": 0
-            }
-        
-        # Class distribution
-        class_counts = {}
-        total_confidence = 0.0
-        
-        for result in results:
-            predicted_class = result.get("predicted_class", "unknown")
-            class_counts[predicted_class] = class_counts.get(predicted_class, 0) + 1
-            total_confidence += result.get("confidence", 0.0)
-        
-        # Calculate percentages
-        total_cells = len(results)
-        class_distribution = {
-            class_name: {
-                "count": count,
-                "percentage": (count / total_cells) * 100
-            }
-            for class_name, count in class_counts.items()
-        }
-        
-        return {
-            "class_distribution": class_distribution,
-            "average_confidence": total_confidence / total_cells,
-            "total_cells": total_cells
-        }
-    
-    def _create_visualizations(self, results: List[Dict], stats: Dict, output_dir: str) -> List[str]:
-        """Create visualizations of analysis results."""
-        viz_paths = []
+        input_data = [question]
+        if image_info and "image_path" in image_info:
+            try:
+                with open(image_info["image_path"], 'rb') as file:
+                    image_bytes = file.read()
+                input_data.append(image_bytes)
+            except Exception as e:
+                print(f"Error reading image file: {str(e)}")
+
+        self.base_response = self.llm_engine_mm(input_data, max_tokens=max_tokens)
+
+        return self.base_response
+
+    def analyze_query(self, question: str, image: str, bytes_mode: bool = False) -> str:
+        image_info = self.get_image_info(image)
+        print("image_info: ", image_info)
+
+        query_prompt = f"""
+Task: Analyze the given query with accompanying inputs and determine the skills and tools needed to address it effectively.
+
+Available tools: {self.available_tools}
+
+Metadata for the tools: {self.toolbox_metadata}
+
+Image: {image_info}
+
+Query: {question}
+
+Instructions:
+1. Carefully read and understand the query and any accompanying inputs.
+2. Identify the main objectives or tasks within the query.
+3. List the specific skills that would be necessary to address the query comprehensively.
+4. Examine the available tools in the toolbox and determine which ones might relevant and useful for addressing the query. Make sure to consider the user metadata for each tool, including limitations and potential applications (if available).
+5. Provide a brief explanation for each skill and tool you've identified, describing how it would contribute to answering the query.
+
+Your response should include:
+1. A concise summary of the query's main points and objectives, as well as content in any accompanying inputs.
+2. A list of required skills, with a brief explanation for each.
+3. A list of relevant tools from the toolbox, with a brief explanation of how each tool would be utilized and its potential limitations.
+4. Any additional considerations that might be important for addressing the query effectively.
+
+Please present your analysis in a clear, structured format.
+"""
+
+        input_data = [query_prompt]
+        if image_info and "image_path" in image_info:
+            try:
+                with open(image_info["image_path"], 'rb') as file:
+                    image_bytes = file.read()
+                input_data.append(image_bytes)
+            except Exception as e:
+                print(f"Error reading image file: {str(e)}")
+
+        self.query_analysis = self.llm_engine_mm(input_data, response_format=QueryAnalysis)
+
+        return str(self.query_analysis).strip()
+
+    def extract_context_subgoal_and_tool(self, response: NextStep) -> Tuple[str, str, str]:
+
+        def normalize_tool_name(tool_name: str) -> str:
+            # Normalize the tool name to match the available tools
+            for tool in self.available_tools:
+                if tool.lower() in tool_name.lower():
+                    return tool
+            return "No matched tool given: " + tool_name
         
         try:
-            # 1. Class distribution pie chart
-            if stats["class_distribution"]:
-                fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
-                
-                # Pie chart
-                classes = list(stats["class_distribution"].keys())
-                counts = [stats["class_distribution"][cls]["count"] for cls in classes]
-                percentages = [stats["class_distribution"][cls]["percentage"] for cls in classes]
-                
-                colors = plt.cm.Set3(np.linspace(0, 1, len(classes)))
-                wedges, texts, autotexts = ax1.pie(counts, labels=classes, autopct='%1.1f%%', 
-                                                   colors=colors, startangle=90)
-                ax1.set_title("Cell State Distribution")
-                
-                # Bar chart
-                ax2.bar(classes, counts, color=colors)
-                ax2.set_title("Cell Count by State")
-                ax2.set_ylabel("Number of Cells")
-                ax2.tick_params(axis='x', rotation=45)
-                
-                # Add percentage labels on bars
-                for i, (cls, count, pct) in enumerate(zip(classes, counts, percentages)):
-                    ax2.text(i, count + 0.5, f'{pct:.1f}%', ha='center', va='bottom')
-                
-                plt.tight_layout()
-                
-                # Save visualization
-                viz_path = os.path.join(output_dir, f"cell_state_distribution_{uuid4().hex[:8]}.png")
-                plt.savefig(viz_path, bbox_inches='tight', dpi=150, format='png')
-                plt.close()
-                viz_paths.append(viz_path)
-            
-            # 2. Confidence distribution histogram
-            if results:
-                confidences = [r.get("confidence", 0) for r in results]
-                fig, ax = plt.subplots(figsize=(10, 6))
-                ax.hist(confidences, bins=20, alpha=0.7, color='skyblue', edgecolor='black')
-                ax.set_xlabel("Confidence Score")
-                ax.set_ylabel("Number of Cells")
-                ax.set_title("Confidence Distribution")
-                ax.axvline(self.confidence_threshold, color='red', linestyle='--', 
-                          label=f'Threshold ({self.confidence_threshold})')
-                ax.legend()
-                ax.grid(True, alpha=0.3)
-                
-                # Save visualization
-                conf_viz_path = os.path.join(output_dir, f"confidence_distribution_{uuid4().hex[:8]}.png")
-                plt.savefig(conf_viz_path, bbox_inches='tight', dpi=150, format='png')
-                plt.close()
-                viz_paths.append(conf_viz_path)
-            
+            context = response.context.strip()
+            sub_goal = response.sub_goal.strip()
+            tool_name = normalize_tool_name(response.tool_name.strip())
+            return context, sub_goal, tool_name
         except Exception as e:
-            logger.error(f"Error creating visualizations: {str(e)}")
+            print(f"Error extracting context, sub-goal, and tool name: {str(e)}")
+            return None, None, None
         
-        return viz_paths
-    
-    def get_metadata(self):
-        """Returns the metadata for the Fibroblast_State_Analyzer_Tool."""
-        metadata = super().get_metadata()
-        metadata.update({
-            "device": str(self.device),
-            "model_loaded": self.model is not None,
-            "backbone_size": self.backbone_size,
-            "class_names": self.class_names,
-            "class_descriptions": self.class_descriptions
-        })
-        return metadata
+    def generate_next_step(self, question: str, image: str, query_analysis: str, memory: Memory, step_count: int, max_step_count: int, bytes_mode: bool = False) -> NextStep:
+        prompt_generate_next_step = f"""
+Task: Determine the optimal next step to address the given query based on the provided analysis, available tools, and previous steps taken.
+
+Context:
+Query: {question}
+Image: {image if not bytes_mode else 'image.jpg'}
+Query Analysis: {query_analysis}
+
+Available Tools:
+{self.available_tools}
+
+Tool Metadata:
+{self.toolbox_metadata}
+
+Previous Steps and Their Results:
+{memory.get_actions()}
+
+Current Step: {step_count} in {max_step_count} steps
+Remaining Steps: {max_step_count - step_count}
+
+Instructions:
+1. Analyze the context thoroughly, including the query, its analysis, any image, available tools and their metadata, and previous steps taken.
+
+2. Determine the most appropriate next step by considering:
+   - Key objectives from the query analysis
+   - Capabilities of available tools
+   - Logical progression of problem-solving
+   - Outcomes from previous steps
+   - Current step count and remaining steps
+
+3. IMPORTANT: For analysis tasks, distinguish between:
+   - Data preparation steps (preprocessing, segmentation, cropping, etc.)
+   - Actual analysis steps (classification, state analysis, feature extraction, etc.)
+   - If data preparation is complete but analysis hasn't been performed, prioritize analysis tools
+
+4. Select ONE tool best suited for the next step, keeping in mind the limited number of remaining steps.
+
+5. Formulate a specific, achievable sub-goal for the selected tool that maximizes progress towards answering the query.
+
+Output Format:
+<justification>: detailed explanation of why the selected tool is the best choice for the next step, considering the context and previous outcomes.
+<context>: MUST include ALL necessary information for the tool to function, structured as follows:
+    * Relevant data from previous steps
+    * File names or paths created or used in previous steps (list EACH ONE individually)
+    * Variable names and their values from previous steps' results
+    * Any other context-specific information required by the tool
+<sub_goal>: a specific, achievable objective for the tool, based on its metadata and previous outcomes. It MUST contain any involved data, file names, and variables from Previous Steps and Their Results that the tool can act upon.
+<tool_name>: MUST be the exact name of a tool from the available tools list.
+
+Rules:
+- Select only ONE tool for this step.
+- The sub-goal MUST directly address the query and be achievable by the selected tool.
+- The Context section MUST include ALL necessary information for the tool to function, including ALL relevant file paths, data, and variables from previous steps.
+- The tool name MUST exactly match one from the available tools list: {self.available_tools}.
+- Avoid redundancy by considering previous steps and building on prior results.
+- For analysis workflows: If data is prepared (e.g., cell crops generated), prioritize analysis tools over further data preparation.
+
+Example (do not copy, use only as reference):
+<justification>: [Your detailed explanation here]
+<context>: Image path: "example/image.jpg", Previous detection results: [list of objects]
+<sub_goal>: Detect and count the number of specific objects in the image "example/image.jpg"
+<tool_name>: Object_Detector_Tool
+"""
+        next_step = self.llm_engine(prompt_generate_next_step, response_format=NextStep)
+        return next_step
+
+    def verificate_memory(self, question: str, image: str, query_analysis: str, memory: Memory, bytes_mode: bool = False) -> MemoryVerification:
+        if bytes_mode:
+            image_info = self.get_image_info_bytes(image)
+        else:
+            image_info = self.get_image_info(image)
+
+        prompt_memory_verification = f"""
+Task: Thoroughly evaluate the completeness and accuracy of the memory for fulfilling the given query, considering the potential need for additional tool usage.
+
+Context:
+Query: {question}
+Image: {image_info}
+Available Tools: {self.available_tools}
+Toolbox Metadata: {self.toolbox_metadata}
+Initial Analysis: {query_analysis}
+Memory (tools used and results): {memory.get_actions()}
+
+Detailed Instructions:
+1. Carefully analyze the query, initial analysis, and image (if provided):
+   - Identify the main objectives of the query.
+   - Note any specific requirements or constraints mentioned.
+   - If an image is provided, consider its relevance and what information it contributes.
+
+2. Review the available tools and their metadata:
+   - Understand the capabilities and limitations and best practices of each tool.
+   - Consider how each tool might be applicable to the query.
+
+3. Examine the memory content in detail:
+   - Review each tool used and its execution results.
+   - Assess how well each tool's output contributes to answering the query.
+
+4. Critical Evaluation (address each point explicitly):
+   a) Completeness: Does the memory fully address all aspects of the query?
+      - Identify any parts of the query that remain unanswered.
+      - Consider if all relevant information has been extracted from the image (if applicable).
+      - IMPORTANT: For analysis tasks, ensure that the actual analysis has been performed, not just data preparation.
+      - For example: If the query asks to "analyze cell states", ensure that cell state analysis has been performed, not just cell cropping.
+
+   b) Unused Tools: Are there any unused tools that could provide additional relevant information?
+      - Specify which unused tools might be helpful and why.
+      - Pay special attention to analysis tools that could provide insights from prepared data.
+
+   c) Inconsistencies: Are there any contradictions or conflicts in the information provided?
+      - If yes, explain the inconsistencies and suggest how they might be resolved.
+
+   d) Verification Needs: Is there any information that requires further verification due to tool limitations?
+      - Identify specific pieces of information that need verification and explain why.
+
+   e) Ambiguities: Are there any unclear or ambiguous results that could be clarified by using another tool?
+      - Point out specific ambiguities and suggest which tools could help clarify them.
+
+5. Final Determination:
+   Based on your thorough analysis, decide if the memory is complete and accurate enough to generate the final output, or if additional tool usage is necessary.
+   
+   CRITICAL CHECKLIST:
+   - Has the query been fully answered with actual analysis results?
+   - Are there any analysis tools available that could provide insights from the prepared data?
+   - Does the current state represent the final analysis, or just intermediate data preparation?
+
+Response Format:
+<analysis>: Provide a detailed analysis of why the memory is sufficient or insufficient. Reference specific information from the memory and explain its relevance to each aspect of the task. Address how each main point of the query has been satisfied or what is still missing.
+<stop_signal>: Whether to stop the problem solving process and proceed to generating the final output.
+    * "True": if the memory is sufficient for addressing the query to proceed and no additional available tools need to be used. If ONLY manual verification without tools is needed, choose "True".
+    * "False": if the memory is insufficient and needs more information from additional tool usage.
+"""
+
+        input_data = [prompt_memory_verification]
+        if image_info:
+            try:
+                with open(image_info["image_path"], 'rb') as file:
+                    image_bytes = file.read()
+                input_data.append(image_bytes)
+            except Exception as e:
+                print(f"Error reading image file: {str(e)}")
+
+        stop_verification = self.llm_engine_mm(input_data, response_format=MemoryVerification)
+
+        return stop_verification
+
+    def extract_conclusion(self, response: MemoryVerification) -> str:
+        analysis = response.analysis
+        stop_signal = response.stop_signal
+        if stop_signal:
+            return analysis, 'STOP'
+        else:
+            return analysis, 'CONTINUE'
+
+    def generate_final_output(self, question: str, image: str, memory: Memory, bytes_mode: bool = False) -> str:
+        if bytes_mode:
+            image_info = self.get_image_info_bytes(image)
+        else:
+            image_info = self.get_image_info(image)
+
+        prompt_generate_final_output = f"""
+Task: Generate the final output based on the query, image, and tools used in the process.
+
+Context:
+Query: {question}
+Image: {image_info}
+Actions Taken:
+{memory.get_actions()}
+
+Instructions:
+1. Review the query, image, and all actions taken during the process.
+2. Consider the results obtained from each tool execution.
+3. Incorporate the relevant information from the memory to generate the step-by-step final output.
+4. The final output should be consistent and coherent using the results from the tools.
+
+Output Structure:
+Your response should be well-organized and include the following sections:
+
+1. Summary:
+   - Provide a brief overview of the query and the main findings.
+
+2. Detailed Analysis:
+   - Break down the process of answering the query step-by-step.
+   - For each step, mention the tool used, its purpose, and the key results obtained.
+   - Explain how each step contributed to addressing the query.
+
+3. Key Findings:
+   - List the most important discoveries or insights gained from the analysis.
+   - Highlight any unexpected or particularly interesting results.
+
+4. Answer to the Query:
+   - Directly address the original question with a clear and concise answer.
+   - If the query has multiple parts, ensure each part is answered separately.
+
+5. Additional Insights (if applicable):
+   - Provide any relevant information or insights that go beyond the direct answer to the query.
+   - Discuss any limitations or areas of uncertainty in the analysis.
+
+6. Conclusion:
+   - Summarize the main points and reinforce the answer to the query.
+   - If appropriate, suggest potential next steps or areas for further investigation.
+"""
+
+        input_data = [prompt_generate_final_output]
+        if image_info:
+            try:
+                with open(image_info["image_path"], 'rb') as file:
+                    image_bytes = file.read()
+                input_data.append(image_bytes)
+            except Exception as e:
+                print(f"Error reading image file: {str(e)}")
+
+        final_output = self.llm_engine_mm(input_data)
+
+        return final_output
 
 
-if __name__ == "__main__":
-    # Test the tool
-    print("Testing Fibroblast_State_Analyzer_Tool...")
+    def generate_direct_output(self, question: str, image: str, memory: Memory, bytes_mode: bool = False) -> str:
+        if bytes_mode:
+            image_info = self.get_image_info_bytes(image)
+        else:
+            image_info = self.get_image_info(image)
+
+        prompt_generate_final_output = f"""
+Context:
+Query: {question}
+Image: {image_info}
+Initial Analysis:
+{self.query_analysis}
+Actions Taken:
+{memory.get_actions()}
+
+Please generate the concise output based on the query, image information, initial analysis, and actions taken. Break down the process into clear, logical, and conherent steps. Conclude with a precise and direct answer to the query.
+
+Answer:
+"""
+
+        input_data = [prompt_generate_final_output]
+        if image_info:
+            try:
+                with open(image_info["image_path"], 'rb') as file:
+                    image_bytes = file.read()
+                input_data.append(image_bytes)
+            except Exception as e:
+                print(f"Error reading image file: {str(e)}")
+
+        final_output = self.llm_engine_mm(input_data)
+
+        return final_output
     
-    # Initialize tool
-    tool = Fibroblast_State_Analyzer_Tool()
-    
-    # Get metadata
-    metadata = tool.get_metadata()
-    print("Tool Metadata:")
-    print(json.dumps(metadata, indent=2))
-    
-    print("\nTool initialized successfully!")
-    print("Example usage:")
-    print("execution = tool.execute(cell_crops=['cell_0001.png', 'cell_0002.png'])") 
