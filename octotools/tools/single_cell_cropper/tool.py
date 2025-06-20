@@ -39,7 +39,7 @@ class Single_Cell_Cropper_Tool(BaseTool):
             }
         )
 
-    def execute(self, original_image, nuclei_mask, min_area=50, margin=25, output_format='tif', query_cache_dir=None):
+    def execute(self, original_image, nuclei_mask, min_area=50, margin=25, output_format='png', query_cache_dir=None):
         """
         Execute single-cell cropping from nuclei segmentation results.
         
@@ -48,7 +48,7 @@ class Single_Cell_Cropper_Tool(BaseTool):
             nuclei_mask: Path to nuclei segmentation mask
             min_area: Minimum area threshold for valid nuclei
             margin: Margin around each nucleus for cropping
-            output_format: Output image format ('tif', 'png', 'jpg')
+            output_format: Output image format ('png', 'tif', 'jpg')
             query_cache_dir: Directory for caching results
             
         Returns:
@@ -351,9 +351,9 @@ class Single_Cell_Cropper_Tool(BaseTool):
             plt.tight_layout(rect=[0, 0, 1, 0.97])
             fig.suptitle("Single-Cell Cropper Analysis Report", fontsize=24, weight='bold')
 
-            # Save visualization
+            # Save visualization, explicitly setting format to PNG
             viz_path = os.path.join(output_dir, f"cropping_summary_{uuid4().hex[:8]}.png")
-            plt.savefig(viz_path, bbox_inches='tight', dpi=150)
+            plt.savefig(viz_path, bbox_inches='tight', dpi=150, format='png')
             plt.close(fig)
             return viz_path
 
