@@ -685,7 +685,8 @@ def main(args):
                     "Relevant_Patch_Zoomer_Tool",
                     "Text_Detector_Tool",
                     "Advanced_Object_Detector_Tool",
-                    "Image_Preprocessor_Tool"
+                    "Image_Preprocessor_Tool",
+                    "Nuclei_Segmenter_Tool"
                 ]
                 
                 # General tools
@@ -785,19 +786,19 @@ def main(args):
                                 [ "Image Preprocessing",
                                  "examples/A5_01_1_1_Phase Contrast_001.png",
                                  "Preprocess this phase contrast image to correct illumination and adjust brightness.",
-                                 ["Image_Preprocessor_Tool"],
+                                 ["Image_Preprocessor_Tool","Generalist_Solution_Generator_Tool","Python_Code_Generator_Tool"],
                                  "Illumination-corrected and brightness-normalized phase contrast image."],
-                                                                                               
-                                [ "Fibroblast Analysis",
+
+                                [ "Nuclei Segmentation",
                                  "examples/fibroblast.png",
-                                 "Analyze the fibroblast in this image. How many cells are there?", 
-                                 ["Image_Captioner_Tool", "Relevant_Patch_Zoomer_Tool", "Generalist_Solution_Generator_Tool"],
-                                 "Fibroblast activation state analysis based on morphology."],
+                                 "Count and segment the nuclei in this fibroblast image.", 
+                                 ["Image_Preprocessor_Tool", "Nuclei_Segmenter_Tool","Generalist_Solution_Generator_Tool","Python_Code_Generator_Tool"],
+                                 "Nuclei count and segmentation results with visualization."],
 
                                 [ "Medical Image Analysis",
                                  "examples/lung.jpg", 
                                  "What is the organ on the left side of this image?", 
-                                 ["Image_Captioner_Tool", "Relevant_Patch_Zoomer_Tool"],
+                                 ["Image_Captioner_Tool", "Relevant_Patch_Zoomer_Tool","Generalist_Solution_Generator_Tool","Python_Code_Generator_Tool"],
                                  "Lung"],
 
                                 [ "Pathology Diagnosis",
@@ -857,6 +858,7 @@ if __name__ == "__main__":
         "Text_Detector_Tool",             # Text recognition in images
         "Advanced_Object_Detector_Tool",  # Advanced cell detection
         "Image_Preprocessor_Tool",        # Image preprocessing and enhancement
+        "Nuclei_Segmenter_Tool",          # Nuclei segmentation
         
         # General analysis tools
         "Generalist_Solution_Generator_Tool",  # Comprehensive analysis generation
