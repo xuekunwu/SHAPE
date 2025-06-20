@@ -125,11 +125,18 @@ class Nuclei_Segmenter_Tool(BaseTool):
             
             # Save mask as separate visualization
             mask_path = os.path.join(tool_cache_dir, f"nuclei_mask_{uuid4().hex[:8]}.png")
+            
+            # Save the original mask array (not matplotlib visualization)
+            # This ensures Single_Cell_Cropper_Tool can properly process it
+            cv2.imwrite(mask_path, mask.astype(np.uint8))
+            
+            # Also save a visualization version for display
+            viz_mask_path = os.path.join(tool_cache_dir, f"nuclei_mask_viz_{uuid4().hex[:8]}.png")
             plt.figure(figsize=(8, 8))
             plt.imshow(mask, cmap='tab20')
             plt.axis('off')
             plt.title(f"Cell Masks - {n_nuclei} cells")
-            plt.savefig(mask_path, bbox_inches='tight', pad_inches=0, dpi=150)
+            plt.savefig(viz_mask_path, bbox_inches='tight', pad_inches=0, dpi=150)
             plt.close()
             
             # Clear CUDA cache if using GPU
@@ -139,7 +146,7 @@ class Nuclei_Segmenter_Tool(BaseTool):
             return {
                 "summary": f"{n_nuclei} cells identified and segmented successfully.",
                 "cell_count": n_nuclei,
-                "visual_outputs": [output_path, mask_path],
+                "visual_outputs": [output_path, mask_path, viz_mask_path],
                 "model_used": f"CellposeModel ({self.model.pretrained_model})",
                 "parameters": {
                     "diameter": diameter,
