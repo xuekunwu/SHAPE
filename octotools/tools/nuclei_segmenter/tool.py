@@ -68,7 +68,7 @@ class Nuclei_Segmenter_Tool(BaseTool):
             print(f"Nuclei_Segmenter_Tool: Error initializing model: {e}")
             raise
 
-    def execute(self, image, diameter=None, flow_threshold=0.6, cellprob_threshold=0, query_cache_dir=None):
+    def execute(self, image, diameter=25, flow_threshold=0.6, cellprob_threshold=0, query_cache_dir=None):
         """
         Execute nuclei segmentation on the input image.
         
