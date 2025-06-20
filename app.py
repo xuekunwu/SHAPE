@@ -312,12 +312,24 @@ class Solver:
                     visual_outputs_for_gradio = []
                     for file_path in visual_output_files:
                         try:
-                            # Skip comparison plots
+                            # Skip comparison plots and non-image files
                             if "comparison" in os.path.basename(file_path).lower():
+                                continue
+                            if not file_path.lower().endswith(('.png', '.jpg', '.jpeg', '.tif', '.tiff')):
+                                continue
+                                
+                            # Check if file exists and is readable
+                            if not os.path.exists(file_path):
+                                print(f"Warning: Image file not found: {file_path}")
                                 continue
                                 
                             # Use (image, label) tuple format to preserve filename for download
                             image = Image.open(file_path)
+                            
+                            # Convert to RGB if necessary for Gradio compatibility
+                            if image.mode not in ['RGB', 'L', 'RGBA']:
+                                image = image.convert('RGB')
+                            
                             filename = os.path.basename(file_path)
                             
                             # Create descriptive label based on filename
@@ -331,12 +343,16 @@ class Solver:
                                 label = f"Detection Result: {filename}"
                             elif "zoomed" in filename.lower():
                                 label = f"Zoomed Region: {filename}"
+                            elif "crop" in filename.lower():
+                                label = f"Single Cell Crop: {filename}"
                             else:
                                 label = f"Analysis Result: {filename}"
                             
                             visual_outputs_for_gradio.append((image, label))
                         except Exception as e:
                             print(f"Warning: Failed to load image {file_path} for Gradio. Error: {e}")
+                            import traceback
+                            print(f"Full traceback: {traceback.format_exc()}")
 
             # Display the command generation information
             messages.append(ChatMessage(
@@ -893,7 +909,7 @@ if __name__ == "__main__":
     print(f"CUDA Available: {torch.cuda.is_available()}")
     if torch.cuda.is_available():
         print(f"CUDA Device: {torch.cuda.get_device_name(0)}")
-    print(f"API Key Source: {args.openai_api_source}")
+    #print(f"API Key Source: {args.openai_api_source}")
     print("==============================\n")
     
     main(args)
