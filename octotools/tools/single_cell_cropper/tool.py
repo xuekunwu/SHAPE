@@ -78,7 +78,7 @@ class Single_Cell_Cropper_Tool(BaseTool):
             os.makedirs(tool_cache_dir, exist_ok=True)
             
             # Generate cell crops
-            cell_crops, cell_metadata = self._generate_cell_crops(
+            cell_crops, cell_metadata, stats = self._generate_cell_crops(
                 original_img, mask, min_area, margin, tool_cache_dir, output_format
             )
             
@@ -93,7 +93,8 @@ class Single_Cell_Cropper_Tool(BaseTool):
                         "min_area": min_area,
                         "margin": margin,
                         "output_format": output_format
-                    }
+                    },
+                    "statistics": stats
                 }
             
             # Save metadata
@@ -103,7 +104,7 @@ class Single_Cell_Cropper_Tool(BaseTool):
             
             # Create a summary visualization instead of individual crop display
             summary_viz_path = self._create_summary_visualization(
-                cell_crops, cell_metadata, tool_cache_dir
+                cell_crops, cell_metadata, stats, tool_cache_dir
             )
             
             return {
@@ -116,7 +117,8 @@ class Single_Cell_Cropper_Tool(BaseTool):
                     "min_area": min_area,
                     "margin": margin,
                     "output_format": output_format
-                }
+                },
+                "statistics": stats
             }
             
         except Exception as e:
@@ -139,12 +141,12 @@ class Single_Cell_Cropper_Tool(BaseTool):
             output_format: Output image format
             
         Returns:
-            tuple: (list of crop paths, list of metadata)
+            tuple: (list of crop paths, list of metadata, dict of statistics)
         """
         # Validate input images
         if original_img is None or mask is None:
             print("Error: Input images are None")
-            return [], []
+            return [], [], {}
         
         # Ensure images are numpy arrays
         original_img = np.asarray(original_img)
@@ -153,7 +155,7 @@ class Single_Cell_Cropper_Tool(BaseTool):
         # Check image dimensions
         if original_img.shape != mask.shape:
             print(f"Error: Image shape mismatch - original: {original_img.shape}, mask: {mask.shape}")
-            return [], []
+            return [], [], {}
         
         # Ensure mask is binary
         if len(np.unique(mask)) > 2:
@@ -164,11 +166,17 @@ class Single_Cell_Cropper_Tool(BaseTool):
         labeled_mask = label(mask)
         cell_properties = regionprops(labeled_mask)
         
+        initial_cell_count = len(cell_properties)
+        filtered_by_area = 0
+        filtered_by_border = 0
+        invalid_crop_data = 0
+
         cell_crops = []
         cell_metadata = []
         
         for idx, region in enumerate(cell_properties):
             if region.area < min_area:
+                filtered_by_area += 1
                 continue
                 
             # Get bounding box from the mask
@@ -191,8 +199,9 @@ class Single_Cell_Cropper_Tool(BaseTool):
             new_minc = max(center_col - half_side, 0)
             new_maxc = min(center_col + half_side, original_img.shape[1])
             
-            # Skip if the crop is not square
+            # Skip if the crop is not square (i.e., at the border)
             if (new_maxr - new_minr) != (new_maxc - new_minc):
+                filtered_by_border += 1
                 continue
                 
             # Crop from original image
@@ -200,6 +209,7 @@ class Single_Cell_Cropper_Tool(BaseTool):
             
             # Validate crop data
             if cell_crop.size == 0 or np.isnan(cell_crop).any() or np.isinf(cell_crop).any():
+                invalid_crop_data += 1
                 print(f"Warning: Invalid crop data for cell {idx}, skipping")
                 continue
             
@@ -268,154 +278,85 @@ class Single_Cell_Cropper_Tool(BaseTool):
             cell_crops.append(crop_path)
             cell_metadata.append(crop_metadata)
         
-        return cell_crops, cell_metadata
+        stats = {
+            "initial_cell_count": initial_cell_count,
+            "filtered_by_area": filtered_by_area,
+            "filtered_by_border": filtered_by_border,
+            "invalid_crop_data": invalid_crop_data,
+            "final_cell_count": len(cell_crops)
+        }
 
-    def _create_summary_visualization(self, cell_crops, cell_metadata, output_dir):
+        return cell_crops, cell_metadata, stats
+
+    def _create_summary_visualization(self, cell_crops, cell_metadata, stats, output_dir):
         """
-        Create a summary visualization showing statistics of generated cell crops.
-        
-        Args:
-            cell_crops: List of crop file paths
-            cell_metadata: List of crop metadata
-            output_dir: Output directory
-            
-        Returns:
-            str: Path to summary visualization image
+        Create a summary visualization with filtering stats, area distribution, and sample crops.
         """
-        if not cell_crops:
-            return None
-        
         try:
-            # Create a summary figure with statistics
-            fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(15, 12))
-            
-            # 1. Cell count and area distribution
-            areas = [meta.get('area', 0) for meta in cell_metadata]
-            ax1.hist(areas, bins=20, alpha=0.7, color='skyblue', edgecolor='black')
-            ax1.set_xlabel('Cell Area (pixels)')
-            ax1.set_ylabel('Number of Cells')
-            ax1.set_title(f'Cell Area Distribution\n(Total: {len(cell_crops)} cells)')
-            ax1.grid(True, alpha=0.3)
-            
-            # 2. Crop size distribution
-            crop_sizes = [meta.get('crop_size', (0, 0)) for meta in cell_metadata]
-            crop_widths = [size[1] for size in crop_sizes if len(size) >= 2]
-            crop_heights = [size[0] for size in crop_sizes if len(size) >= 2]
-            
-            ax2.scatter(crop_widths, crop_heights, alpha=0.6, color='green')
-            ax2.set_xlabel('Crop Width (pixels)')
-            ax2.set_ylabel('Crop Height (pixels)')
-            ax2.set_title('Crop Size Distribution')
-            ax2.grid(True, alpha=0.3)
-            
-            # 3. Sample of first few crops (max 9)
-            sample_size = min(9, len(cell_crops))
-            if sample_size > 0:
-                cols = 3
-                rows = (sample_size + cols - 1) // cols
-                
-                for idx in range(sample_size):
-                    row = idx // cols
-                    col = idx % cols
-                    
-                    try:
-                        # Load sample crop
-                        crop_img = cv2.imread(cell_crops[idx], cv2.IMREAD_GRAYSCALE)
-                        if crop_img is not None:
-                            ax3.imshow(crop_img, cmap='gray')
-                            ax3.set_title(f'Sample {idx+1}')
-                            ax3.axis('off')
-                    except Exception as e:
-                        print(f"Error loading sample crop {cell_crops[idx]}: {e}")
-                        continue
-                
-                # Hide empty subplots
-                for idx in range(sample_size, rows * cols):
-                    row = idx // cols
-                    col = idx % cols
-                    ax3.axis('off')
-            
-            # 4. Statistics summary
-            ax4.axis('off')
-            stats_text = f"""
-Single-Cell Cropping Summary
-
-Total Cells: {len(cell_crops)}
-Average Area: {np.mean(areas):.1f} pixels
-Min Area: {np.min(areas) if areas else 0} pixels
-Max Area: {np.max(areas) if areas else 0} pixels
-
-Crop Parameters:
-- Min Area Threshold: {cell_metadata[0].get('min_area', 'N/A') if cell_metadata else 'N/A'}
-- Margin: {cell_metadata[0].get('margin', 'N/A') if cell_metadata else 'N/A'}
-- Output Format: {cell_metadata[0].get('output_format', 'N/A') if cell_metadata else 'N/A'}
-
-Status: Ready for downstream analysis
-"""
-            ax4.text(0.1, 0.9, stats_text, transform=ax4.transAxes, fontsize=12,
-                    verticalalignment='top', fontfamily='monospace',
-                    bbox=dict(boxstyle="round,pad=0.3", facecolor="lightgray", alpha=0.8))
-            
-            plt.tight_layout()
-            
-            # Save visualization with enhanced error handling
-            viz_path = os.path.join(output_dir, f"cell_crops_summary_{uuid4().hex[:8]}.png")
-            
-            try:
-                # Save with multiple fallback options
-                save_success = False
-                
-                # Try high quality first
-                try:
-                    plt.savefig(viz_path, bbox_inches='tight', pad_inches=0.1, dpi=150, format='png', 
-                               facecolor='white', edgecolor='none')
-                    save_success = True
-                except Exception as e:
-                    print(f"Warning: High quality save failed: {e}")
-                
-                # Fallback to lower quality
-                if not save_success:
-                    try:
-                        plt.savefig(viz_path, bbox_inches='tight', pad_inches=0.1, dpi=100, format='png',
-                                   facecolor='white', edgecolor='none')
-                        save_success = True
-                    except Exception as e:
-                        print(f"Warning: Lower quality save failed: {e}")
-                
-                # Final fallback
-                if not save_success:
-                    try:
-                        plt.savefig(viz_path, bbox_inches='tight', pad_inches=0.1, dpi=72, format='png',
-                                   facecolor='white', edgecolor='none')
-                        save_success = True
-                    except Exception as e:
-                        print(f"Error: All save attempts failed: {e}")
-                        return None
-                
-                plt.close()
-                
-                # Verify the saved file
-                if not os.path.exists(viz_path) or os.path.getsize(viz_path) == 0:
-                    print("Warning: Summary visualization file not saved properly")
-                    return None
-                
-                # Test loading the saved image
-                try:
-                    test_image = Image.open(viz_path)
-                    test_image.verify()
-                    test_image.close()
-                    print(f"Successfully saved summary visualization: {viz_path}")
-                except Exception as e:
-                    print(f"Warning: Summary visualization verification failed: {e}")
-                    return None
-                
-                return viz_path
-                
-            except Exception as e:
-                print(f"Error in summary visualization saving: {e}")
-                plt.close()
+            if not cell_crops:
                 return None
+
+            # Create figure with GridSpec
+            fig = plt.figure(figsize=(20, 24))
+            gs = fig.add_gridspec(3, 2, height_ratios=[0.2, 0.4, 0.4], hspace=0.4, wspace=0.2)
+
+            # --- Top Left: Summary Text ---
+            ax_text = fig.add_subplot(gs[0, 0])
+            ax_text.axis('off')
+            
+            summary_text = (
+                f"Single-Cell Cropping Summary\n"
+                f"---------------------------------\n"
+                f"Initial detected objects: {stats['initial_cell_count']}\n"
+                f"Filtered (area < {cell_metadata[0].get('min_area', 'N/A')} px): {stats['filtered_by_area']}\n"
+                f"Filtered (border objects): {stats['filtered_by_border']}\n"
+                f"Filtered (invalid data): {stats['invalid_crop_data']}\n"
+                f"---------------------------------\n"
+                f"Final valid cells: {stats['final_cell_count']}\n\n"
+                f"Crop Parameters:\n"
+                f" - Min Area Threshold: {cell_metadata[0].get('min_area', 'N/A')} pixels\n"
+                f" - Margin: {cell_metadata[0].get('margin', 'N/A')} pixels\n"
+                f"Status: Ready for downstream analysis"
+            )
+            ax_text.text(0.05, 0.95, summary_text, transform=ax_text.transAxes,
+                         fontsize=16, verticalalignment='top', family='monospace',
+                         bbox=dict(boxstyle='round,pad=0.5', fc='aliceblue', alpha=0.9))
+
+            # --- Top Right: Cell Area Distribution ---
+            ax_hist = fig.add_subplot(gs[0, 1])
+            cell_areas = [md.get('area', 0) for md in cell_metadata]
+            ax_hist.hist(cell_areas, bins=20, color='skyblue', edgecolor='black')
+            ax_hist.set_title(f"Cell Area Distribution (Total: {len(cell_areas)} cells)", fontsize=18)
+            ax_hist.set_xlabel("Cell Area (pixels)", fontsize=14)
+            ax_hist.set_ylabel("Number of Cells", fontsize=14)
+            ax_hist.tick_params(axis='both', which='major', labelsize=12)
+            ax_hist.grid(True, linestyle='--', alpha=0.6)
+
+            # --- Bottom: Sample Crops ---
+            sample_size = min(20, len(cell_crops))
+            if sample_size > 0:
+                indices = np.random.choice(len(cell_crops), sample_size, replace=False)
                 
+                # Create a sub-gridspec for the crops
+                gs_crops = gs[1:, :].subgridspec(2, 10, hspace=0.5, wspace=0.2)
+
+                for i in range(sample_size):
+                    ax_crop = fig.add_subplot(gs_crops[i // 10, i % 10])
+                    crop_path = cell_crops[indices[i]]
+                    img = Image.open(crop_path)
+                    ax_crop.imshow(img, cmap='gray')
+                    ax_crop.set_title(Path(crop_path).name, fontsize=10)
+                    ax_crop.axis('off')
+
+            plt.tight_layout(rect=[0, 0, 1, 0.97])
+            fig.suptitle("Single-Cell Cropper Analysis Report", fontsize=24, weight='bold')
+
+            # Save visualization
+            viz_path = os.path.join(output_dir, f"cropping_summary_{uuid4().hex[:8]}.png")
+            plt.savefig(viz_path, bbox_inches='tight', dpi=150)
+            plt.close(fig)
+            return viz_path
+
         except Exception as e:
             print(f"Error creating summary visualization: {e}")
             return None
