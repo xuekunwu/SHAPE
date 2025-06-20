@@ -176,33 +176,45 @@ class Solver:
         visual_output_files = []
         
         # Handle image input - simplified logic based on original OctoTools
+        print(f"=== DEBUG: Image processing started ===")
+        print(f"DEBUG: user_image type: {type(user_image)}")
+        print(f"DEBUG: user_image is None: {user_image is None}")
+        
         if user_image:
+            print(f"DEBUG: user_image exists, processing...")
             # Handle different image input formats from Gradio
-            if isinstance(user_image, dict):
-                # Gradio Image component returns dict with 'image' key
-                if 'image' in user_image:
-                    user_image = user_image['image']
-                else:
-                    # Try to get the first value if it's a dict
-                    user_image = list(user_image.values())[0] if user_image else None
-            
-            # Now user_image should be a PIL Image object or None
-            if user_image and hasattr(user_image, 'save'):
+            if isinstance(user_image, dict) and 'path' in user_image:
+                img_path = user_image['path']
+                print(f"DEBUG: extracted path from dict: {img_path}")
+            elif isinstance(user_image, str) and os.path.exists(user_image):
+                img_path = user_image
+                print(f"DEBUG: user_image is valid string path: {img_path}")
+            elif hasattr(user_image, 'save'):
+                print(f"DEBUG: user_image is a PIL Image, saving...")
                 # It's a PIL Image object - save it like in original version
                 img_path = os.path.join(self.query_cache_dir, 'query_image.jpg')
+                print(f"DEBUG: saving to path: {img_path}")
+                print(f"DEBUG: query_cache_dir exists: {os.path.exists(self.query_cache_dir)}")
                 try:
                     user_image.save(img_path)
-                    print(f"Debug - Image saved successfully to: {img_path}")
+                    print(f"DEBUG: Image saved successfully to: {img_path}")
+                    print(f"DEBUG: file exists after save: {os.path.exists(img_path)}")
                 except Exception as e:
-                    print(f"Debug - Error saving image: {e}")
+                    print(f"DEBUG: Error saving image: {e}")
+                    import traceback
+                    print(f"DEBUG: Full traceback: {traceback.format_exc()}")
                     img_path = None
             else:
-                print(f"Debug - user_image is not a PIL Image: {type(user_image)}")
+                print(f"DEBUG: user_image is not a recognized format: {type(user_image)}")
+                if user_image:
+                    print(f"DEBUG: user_image attributes: {dir(user_image)}")
                 img_path = None
         else:
+            print(f"DEBUG: no user_image provided")
             img_path = None
 
-        print(f"Debug - final img_path: {img_path}")
+        print(f"DEBUG: final img_path: {img_path}")
+        print(f"=== DEBUG: Image processing completed ===")
 
         # Set tool cache directory
         _tool_cache_dir = os.path.join(self.query_cache_dir, "tool_cache") # NOTE: This is the directory for tool cache
@@ -417,8 +429,22 @@ def solve_problem_gradio(user_query, user_image, max_steps=10, max_time=60, api_
     query_cache_dir = os.path.join(DATASET_DIR.name, query_id) # NOTE
     os.makedirs(query_cache_dir, exist_ok=True)
 
-    if api_key is None:
-        return [[gr.ChatMessage(role="assistant", content="⚠️ Error: OpenAI API Key is required.")]], "", []
+    if api_key is None or api_key.strip() == "":
+        return [[gr.ChatMessage(role="assistant", content="""⚠️ **API Key Configuration Required**
+
+To use this application, you need to set up your OpenAI API key. You can do this in one of two ways:
+
+**Option 1: Environment Variable (Recommended)**
+Set the `OPENAI_API_KEY` environment variable:
+```bash
+export OPENAI_API_KEY="your-api-key-here"
+```
+
+**Option 2: Manual Input**
+If you prefer to enter the API key manually, please contact the administrator to enable manual input mode.
+
+For more information about obtaining an OpenAI API key, visit: https://platform.openai.com/api-keys
+""")]], "", []
     
     # Debug: Print enabled_tools
     print(f"Debug - enabled_tools: {enabled_tools}")
@@ -536,19 +562,13 @@ def main(args):
             with gr.Column(scale=1, min_width=250):
                 gr.Markdown("### ⚙️ Model Configuration")
                 
-                # API Key
-                if args.openai_api_source == "user_provided":
-                    api_key = gr.Textbox(
-                        placeholder="Enter your OpenAI API key",
-                        type="password",
-                        label="🔑 API Key"
-                    )
-                else:
-                    api_key = gr.Textbox(
-                        value=os.getenv("OPENAI_API_KEY"),
-                        visible=False,
-                        interactive=False
-                    )
+                # API Key - Manual input option
+                api_key = gr.Textbox(
+                    placeholder="Enter your OpenAI API key",
+                    type="password",
+                    label="🔑 OpenAI API Key",
+                    value=os.getenv("OPENAI_API_KEY", "")
+                )
 
                 # Model and limits
                 llm_model_engine = gr.Dropdown(
@@ -667,44 +687,11 @@ def main(args):
                         gr.Examples(
                             examples=[
                                 # [ None, "Who is the president of the United States?", ["Google_Search_Tool"]],
-                                [ "Logical Reasoning",
-                                 None,                             
-                                 "How many r letters are in the word strawberry?", 
-                                 ["Generalist_Solution_Generator_Tool", "Python_Code_Generator_Tool"], 
-                                 "3"],
-
-                                [ "Web Search", 
-                                 None, 
-                                 "What's up with the upcoming Apple Launch? Any rumors?", 
-                                 ["Generalist_Solution_Generator_Tool", "Google_Search_Tool", "Wikipedia_Knowledge_Searcher_Tool", "URL_Text_Extractor_Tool"], 
-                                 "Apple's February 19, 2025, event may feature the iPhone SE 4, new iPads, accessories, and rumored iPhone 17 and Apple Watch Series 10."],
-
-                                [ "Arithmetic Reasoning", 
-                                 None, 
-                                 "Which is bigger, 9.11 or 9.9?", 
-                                 ["Generalist_Solution_Generator_Tool", "Python_Code_Generator_Tool"], 
-                                 "9.9"],
-
-                                [ "Multi-step Reasoning", 
-                                 None, 
-                                 "Using the numbers [1, 1, 6, 9], create an expression that equals 24. You must use basic arithmetic operations (+, -, ×, /) and parentheses. For example, one solution for [1, 2, 3, 4] is (1+2+3)×4.", ["Python_Code_Generator_Tool"], 
-                                 "((1 + 1) * 9) + 6"],
-
-                                [ "Scientific Research",
-                                 None, 
-                                 "What are the research trends in tool agents with large language models for scientific discovery? Please consider the latest literature from ArXiv, PubMed, Nature, and news sources.", ["ArXiv_Paper_Searcher_Tool", "Pubmed_Search_Tool", "Nature_News_Fetcher_Tool"],
-                                 "Open-ended question. No reference answer."],
-
-                                [ "Visual Perception", 
-                                 "examples/baseball.png", 
-                                 "How many baseballs are there?", 
-                                 ["Object_Detector_Tool"], 
-                                 "20"],
-
-                                [ "Visual Reasoning",  
-                                 "examples/rotting_kiwi.png", 
-                                 "You are given a 3 x 3 grid in which each cell can contain either no kiwi, one fresh kiwi, or one rotten kiwi. Every minute, any fresh kiwi that is 4-directionally adjacent to a rotten kiwi also becomes rotten. What is the minimum number of minutes that must elapse until no cell has a fresh kiwi?", ["Image_Captioner_Tool"], 
-                                 "4 minutes"],
+                                [ "Fibroblast Analysis",
+                                 "examples/fibroblast.png",
+                                 "Analyze the fibroblast in this image. How many cells are there?", 
+                                 ["Image_Captioner_Tool", "Relevant_Patch_Zoomer_Tool", "Generalist_Solution_Generator_Tool"],
+                                 "Fibroblast activation state analysis based on morphology."],
 
                                 [ "Medical Image Analysis",
                                  "examples/lung.jpg", 
@@ -748,13 +735,17 @@ def main(args):
         # Local development config
         demo.launch(
             server_name="0.0.0.0",
-            server_port=1019,
+            server_port=1029,
             debug=True,
             share=False
         )
 
 if __name__ == "__main__":
     args = parse_arguments()
+    
+    # Set default API source to use environment variables
+    if not hasattr(args, 'openai_api_source') or args.openai_api_source is None:
+        args.openai_api_source = "we_provided"
 
     # All available tools
     all_tools = [
@@ -788,6 +779,7 @@ if __name__ == "__main__":
     print(f"CUDA Available: {torch.cuda.is_available()}")
     if torch.cuda.is_available():
         print(f"CUDA Device: {torch.cuda.get_device_name(0)}")
+    print(f"API Key Source: {args.openai_api_source}")
     print("==============================\n")
     
     main(args)
