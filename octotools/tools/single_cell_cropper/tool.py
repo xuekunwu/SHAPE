@@ -104,7 +104,7 @@ class Single_Cell_Cropper_Tool(BaseTool):
             
             # Create a summary visualization instead of individual crop display
             summary_viz_path = self._create_summary_visualization(
-                cell_crops, cell_metadata, stats, tool_cache_dir
+                cell_crops, cell_metadata, stats, tool_cache_dir, min_area, margin
             )
             
             return {
@@ -288,7 +288,7 @@ class Single_Cell_Cropper_Tool(BaseTool):
 
         return cell_crops, cell_metadata, stats
 
-    def _create_summary_visualization(self, cell_crops, cell_metadata, stats, output_dir):
+    def _create_summary_visualization(self, cell_crops, cell_metadata, stats, output_dir, min_area, margin):
         """
         Create a summary visualization with filtering stats, area distribution, and sample crops.
         """
@@ -296,9 +296,9 @@ class Single_Cell_Cropper_Tool(BaseTool):
             if not cell_crops:
                 return None
 
-            # Create figure with GridSpec
-            fig = plt.figure(figsize=(20, 24))
-            gs = fig.add_gridspec(3, 2, height_ratios=[0.2, 0.4, 0.4], hspace=0.4, wspace=0.2)
+            # Create a more compact figure with adjusted GridSpec
+            fig = plt.figure(figsize=(20, 15))
+            gs = fig.add_gridspec(3, 2, height_ratios=[0.4, 1, 1], hspace=0.35, wspace=0.2)
 
             # --- Top Left: Summary Text ---
             ax_text = fig.add_subplot(gs[0, 0])
@@ -308,14 +308,14 @@ class Single_Cell_Cropper_Tool(BaseTool):
                 f"Single-Cell Cropping Summary\n"
                 f"---------------------------------\n"
                 f"Initial detected objects: {stats['initial_cell_count']}\n"
-                f"Filtered (area < {cell_metadata[0].get('min_area', 'N/A')} px): {stats['filtered_by_area']}\n"
+                f"Filtered (area < {min_area} px): {stats['filtered_by_area']}\n"
                 f"Filtered (border objects): {stats['filtered_by_border']}\n"
                 f"Filtered (invalid data): {stats['invalid_crop_data']}\n"
                 f"---------------------------------\n"
                 f"Final valid cells: {stats['final_cell_count']}\n\n"
                 f"Crop Parameters:\n"
-                f" - Min Area Threshold: {cell_metadata[0].get('min_area', 'N/A')} pixels\n"
-                f" - Margin: {cell_metadata[0].get('margin', 'N/A')} pixels\n"
+                f" - Min Area Threshold: {min_area} pixels\n"
+                f" - Margin: {margin} pixels\n"
                 f"Status: Ready for downstream analysis"
             )
             ax_text.text(0.05, 0.95, summary_text, transform=ax_text.transAxes,
@@ -337,8 +337,8 @@ class Single_Cell_Cropper_Tool(BaseTool):
             if sample_size > 0:
                 indices = np.random.choice(len(cell_crops), sample_size, replace=False)
                 
-                # Create a sub-gridspec for the crops
-                gs_crops = gs[1:, :].subgridspec(2, 10, hspace=0.5, wspace=0.2)
+                # Create a sub-gridspec for the crops with less vertical space
+                gs_crops = gs[1:, :].subgridspec(2, 10, hspace=0.3, wspace=0.2)
 
                 for i in range(sample_size):
                     ax_crop = fig.add_subplot(gs_crops[i // 10, i % 10])
