@@ -455,6 +455,7 @@ class Solver:
         segmented_count = sum(1 for _, label in visual_outputs if "segmented" in label.lower())
         detected_count = sum(1 for _, label in visual_outputs if "detected" in label.lower())
         zoomed_count = sum(1 for _, label in visual_outputs if "zoomed" in label.lower())
+        cropped_count = sum(1 for _, label in visual_outputs if "crop" in label.lower())
         
         # Generate tool-specific descriptions
         tool_descriptions = {
@@ -464,6 +465,7 @@ class Solver:
             "Relevant_Patch_Zoomer_Tool": f"*Showing {zoomed_count} zoomed region(s) highlighting key areas of interest.*",
             "Advanced_Object_Detector_Tool": f"*Displaying {detected_count} advanced detection result(s) with enhanced object identification.*",
             "Nuclei_Segmenter_Tool": f"*Showing {segmented_count} segmentation result(s) with identified nuclei regions.*",
+            "Single_Cell_Cropper_Tool": f"*Displaying {cropped_count} single-cell crop(s) generated from nuclei segmentation results.*",
             "Cell_Morphology_Analyzer_Tool": "*Displaying cell morphology analysis results with detailed structural insights.*",
             "Fibroblast_Activation_Detector_Tool": "*Showing fibroblast activation state analysis with morphological indicators.*"
         }
@@ -686,7 +688,8 @@ def main(args):
                     "Text_Detector_Tool",
                     "Advanced_Object_Detector_Tool",
                     "Image_Preprocessor_Tool",
-                    "Nuclei_Segmenter_Tool"
+                    "Nuclei_Segmenter_Tool",
+                    "Single_Cell_Cropper_Tool"
                 ]
                 
                 # General tools
@@ -786,19 +789,25 @@ def main(args):
                                 [ "Image Preprocessing",
                                  "examples/A5_01_1_1_Phase Contrast_001.png",
                                  "Preprocess this phase contrast image to correct illumination and adjust brightness.",
-                                 ["Image_Preprocessor_Tool","Generalist_Solution_Generator_Tool","Python_Code_Generator_Tool"],
+                                 ["Image_Preprocessor_Tool"],
                                  "Illumination-corrected and brightness-normalized phase contrast image."],
 
                                 [ "Nuclei Segmentation",
-                                 "examples/fibroblast.png",
-                                 "Count and segment the nuclei in this fibroblast image.", 
-                                 ["Image_Preprocessor_Tool", "Nuclei_Segmenter_Tool","Generalist_Solution_Generator_Tool","Python_Code_Generator_Tool"],
+                                 "examples/A5_01_1_1_Phase Contrast_001.png",
+                                 "Segment and count the nuclei in this fibroblast image.", 
+                                 ["Image_Preprocessor_Tool", "Nuclei_Segmenter_Tool"],
                                  "Nuclei count and segmentation results with visualization."],
+
+                                [ "Single Cell Cropping",
+                                 "examples/fibroblast.png",
+                                 "Generate individual cell crops from nuclei segmentation for single-cell analysis.", 
+                                 ["Image_Preprocessor_Tool", "Nuclei_Segmenter_Tool", "Single_Cell_Cropper_Tool"],
+                                 "Individual cell crops with metadata for single-cell analysis."],
 
                                 [ "Medical Image Analysis",
                                  "examples/lung.jpg", 
                                  "What is the organ on the left side of this image?", 
-                                 ["Image_Captioner_Tool", "Relevant_Patch_Zoomer_Tool","Generalist_Solution_Generator_Tool","Python_Code_Generator_Tool"],
+                                 ["Image_Captioner_Tool", "Relevant_Patch_Zoomer_Tool"],
                                  "Lung"],
 
                                 [ "Pathology Diagnosis",
@@ -859,6 +868,7 @@ if __name__ == "__main__":
         "Advanced_Object_Detector_Tool",  # Advanced cell detection
         "Image_Preprocessor_Tool",        # Image preprocessing and enhancement
         "Nuclei_Segmenter_Tool",          # Nuclei segmentation
+        "Single_Cell_Cropper_Tool",        # Single cell cropping
         
         # General analysis tools
         "Generalist_Solution_Generator_Tool",  # Comprehensive analysis generation
