@@ -6,6 +6,7 @@ import time
 import io
 import uuid
 import torch
+import shutil
 from PIL import Image
 import numpy as np
 from tifffile import imwrite as tiff_write
@@ -173,7 +174,8 @@ class Solver:
 
 
     def stream_solve_user_problem(self, user_query: str, user_image, api_key: str, messages: List[ChatMessage]) -> Iterator:
-        visual_output_files = []
+        visual_outputs_for_gradio = []
+        visual_description = "*Ready to display analysis results and processed images.*"
         
         # Handle image input - simplified logic based on original OctoTools
         print(f"=== DEBUG: Image processing started ===")
@@ -225,7 +227,7 @@ class Solver:
             messages.append(ChatMessage(role="assistant", content=f"### 📝 Received Query:\n{user_query}\n### 🖼️ Image Uploaded"))
         else:
             messages.append(ChatMessage(role="assistant", content=f"### 📝 Received Query:\n{user_query}"))
-        yield messages, "", [], "**Progress**: Input received"
+        yield messages, "", [], visual_description, "**Progress**: Input received"
 
         # [Step 3] Initialize problem-solving state
         start_time = time.time()
@@ -234,7 +236,7 @@ class Solver:
 
         messages.append(ChatMessage(role="assistant", content="<br>"))
         messages.append(ChatMessage(role="assistant", content="### 🐙 Deep Thinking:"))
-        yield messages, "", [], "**Progress**: Starting analysis"
+        yield messages, "", [], visual_description, "**Progress**: Starting analysis"
 
         # [Step 4] Query Analysis - This is the key step that should happen first
         print(f"Debug - Starting query analysis for: {user_query}")
@@ -250,7 +252,7 @@ class Solver:
             messages.append(ChatMessage(role="assistant", 
                                         content=f"{query_analysis}",
                                         metadata={"title": "### 🔍 Step 0: Query Analysis"}))
-            yield messages, query_analysis, [], "**Progress**: Query analysis completed"
+            yield messages, query_analysis, [], visual_description, "**Progress**: Query analysis completed"
 
             # Save the query analysis data
             query_analysis_data = {"query_analysis": query_analysis, "time": round(time.time() - start_time, 5)}
@@ -261,7 +263,7 @@ class Solver:
             messages.append(ChatMessage(role="assistant", 
                                         content=error_msg,
                                         metadata={"title": "### 🔍 Step 0: Query Analysis (Error)"}))
-            yield messages, error_msg, [], "**Progress**: Error in query analysis"
+            yield messages, error_msg, [], visual_description, "**Progress**: Error in query analysis"
             return
 
         # Execution loop (similar to your step-by-step solver)
@@ -270,7 +272,7 @@ class Solver:
             messages.append(ChatMessage(role="OctoTools", 
                                         content=f"Generating the {step_count}-th step...",
                                         metadata={"title": f"🔄 Step {step_count}"}))
-            yield messages, query_analysis, visual_output_files, f"**Progress**: Step {step_count}"
+            yield messages, query_analysis, visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count}"
 
             # [Step 5] Generate the next step
             next_step = self.planner.generate_next_step(user_query, img_path, query_analysis, self.memory, step_count, self.max_steps)
@@ -283,32 +285,65 @@ class Solver:
                 role="assistant",
                 content=f"**Context:** {context}\n\n**Sub-goal:** {sub_goal}\n\n**Tool:** `{tool_name}`",
                 metadata={"title": f"### 🎯 Step {step_count}: Action Prediction ({tool_name})"}))
-            yield messages, query_analysis, visual_output_files, f"**Progress**: Step {step_count} - Action predicted"
+            yield messages, query_analysis, visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Action predicted"
 
             # Handle tool execution or errors
             if tool_name not in self.planner.available_tools:
                 messages.append(ChatMessage(
                     role="assistant", 
                     content=f"⚠️ Error: Tool '{tool_name}' is not available."))
-                yield messages, query_analysis, visual_output_files, f"**Progress**: Step {step_count} - Tool not available"
+                yield messages, query_analysis, visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Tool not available"
                 continue
 
             # [Step 6-7] Generate and execute the tool command
-            tool_command = self.executor.generate_tool_command(user_query, img_path, context, sub_goal, tool_name, self.planner.toolbox_metadata[tool_name])
+            safe_path = img_path.replace("\\", "\\\\") if img_path else None
+            tool_command = self.executor.generate_tool_command(user_query, safe_path, context, sub_goal, tool_name, self.planner.toolbox_metadata[tool_name])
             analysis, explanation, command = self.executor.extract_explanation_and_command(tool_command)
             result = self.executor.execute_tool_command(tool_name, command)
             result = make_json_serializable(result)
             print(f"Tool '{tool_name}' result:", result)
+            
+            # Generate dynamic visual description based on tool and results
+            visual_description = self.generate_visual_description(tool_name, result, visual_outputs_for_gradio)
+            
             if isinstance(result, dict):
                 if "visual_outputs" in result:
-                    visual_output_files = result["visual_outputs"]  # Use the processed image paths directly
+                    visual_output_files = result["visual_outputs"]
+                    visual_outputs_for_gradio = []
+                    for file_path in visual_output_files:
+                        try:
+                            # Skip comparison plots
+                            if "comparison" in os.path.basename(file_path).lower():
+                                continue
+                                
+                            # Use (image, label) tuple format to preserve filename for download
+                            image = Image.open(file_path)
+                            filename = os.path.basename(file_path)
+                            
+                            # Create descriptive label based on filename
+                            if "processed" in filename.lower():
+                                label = f"Processed Image: {filename}"
+                            elif "corrected" in filename.lower():
+                                label = f"Illumination Corrected: {filename}"
+                            elif "segmented" in filename.lower():
+                                label = f"Segmented Result: {filename}"
+                            elif "detected" in filename.lower():
+                                label = f"Detection Result: {filename}"
+                            elif "zoomed" in filename.lower():
+                                label = f"Zoomed Region: {filename}"
+                            else:
+                                label = f"Analysis Result: {filename}"
+                            
+                            visual_outputs_for_gradio.append((image, label))
+                        except Exception as e:
+                            print(f"Warning: Failed to load image {file_path} for Gradio. Error: {e}")
 
             # Display the command generation information
             messages.append(ChatMessage(
                 role="assistant",
                 content=f"**Analysis:** {analysis}\n\n**Explanation:** {explanation}\n\n**Command:**\n```python\n{command}\n```",
                 metadata={"title": f"### 📝 Step {step_count}: Command Generation ({tool_name})"}))
-            yield messages, query_analysis, visual_output_files, f"**Progress**: Step {step_count} - Command generated"
+            yield messages, query_analysis, visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Command generated"
 
             # Save the command generation data
             command_generation_data = {
@@ -324,7 +359,7 @@ class Solver:
                 role="assistant",
                 content=f"**Result:**\n```json\n{json.dumps(result, indent=4)}\n```",
                 metadata={"title": f"### 🛠️ Step {step_count}: Command Execution ({tool_name})"}))
-            yield messages, query_analysis, visual_output_files, f"**Progress**: Step {step_count} - Command executed"
+            yield messages, query_analysis, visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Command executed"
 
             # Save the command execution data
             command_execution_data = {
@@ -352,17 +387,34 @@ class Solver:
                 role="assistant", 
                 content=f"**Analysis:**\n{context_verification}\n\n**Conclusion:** `{conclusion}` {conclusion_emoji}",
                 metadata={"title": f"### 🤖 Step {step_count}: Context Verification"}))
-            yield messages, query_analysis, visual_output_files, f"**Progress**: Step {step_count} - Context verified"
+            yield messages, query_analysis, visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Context verified"
 
             if conclusion == 'STOP':
                 break
 
         # Step 7: Generate Final Output (if needed)
+        final_answer = ""
         if 'direct' in self.output_types:
             messages.append(ChatMessage(role="assistant", content="<br>"))
             direct_output = self.planner.generate_direct_output(user_query, img_path, self.memory)
-            messages.append(ChatMessage(role="assistant", content=f"### 🐙 Final Answer:\n{direct_output}"))
-            yield messages, direct_output, visual_output_files, "**Progress**: Final answer generated"
+            
+            # Extract conclusion from the final answer
+            conclusion = ""
+            if "### Conclusion:" in direct_output:
+                conclusion = direct_output.split("### Conclusion:")[1].strip()
+            elif "Conclusion:" in direct_output:
+                conclusion = direct_output.split("Conclusion:")[1].strip()
+            elif "**Conclusion:**" in direct_output:
+                conclusion = direct_output.split("**Conclusion:**")[1].strip()
+            else:
+                # If no clear conclusion section, use the entire output
+                # This ensures we always have content to display
+                conclusion = direct_output.strip()
+            
+            final_answer = f"🐙 **Conclusion:**\n{conclusion}"
+            # Remove the ChatMessage that displays final answer in reasoning steps
+            # messages.append(ChatMessage(role="assistant", content=f"### 🐙 Final Answer:\n{direct_output}"))
+            yield messages, final_answer, visual_outputs_for_gradio, visual_description, "**Progress**: Completed!"
 
             # Save the direct output data
             direct_output_data = {
@@ -386,7 +438,42 @@ class Solver:
         # Step 8: Completion Message
         messages.append(ChatMessage(role="assistant", content="<br>"))
         messages.append(ChatMessage(role="assistant", content="### ✅ Query Solved!"))
-        yield messages, "Analysis completed successfully", visual_output_files, "**Progress**: Analysis completed"
+        # Use the final answer if available, otherwise use a default message
+        completion_text = final_answer if final_answer else "Analysis completed successfully"
+        yield messages, completion_text, visual_outputs_for_gradio, visual_description, "**Progress**: Analysis completed!"
+
+    def generate_visual_description(self, tool_name: str, result: dict, visual_outputs: list) -> str:
+        """
+        Generate dynamic visual description based on tool type and results.
+        """
+        if not visual_outputs:
+            return "*Ready to display analysis results and processed images.*"
+        
+        # Count different types of images
+        processed_count = sum(1 for _, label in visual_outputs if "processed" in label.lower())
+        corrected_count = sum(1 for _, label in visual_outputs if "corrected" in label.lower())
+        segmented_count = sum(1 for _, label in visual_outputs if "segmented" in label.lower())
+        detected_count = sum(1 for _, label in visual_outputs if "detected" in label.lower())
+        zoomed_count = sum(1 for _, label in visual_outputs if "zoomed" in label.lower())
+        
+        # Generate tool-specific descriptions
+        tool_descriptions = {
+            "Image_Preprocessor_Tool": f"*Displaying {processed_count} processed image(s) from illumination correction and brightness adjustment.*",
+            "Object_Detector_Tool": f"*Showing {detected_count} detection result(s) with identified objects and regions of interest.*",
+            "Image_Captioner_Tool": "*Displaying image analysis results with detailed morphological descriptions.*",
+            "Relevant_Patch_Zoomer_Tool": f"*Showing {zoomed_count} zoomed region(s) highlighting key areas of interest.*",
+            "Advanced_Object_Detector_Tool": f"*Displaying {detected_count} advanced detection result(s) with enhanced object identification.*",
+            "Nuclei_Segmenter_Tool": f"*Showing {segmented_count} segmentation result(s) with identified nuclei regions.*",
+            "Cell_Morphology_Analyzer_Tool": "*Displaying cell morphology analysis results with detailed structural insights.*",
+            "Fibroblast_Activation_Detector_Tool": "*Showing fibroblast activation state analysis with morphological indicators.*"
+        }
+        
+        # Return tool-specific description or generic one
+        if tool_name in tool_descriptions:
+            return tool_descriptions[tool_name]
+        else:
+            total_images = len(visual_outputs)
+            return f"*Displaying {total_images} analysis result(s) from {tool_name}.*"
 
 
 def parse_arguments():
@@ -444,7 +531,7 @@ export OPENAI_API_KEY="your-api-key-here"
 If you prefer to enter the API key manually, please contact the administrator to enable manual input mode.
 
 For more information about obtaining an OpenAI API key, visit: https://platform.openai.com/api-keys
-""")]], "", []
+""")]], "", [], "**Progress**: Ready"
     
     # Debug: Print enabled_tools
     print(f"Debug - enabled_tools: {enabled_tools}")
@@ -500,7 +587,8 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
         llm_engine_name=llm_model_engine,
         query_cache_dir=query_cache_dir, # NOTE
         enable_signal=False,
-        api_key=api_key
+        api_key=api_key,
+        initializer=initializer
     )
 
     # Instantiate Solver
@@ -525,7 +613,7 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
     
     try:
         # Stream the solution
-        for messages, text_output, gallery_output, progress_md in solver.stream_solve_user_problem(user_query, user_image, api_key, messages):
+        for messages, text_output, gallery_output, visual_desc, progress_md in solver.stream_solve_user_problem(user_query, user_image, api_key, messages):
             # Save steps data
             save_steps_data(query_id, memory)
             
@@ -544,17 +632,27 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
         # Return error message in the expected format
         error_messages = [gr.ChatMessage(role="assistant", content=error_message)]
         yield error_messages, "", [], "**Progress**: Error occurred"
+    finally:
+        print(f"Task completed for query_id: {query_id}. Cleaning up cache directory: {query_cache_dir}")
+        try:
+            # Add a check to prevent deleting the root solver_cache
+            if query_cache_dir != DATASET_DIR.name and DATASET_DIR.name in query_cache_dir:
+                shutil.rmtree(query_cache_dir)
+                print(f"Successfully cleaned up cache directory: {query_cache_dir}")
+            else:
+                print(f"Skipping cleanup for safety. Path was: {query_cache_dir}")
+        except Exception as e:
+            print(f"Error cleaning up cache directory {query_cache_dir}: {e}")
 
 
 def main(args):
     #################### Gradio Interface ####################
     with gr.Blocks() as demo:
-    # with gr.Blocks(theme=gr.themes.Soft()) as demo:
         # Theming https://www.gradio.app/guides/theming-guide
         
         gr.Markdown("# Chat with FBagent: An augmented agentic approach to resolve fibroblast states at single-cell multimodal resolution")  # Title
         gr.Markdown("""
-        **FB Agent** is an open-source assistant for interpreting cell images, powered by large language models and tool-based reasoning. It supports morphological reasoning, patch extraction, and multi-omic integration.
+        **FBagent** is an open-source assistant for interpreting cell images, powered by large language models and tool-based reasoning. It supports morphological reasoning, patch extraction, and multi-omic integration.
         """)
         
         with gr.Row():
@@ -586,7 +684,8 @@ def main(args):
                     "Image_Captioner_Tool", 
                     "Relevant_Patch_Zoomer_Tool",
                     "Text_Detector_Tool",
-                    "Advanced_Object_Detector_Tool"
+                    "Advanced_Object_Detector_Tool",
+                    "Image_Preprocessor_Tool"
                 ]
                 
                 # General tools
@@ -644,38 +743,34 @@ def main(args):
                         run_button = gr.Button("🚀 Start Analysis", variant="primary", size="lg")
                         progress_md = gr.Markdown("**Progress**: Ready")
 
-                # Output area - three columns
+                # Output area - two columns instead of three
                 gr.Markdown("### 📊 Analysis Results")
                 with gr.Row():
                     # Reasoning steps
-                    with gr.Column(scale=2):
+                    with gr.Column(scale=1):
                         gr.Markdown("#### 🔍 Reasoning Steps")
                         chatbot_output = gr.Chatbot(
                             type="messages", 
-                            height=450,
+                            height=700,
                             show_label=False
                         )
 
-                    # Text report
-                    with gr.Column(scale=2):
-                        gr.Markdown("#### 📝 Analysis Report")
-                        text_output = gr.Textbox(
-                            interactive=False,
-                            lines=20,
-                            placeholder="The analysis report will appear here...",
-                            show_label=False
-                        )
-
-                    # Visual output
-                    with gr.Column(scale=2):
-                        gr.Markdown("#### 🖼️ Visual Output")
-                        gallery_output = gr.Gallery(
-                            label=None, 
-                            show_label=False,
-                            height=450,
-                            columns=2,
-                            rows=3
-                        )
+                    # Combined analysis report and visual output
+                    with gr.Column(scale=1):
+                        gr.Markdown("#### 📝 Analysis Report & Visual Output")
+                        with gr.Group():
+                            #gr.Markdown("*The final analysis conclusion and key findings will appear here.*")
+                            text_output = gr.Markdown(
+                                value="",
+                                height=350
+                            )
+                            gallery_output = gr.Gallery(
+                                label=None, 
+                                show_label=False,
+                                height=350,
+                                columns=2,
+                                rows=2
+                            )
 
                 # Bottom row for examples
                 with gr.Row():
@@ -687,6 +782,12 @@ def main(args):
                         gr.Examples(
                             examples=[
                                 # [ None, "Who is the president of the United States?", ["Google_Search_Tool"]],
+                                [ "Image Preprocessing",
+                                 "examples/A5_01_1_1_Phase Contrast_001.png",
+                                 "Preprocess this phase contrast image to correct illumination and adjust brightness.",
+                                 ["Image_Preprocessor_Tool"],
+                                 "Illumination-corrected and brightness-normalized phase contrast image."],
+                                                                                               
                                 [ "Fibroblast Analysis",
                                  "examples/fibroblast.png",
                                  "Analyze the fibroblast in this image. How many cells are there?", 
@@ -735,7 +836,7 @@ def main(args):
         # Local development config
         demo.launch(
             server_name="0.0.0.0",
-            server_port=1029,
+            server_port=1048,
             debug=True,
             share=False
         )
@@ -755,6 +856,7 @@ if __name__ == "__main__":
         "Relevant_Patch_Zoomer_Tool",     # Cell region zoom analysis
         "Text_Detector_Tool",             # Text recognition in images
         "Advanced_Object_Detector_Tool",  # Advanced cell detection
+        "Image_Preprocessor_Tool",        # Image preprocessing and enhancement
         
         # General analysis tools
         "Generalist_Solution_Generator_Tool",  # Comprehensive analysis generation
