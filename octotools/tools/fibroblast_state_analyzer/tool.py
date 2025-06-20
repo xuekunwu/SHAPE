@@ -152,11 +152,12 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
             try:
                 logger.info("Downloading finetuned weights from HuggingFace Hub...")
                 
-                # Download model weights from the specified repository
+                # Download model weights from the specified repository with authentication
                 model_weights_path = hf_hub_download(
                     repo_id="5xuekun/fb-classifier-model",
                     filename="model.pt",
-                    cache_dir=None  # Use default cache
+                    cache_dir=None,  # Use default cache
+                    token=os.getenv("HUGGINGFACE_TOKEN")  # Add authentication token
                 )
                 
                 logger.info(f"Downloaded model weights to: {model_weights_path}")
@@ -182,7 +183,18 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                 
             except Exception as e:
                 logger.warning(f"Failed to load finetuned weights from HuggingFace Hub: {str(e)}")
+                
+                # Check if it's an authentication error
+                if "401" in str(e) or "authentication" in str(e).lower() or "token" in str(e).lower():
+                    logger.warning("Authentication error detected. Please set HUGGINGFACE_TOKEN environment variable.")
+                    logger.warning("You can get a token from: https://huggingface.co/settings/tokens")
+                    logger.warning("Example: export HUGGINGFACE_TOKEN=your_token_here")
+                elif "Repository Not Found" in str(e):
+                    logger.warning("Repository not found. The model may be private or the repository ID may be incorrect.")
+                    logger.warning("Please check the repository access or contact the model owner.")
+                
                 logger.warning("Using untrained classifier - results may not be accurate")
+                logger.warning("For best results, please provide a local model path or set up HuggingFace authentication")
                 
                 # Try to load from local path if provided
                 if self.model_path and os.path.exists(self.model_path):
@@ -196,6 +208,11 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                         logger.info("Successfully loaded from local path")
                     except Exception as local_e:
                         logger.error(f"Failed to load from local path: {str(local_e)}")
+                else:
+                    logger.info("No local model path provided. Using untrained classifier.")
+                    logger.info("To use a trained model, either:")
+                    logger.info("1. Set HUGGINGFACE_TOKEN environment variable for remote access")
+                    logger.info("2. Provide a local model_path parameter")
             
             self.model = self.model.to(self.device)
             self.model.eval()
@@ -212,6 +229,25 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
         except Exception as e:
             logger.error(f"Error initializing model: {str(e)}")
             raise
+    
+    def _is_model_trained(self) -> bool:
+        """Check if the model has been trained by examining classifier weights."""
+        try:
+            # Check if classifier weights are initialized with non-zero values
+            classifier_weights = self.model.classifier.weight.data
+            classifier_bias = self.model.classifier.bias.data
+            
+            # If weights are all close to zero, the model is likely untrained
+            weights_norm = torch.norm(classifier_weights).item()
+            bias_norm = torch.norm(classifier_bias).item()
+            
+            # Threshold for considering weights as "trained"
+            threshold = 0.1
+            return weights_norm > threshold or bias_norm > threshold
+            
+        except Exception as e:
+            logger.warning(f"Could not determine if model is trained: {str(e)}")
+            return False
     
     def _preprocess_image(self, image_path: str) -> torch.Tensor:
         """Preprocess a single image for model input."""
@@ -280,6 +316,14 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
         """
         try:
             logger.info(f"Starting fibroblast state analysis for {len(cell_crops)} cells")
+            
+            # Check if model is trained and warn if not
+            if not self._is_model_trained():
+                logger.warning("⚠️  WARNING: Using untrained model. Results may not be accurate!")
+                logger.warning("To get accurate results, please:")
+                logger.warning("1. Set HUGGINGFACE_TOKEN environment variable for remote model access")
+                logger.warning("2. Provide a local model_path parameter with trained weights")
+                logger.warning("3. Contact the model owner for access to the trained model")
             
             # Use provided confidence threshold or default
             threshold = confidence_threshold if confidence_threshold is not None else self.confidence_threshold
@@ -478,6 +522,7 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
         metadata.update({
             "device": str(self.device),
             "model_loaded": self.model is not None,
+            "is_model_trained": self._is_model_trained(),
             "backbone_size": self.backbone_size,
             "class_names": self.class_names,
             "class_descriptions": self.class_descriptions
