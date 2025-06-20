@@ -322,13 +322,38 @@ class Solver:
                             if not os.path.exists(file_path):
                                 print(f"Warning: Image file not found: {file_path}")
                                 continue
+                            
+                            # Check file size
+                            if os.path.getsize(file_path) == 0:
+                                print(f"Warning: Image file is empty: {file_path}")
+                                continue
                                 
                             # Use (image, label) tuple format to preserve filename for download
                             image = Image.open(file_path)
                             
+                            # Validate image data
+                            if image.size[0] == 0 or image.size[1] == 0:
+                                print(f"Warning: Invalid image size: {file_path}")
+                                continue
+                            
                             # Convert to RGB if necessary for Gradio compatibility
                             if image.mode not in ['RGB', 'L', 'RGBA']:
-                                image = image.convert('RGB')
+                                try:
+                                    image = image.convert('RGB')
+                                except Exception as e:
+                                    print(f"Warning: Failed to convert image {file_path} to RGB: {e}")
+                                    continue
+                            
+                            # Additional validation for image data
+                            try:
+                                # Test if image can be converted to array
+                                img_array = np.array(image)
+                                if img_array.size == 0 or np.isnan(img_array).any():
+                                    print(f"Warning: Invalid image data in {file_path}")
+                                    continue
+                            except Exception as e:
+                                print(f"Warning: Failed to validate image data for {file_path}: {e}")
+                                continue
                             
                             filename = os.path.basename(file_path)
                             
@@ -349,10 +374,13 @@ class Solver:
                                 label = f"Analysis Result: {filename}"
                             
                             visual_outputs_for_gradio.append((image, label))
+                            print(f"Successfully loaded image for Gradio: {filename}")
+                            
                         except Exception as e:
                             print(f"Warning: Failed to load image {file_path} for Gradio. Error: {e}")
                             import traceback
                             print(f"Full traceback: {traceback.format_exc()}")
+                            continue
 
             # Display the command generation information
             messages.append(ChatMessage(
