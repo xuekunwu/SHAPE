@@ -18,6 +18,7 @@ from typing import List, Dict, Any, Optional, Tuple
 from uuid import uuid4
 import matplotlib.pyplot as plt
 from huggingface_hub import hf_hub_download
+import argparse
 
 # Add the project root to the Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -483,17 +484,56 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
 
 
 if __name__ == "__main__":
-    # Test the tool
-    print("Testing Fibroblast_State_Analyzer_Tool...")
-    
-    # Initialize tool
-    tool = Fibroblast_State_Analyzer_Tool()
-    
-    # Get metadata
+    # --- Command-Line Interface for Testing ---
+    parser = argparse.ArgumentParser(
+        description="Test the Fibroblast_State_Analyzer_Tool from the command line."
+    )
+    parser.add_argument(
+        'cell_crops', 
+        nargs='*',  # 0 or more arguments
+        default=[],
+        help="Paths to one or more cell crop images to analyze."
+    )
+    parser.add_argument(
+        '--model_path',
+        type=str,
+        default=None,
+        help="Optional path to a local model checkpoint file."
+    )
+    parser.add_argument(
+        '--confidence',
+        type=float,
+        default=0.5,
+        help="Confidence threshold for classification."
+    )
+    args = parser.parse_args()
+
+    print("--- Initializing Fibroblast State Analyzer Tool ---")
+    tool = Fibroblast_State_Analyzer_Tool(
+        model_path=args.model_path,
+        confidence_threshold=args.confidence
+    )
+
+    # --- Get and Print Tool Metadata ---
+    print("\n--- Tool Metadata ---")
     metadata = tool.get_metadata()
-    print("Tool Metadata:")
     print(json.dumps(metadata, indent=2))
-    
-    print("\nTool initialized successfully!")
-    print("Example usage:")
-    print("execution = tool.execute(cell_crops=['cell_0001.png', 'cell_0002.png'])") 
+
+    # --- Execute Analysis if Crops are Provided ---
+    if args.cell_crops:
+        print(f"\n--- Analyzing {len(args.cell_crops)} Cell Crops ---")
+        try:
+            execution_result = tool.execute(cell_crops=args.cell_crops)
+            print("\n--- Analysis Result ---")
+            print(json.dumps(execution_result, indent=2))
+        except Exception as e:
+            print(f"\n--- An error occurred during execution ---")
+            print(str(e))
+    else:
+        print("\n--- No cell crops provided for analysis. ---")
+        print("You can test the tool by providing file paths as arguments.")
+        print("Example: python tool.py path/to/cell1.png path/to/cell2.png")
+        print("Or use the tool's demo commands in your code:")
+        print("execution = tool.execute(cell_crops=['cell_0001.png', 'cell_0002.png'])")
+
+    print("\n--- Test script finished. ---") 
