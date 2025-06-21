@@ -142,11 +142,11 @@ Remember: Your <command> field MUST be valid Python code including any necessary
         except Exception as e:
             print(f"Error in tool command generation: {e}")
             # Fallback: create a basic ToolCommand with error information
-            from octotools.models.formatters import ToolCommand
+            error_msg = str(e).replace("'", "\\'")  # Escape single quotes
             return ToolCommand(
                 analysis=f"Error generating tool command: {str(e)}",
                 explanation="Failed to generate proper command due to response format parsing error",
-                command=f"execution = tool.execute(error='Command generation failed: {str(e)}')"
+                command=f"execution = tool.execute(error='Command generation failed: {error_msg}')"
             )
 
     def extract_explanation_and_command(self, response: ToolCommand) -> tuple:
