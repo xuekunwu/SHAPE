@@ -135,10 +135,19 @@ Reason: Do not use placeholder paths like "path/to/image". Use the actual image 
 Remember: Your <command> field MUST be valid Python code including any necessary data preparation steps and one or more `execution = tool.execute(` calls, without any additional explanatory text. The format `execution = tool.execute` must be strictly followed, and the last line must begin with `execution = tool.execute` to capture the final output. ALWAYS use the actual image path "{safe_path}" when the tool requires an image parameter.
 """
 
-        llm_generate_tool_command = ChatOpenAI(model_string=self.llm_engine_name, is_multimodal=False, api_key=self.api_key)
-        tool_command = llm_generate_tool_command(prompt_generate_tool_command, response_format=ToolCommand)
-
-        return tool_command
+        try:
+            llm_generate_tool_command = ChatOpenAI(model_string=self.llm_engine_name, is_multimodal=False, api_key=self.api_key)
+            tool_command = llm_generate_tool_command(prompt_generate_tool_command, response_format=ToolCommand)
+            return tool_command
+        except Exception as e:
+            print(f"Error in tool command generation: {e}")
+            # Fallback: create a basic ToolCommand with error information
+            from octotools.models.formatters import ToolCommand
+            return ToolCommand(
+                analysis=f"Error generating tool command: {str(e)}",
+                explanation="Failed to generate proper command due to response format parsing error",
+                command=f"execution = tool.execute(error='Command generation failed: {str(e)}')"
+            )
 
     def extract_explanation_and_command(self, response: ToolCommand) -> tuple:
         def normarlize_code(code: str) -> str:
@@ -150,10 +159,6 @@ Remember: Your <command> field MUST be valid Python code including any necessary
         return analysis, explanation, command
 
     def execute_tool_command(self, tool_name: str, command: str) -> Any:
-        def split_commands(command: str) -> List[str]:
-            pattern = r"((?:[a-zA-Z0-9_]+\s*=\s*)?tool\.execute\(.*?\))"
-            return re.findall(pattern, command)
-
         def execute_with_timeout(block: str, local_context: dict) -> Optional[str]:
             output_file = f"temp_output_{uuid.uuid4()}.txt"
             with open(output_file, "w") as f, redirect_stdout(f), redirect_stderr(f):
@@ -192,14 +197,8 @@ Remember: Your <command> field MUST be valid Python code including any necessary
             
             local_context = {"tool": tool}
             
-            command_blocks = split_commands(command)
-            if not command_blocks:
-                command_blocks = [command]
-
-            result = None
-            for command_block in command_blocks:
-                execution_block = f"execution = {command_block}" if 'tool.execute' in command_block and not command_block.strip().startswith('execution') else command_block
-                result = execute_with_timeout(execution_block, local_context)
+            # Execute the entire command as a single block to preserve variable definitions
+            result = execute_with_timeout(command, local_context)
             
             return result
 
