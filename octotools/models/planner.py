@@ -251,10 +251,17 @@ Detailed Instructions:
    - Does the current state represent the final analysis, or just intermediate data preparation?
 
 Response Format:
-<analysis>: Provide a detailed analysis of why the memory is sufficient or insufficient. Reference specific information from the memory and explain its relevance to each aspect of the task. Address how each main point of the query has been satisfied or what is still missing.
-<stop_signal>: Whether to stop the problem solving process and proceed to generating the final output.
-    * "True": if the memory is sufficient for addressing the query to proceed and no additional available tools need to be used. If ONLY manual verification without tools is needed, choose "True".
-    * "False": if the memory is insufficient and needs more information from additional tool usage.
+You MUST respond with exactly two fields:
+1. analysis: A detailed analysis of why the memory is sufficient or insufficient. Reference specific information from the memory and explain its relevance to each aspect of the task. Address how each main point of the query has been satisfied or what is still missing.
+2. stop_signal: A boolean value (True or False) indicating whether to stop the problem solving process and proceed to generating the final output.
+    * True: if the memory is sufficient for addressing the query to proceed and no additional available tools need to be used. If ONLY manual verification without tools is needed, choose True.
+    * False: if the memory is insufficient and needs more information from additional tool usage.
+
+IMPORTANT: The response must be structured exactly as specified above with both 'analysis' and 'stop_signal' fields present.
+
+For text-based responses, format your answer as:
+analysis: [Your detailed analysis here]
+stop_signal: [True or False]
 """
 
         input_data = [prompt_memory_verification]
@@ -266,17 +273,108 @@ Response Format:
             except Exception as e:
                 print(f"Error reading image file: {str(e)}")
 
-        stop_verification = self.llm_engine_mm(input_data, response_format=MemoryVerification)
+        try:
+            stop_verification = self.llm_engine_mm(input_data, response_format=MemoryVerification)
+            
+            # Debug: Check if the response is properly formatted
+            print(f"Stop verification response type: {type(stop_verification)}")
+            print(f"Stop verification response: {stop_verification}")
+            
+            # Check if we got a string response (non-structured model) instead of MemoryVerification object
+            if isinstance(stop_verification, str):
+                print("WARNING: Received string response instead of MemoryVerification object")
+                # Try to parse the string response to extract analysis and stop_signal
+                try:
+                    # Look for patterns in the response to extract information
+                    lines = stop_verification.split('\n')
+                    analysis = ""
+                    stop_signal = False
+                    
+                    for line in lines:
+                        line = line.strip()
+                        if line.lower().startswith('analysis:'):
+                            analysis = line[9:].strip()
+                        elif line.lower().startswith('stop_signal:'):
+                            signal_text = line[12:].strip().lower()
+                            stop_signal = signal_text in ['true', 'yes', '1']
+                    
+                    # If we couldn't parse properly, use the whole response as analysis
+                    if not analysis:
+                        analysis = stop_verification
+                    
+                    # Create MemoryVerification object manually
+                    stop_verification = MemoryVerification(
+                        analysis=analysis,
+                        stop_signal=stop_signal
+                    )
+                    print(f"Created MemoryVerification object: analysis='{analysis}', stop_signal={stop_signal}")
+                    
+                except Exception as parse_error:
+                    print(f"Error parsing string response: {parse_error}")
+                    # Create a default MemoryVerification object
+                    stop_verification = MemoryVerification(
+                        analysis=stop_verification,
+                        stop_signal=False
+                    )
+            
+            if hasattr(stop_verification, 'analysis'):
+                print(f"Analysis attribute exists: {stop_verification.analysis}")
+            if hasattr(stop_verification, 'stop_signal'):
+                print(f"Stop signal attribute exists: {stop_verification.stop_signal}")
+            else:
+                print("WARNING: stop_signal attribute not found!")
+                
+        except Exception as e:
+            print(f"Error in response format parsing: {e}")
+            # Fallback: try without response format
+            try:
+                raw_response = self.llm_engine_mm(input_data)
+                print(f"Raw response: {raw_response}")
+                # Create a basic MemoryVerification object with default values
+                stop_verification = MemoryVerification(
+                    analysis=raw_response,
+                    stop_signal=False  # Default to continue
+                )
+            except Exception as fallback_error:
+                print(f"Fallback error: {fallback_error}")
+                # Create a minimal MemoryVerification object
+                stop_verification = MemoryVerification(
+                    analysis="Error in memory verification",
+                    stop_signal=False
+                )
 
         return stop_verification
 
     def extract_conclusion(self, response: MemoryVerification) -> str:
-        analysis = response.analysis
-        stop_signal = response.stop_signal
-        if stop_signal:
-            return analysis, 'STOP'
-        else:
-            return analysis, 'CONTINUE'
+        try:
+            print(f"Extract conclusion - Response type: {type(response)}")
+            print(f"Extract conclusion - Response: {response}")
+            
+            analysis = response.analysis
+            stop_signal = response.stop_signal
+            print(f"Extract conclusion - Analysis: {analysis}")
+            print(f"Extract conclusion - Stop signal: {stop_signal}")
+            
+            if stop_signal:
+                return analysis, 'STOP'
+            else:
+                return analysis, 'CONTINUE'
+        except AttributeError as e:
+            print(f"Error accessing MemoryVerification attributes: {e}")
+            print(f"Response object type: {type(response)}")
+            print(f"Response object attributes: {dir(response)}")
+            # Fallback: try to extract from string representation or default to continue
+            try:
+                if hasattr(response, 'analysis'):
+                    analysis = response.analysis
+                else:
+                    analysis = str(response)
+                
+                # Default to continue if we can't determine stop_signal
+                return analysis, 'CONTINUE'
+            except Exception as fallback_error:
+                print(f"Fallback error: {fallback_error}")
+                return "Error processing verification response", 'CONTINUE'
 
     def generate_final_output(self, question: str, image: str, memory: Memory, bytes_mode: bool = False) -> str:
         if bytes_mode:
