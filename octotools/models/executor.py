@@ -60,10 +60,11 @@ Instructions:
 1. Carefully review all provided information: the query, image path, context, sub-goal, selected tool, and tool metadata.
 2. Analyze the tool's input_types from the metadata to understand required and optional parameters.
 3. Construct a command or series of commands that aligns with the tool's usage pattern and addresses the sub-goal.
-4. Ensure all required parameters are included and properly formatted.
-5. Use appropriate values for parameters based on the given context, particularly the `Context` field which may contain relevant information from previous steps.
-6. If multiple steps are needed to prepare data for the tool, include them in the command construction.
-7. CRITICAL: If the tool requires an image parameter, use the exact image path "{safe_path}" provided above.
+4. CRITICAL: If a tool's output provides a path to a file (e.g., `some_data_path`) and the next tool requires the *contents* of that file as input (e.g., a list of file paths), your command MUST include a step to read the file (e.g., using `json.load`) and pass the resulting data to the next tool. Do not pass the path directly unless the tool specifically asks for a file path.
+5. Ensure all required parameters are included and properly formatted.
+6. Use appropriate values for parameters based on the given context, particularly the `Context` field which may contain relevant information from previous steps.
+7. If multiple steps are needed to prepare data for the tool, include them in the command construction.
+8. CRITICAL: If the tool requires an image parameter, use the exact image path "{safe_path}" provided above.
 
 Output Format:
 <analysis>: a step-by-step analysis of the context, sub-goal, and selected tool to guide the command construction.
