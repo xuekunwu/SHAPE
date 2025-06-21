@@ -13,6 +13,14 @@ from typing import Dict, Any, List, Optional
 import uuid
 from contextlib import redirect_stdout, redirect_stderr
 import traceback
+import json
+import sys
+import pathlib
+import numpy as np
+import torch
+import matplotlib
+import matplotlib.pyplot as plt
+from PIL import Image as PILImage
 
 class TimeoutError(Exception):
     pass
@@ -66,6 +74,14 @@ Instructions:
 7. If multiple steps are needed to prepare data for the tool, include them in the command construction.
 8. CRITICAL: If the tool requires an image parameter, use the exact image path "{safe_path}" provided above.
 
+SPECIAL HANDLING FOR FIBROBLAST_STATE_ANALYZER_TOOL:
+- If the selected tool is Fibroblast_State_Analyzer_Tool, it requires:
+  * cell_crops: List of paths to cell crop images
+  * cell_metadata: List of metadata for each cell (optional)
+- Look for cell crop information in the context from previous steps
+- If cell crops are available from Single_Cell_Cropper_Tool, extract the crop paths and metadata
+- Use appropriate confidence_threshold and batch_size parameters
+
 Output Format:
 <analysis>: a step-by-step analysis of the context, sub-goal, and selected tool to guide the command construction.
 <explanation>: a detailed explanation of the constructed command(s) and their parameters.
@@ -111,12 +127,18 @@ threshold = 0.5
 execution = tool.execute(image=image, labels=labels, threshold=threshold)
 ```
 
-Example 3 (Image captioning with actual image path):
-<analysis>: The tool requires an image path and an optional prompt for captioning.
-<explanation>: We use the actual image path and provide a descriptive prompt.
+Example 3 (Fibroblast State Analyzer with cell crops):
+<analysis>: The tool requires cell crop paths and metadata from previous Single_Cell_Cropper_Tool execution.
+<explanation>: We extract cell crops and metadata from the previous step's results and pass them to the analyzer.
 <command>:
 ```python
-execution = tool.execute(image="{safe_path}", prompt="Describe this image in detail.")
+import json
+# Load cell crops and metadata from previous step
+with open("cell_crops_metadata.json", "r") as f:
+    metadata_data = json.load(f)
+cell_crops = metadata_data["cell_crops_paths"]
+cell_metadata = metadata_data["cell_metadata"]
+execution = tool.execute(cell_crops=cell_crops, cell_metadata=cell_metadata, confidence_threshold=0.5, batch_size=16)
 ```
 
 Some Wrong Examples:
@@ -199,7 +221,44 @@ Remember: Your <command> field MUST be valid Python code including any necessary
             if hasattr(tool, 'set_custom_output_dir'):
                 tool.set_custom_output_dir(self.tool_cache_dir)
             
-            local_context = {"tool": tool}
+            # Create local context with necessary imports and tool
+            local_context = {
+                "tool": tool,
+                "json": json,
+                "os": os,
+                "sys": sys,
+                "pathlib": pathlib,
+                "numpy": np,
+                "torch": torch,
+                "PIL": PILImage,
+                "matplotlib": matplotlib,
+                "plt": plt
+            }
+            
+            # Add more imports if needed
+            try:
+                import cv2
+                local_context["cv2"] = cv2
+            except ImportError:
+                pass
+                
+            try:
+                import pandas as pd
+                local_context["pd"] = pd
+            except ImportError:
+                pass
+                
+            try:
+                import anndata
+                local_context["anndata"] = anndata
+            except ImportError:
+                pass
+                
+            try:
+                import scanpy as sc
+                local_context["sc"] = sc
+            except ImportError:
+                pass
             
             command_blocks = split_commands(command)
             if not command_blocks:
