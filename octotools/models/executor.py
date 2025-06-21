@@ -127,9 +127,9 @@ import json
 with open('solver_cache/temp/tool_cache/cell_crops_metadata.json', 'r') as f:
     metadata = json.load(f)
 
-# Extract required data
-cell_crops = [item['image_path'] for item in metadata['crops']]
-cell_metadata = [{{'cell_id': item['cell_id']}} for item in metadata['crops']]
+# Extract required data (metadata is a list, not a dict with 'crops' key)
+cell_crops = [item['crop_path'] for item in metadata]
+cell_metadata = [{{'cell_id': item['cell_id']}} for item in metadata]
 
 # Execute tool
 execution = tool.execute(cell_crops=cell_crops, cell_metadata=cell_metadata)
