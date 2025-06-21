@@ -333,7 +333,7 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                         result, features = self._classify_single_cell(crop_path)
                         if result.get("confidence", 0) >= threshold:
                             results.append(result)
-                            if features is not None:
+                            if features is not None and isinstance(features, torch.Tensor):
                                 all_features.append(features)
                         else:
                             failed_cells.append({
