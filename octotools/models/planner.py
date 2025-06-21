@@ -109,25 +109,9 @@ Please present your analysis in a clear, structured format.
     def extract_context_subgoal_and_tool(self, response: NextStep) -> Tuple[str, str, str]:
         def normalize_tool_name(tool_name: str) -> str:
             # Normalize the tool name to match the available tools
-            tool_name_lower = tool_name.lower().strip()
-            
-            # First try exact match
             for tool in self.available_tools:
-                if tool.lower() == tool_name_lower:
+                if tool.lower() in tool_name.lower():
                     return tool
-            
-            # Then try partial match
-            for tool in self.available_tools:
-                if tool.lower() in tool_name_lower or tool_name_lower in tool.lower():
-                    return tool
-            
-            # Special handling for common variations
-            if "fibroblast" in tool_name_lower and "state" in tool_name_lower and "analyzer" in tool_name_lower:
-                for tool in self.available_tools:
-                    if "fibroblast" in tool.lower() and "state" in tool.lower() and "analyzer" in tool.lower():
-                        return tool
-            
-            # If still no match, return the original with error message
             return "No matched tool given: " + tool_name
         
         try:
