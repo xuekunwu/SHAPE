@@ -31,7 +31,7 @@ class NextStep(BaseModel):
 # Executor: MemoryVerification
 class MemoryVerification(BaseModel):
     analysis: str
-    stop_signal: bool
+    conclusion: str
 
 # Executor: ToolCommand
 class ToolCommand(BaseModel):
