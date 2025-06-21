@@ -14,6 +14,7 @@ import uuid
 from contextlib import redirect_stdout, redirect_stderr
 import traceback
 import json
+import glob
 
 class TimeoutError(Exception):
     pass
@@ -122,19 +123,30 @@ Example 3 (Data loading with imports):
 <command>:
 ```python
 import json
+import os
+import glob
 
-# Load metadata from JSON file
-with open('solver_cache/temp/tool_cache/cell_crops_metadata.json', 'r') as f:
-    metadata = json.load(f)
+# Dynamically find the most recent metadata file
+metadata_dir = 'solver_cache/temp/tool_cache'
+metadata_files = glob.glob(os.path.join(metadata_dir, 'cell_crops_metadata_*.json'))
+if not metadata_files:
+    execution = {{"error": "No metadata files found", "status": "failed"}}
+else:
+    # Use the most recent metadata file
+    latest_metadata_file = max(metadata_files, key=os.path.getctime)
+    print("Using metadata file: " + latest_metadata_file)
+    
+    with open(latest_metadata_file, 'r') as f:
+        metadata = json.load(f)
 
-# IMPORTANT: metadata is a list of dictionaries, not a dict with 'crops' key
-# Each item in the list has: cell_id, crop_path, original_bbox, crop_bbox, area, centroid, crop_size
-# Extract required data directly from the list
-cell_crops = [item['crop_path'] for item in metadata]
-cell_metadata = [{{'cell_id': item['cell_id']}} for item in metadata]
+    # IMPORTANT: metadata is a list of dictionaries, not a dict with 'crops' key
+    # Each item in the list has: cell_id, crop_path, original_bbox, crop_bbox, area, centroid, crop_size
+    # Extract required data directly from the list
+    cell_crops = [item['crop_path'] for item in metadata]
+    cell_metadata = [{{'cell_id': item['cell_id']}} for item in metadata]
 
-# Execute tool
-execution = tool.execute(cell_crops=cell_crops, cell_metadata=cell_metadata)
+    # Execute tool
+    execution = tool.execute(cell_crops=cell_crops, cell_metadata=cell_metadata)
 ```
 
 Example 4 (Data loading with error handling):
@@ -143,31 +155,42 @@ Example 4 (Data loading with error handling):
 <command>:
 ```python
 import json
+import os
+import glob
 
-# Load metadata from JSON file with error handling
-try:
-    with open('solver_cache/temp/tool_cache/cell_crops_metadata.json', 'r') as f:
-        metadata = json.load(f)
+# Dynamically find the most recent metadata file
+metadata_dir = 'solver_cache/temp/tool_cache'
+metadata_files = glob.glob(os.path.join(metadata_dir, 'cell_crops_metadata_*.json'))
+if not metadata_files:
+    execution = {{"error": "No metadata files found", "status": "failed"}}
+else:
+    # Use the most recent metadata file
+    latest_metadata_file = max(metadata_files, key=os.path.getctime)
+    print("Using metadata file: " + latest_metadata_file)
     
-    # Verify metadata is a list
-    if not isinstance(metadata, list):
-        raise ValueError("Metadata should be a list of cell data")
-    
-    # Extract required data safely
-    cell_crops = []
-    cell_metadata = []
-    
-    for item in metadata:
-        if isinstance(item, dict) and 'crop_path' in item and 'cell_id' in item:
-            cell_crops.append(item['crop_path'])
-            cell_metadata.append({{'cell_id': item['cell_id']}})
-    
-    # Execute tool
-    execution = tool.execute(cell_crops=cell_crops, cell_metadata=cell_metadata)
-    
-except Exception as e:
-    print(f"Error loading metadata: {{e}}")
-    execution = {{"error": f"Failed to load metadata: {{e}}", "status": "failed"}}
+    try:
+        with open(latest_metadata_file, 'r') as f:
+            metadata = json.load(f)
+        
+        # Verify metadata is a list
+        if not isinstance(metadata, list):
+            raise ValueError("Metadata should be a list of cell data")
+        
+        # Extract required data safely
+        cell_crops = []
+        cell_metadata = []
+        
+        for item in metadata:
+            if isinstance(item, dict) and 'crop_path' in item and 'cell_id' in item:
+                cell_crops.append(item['crop_path'])
+                cell_metadata.append({{'cell_id': item['cell_id']}})
+        
+        # Execute tool
+        execution = tool.execute(cell_crops=cell_crops, cell_metadata=cell_metadata, confidence_threshold=0.5, batch_size=16, query_cache_dir='solver_cache/temp/tool_cache/')
+        
+    except Exception as e:
+        print("Error loading metadata: " + str(e))
+        execution = {{"error": "Failed to load metadata: " + str(e), "status": "failed"}}
 ```
 
 Example 5 (Image captioning with actual image path):
@@ -229,11 +252,56 @@ Remember: Your <command> field MUST be valid Python code including any necessary
             print(f"Error in tool command generation: {e}")
             # Fallback: create a basic ToolCommand with error information
             error_msg = str(e).replace("'", "\\'")  # Escape single quotes
-            return ToolCommand(
-                analysis=f"Error generating tool command: {str(e)}",
-                explanation="Failed to generate proper command due to response format parsing error",
-                command=f"execution = tool.execute(error='Command generation failed: {error_msg}')"
-            )
+            
+            # Special handling for Fibroblast_State_Analyzer_Tool to use dynamic metadata file discovery
+            if tool_name == "Fibroblast_State_Analyzer_Tool":
+                return ToolCommand(
+                    analysis=f"Error generating tool command: {str(e)}. Using fallback command with dynamic metadata file discovery.",
+                    explanation="Failed to generate proper command due to response format parsing error. Using fallback that automatically finds the correct metadata file.",
+                    command="""import json
+import os
+import glob
+
+# Dynamically find the most recent metadata file
+metadata_dir = 'solver_cache/temp/tool_cache'
+metadata_files = glob.glob(os.path.join(metadata_dir, 'cell_crops_metadata_*.json'))
+if not metadata_files:
+    execution = {"error": "No metadata files found", "status": "failed"}
+else:
+    # Use the most recent metadata file
+    latest_metadata_file = max(metadata_files, key=os.path.getctime)
+    print("Using metadata file: " + latest_metadata_file)
+    
+    try:
+        with open(latest_metadata_file, 'r') as f:
+            metadata = json.load(f)
+        
+        # Verify metadata is a list
+        if not isinstance(metadata, list):
+            raise ValueError("Metadata should be a list of cell data")
+        
+        # Extract required data safely
+        cell_crops = []
+        cell_metadata = []
+        
+        for item in metadata:
+            if isinstance(item, dict) and 'crop_path' in item and 'cell_id' in item:
+                cell_crops.append(item['crop_path'])
+                cell_metadata.append({'cell_id': item['cell_id']})
+        
+        # Execute tool
+        execution = tool.execute(cell_crops=cell_crops, cell_metadata=cell_metadata, confidence_threshold=0.5, batch_size=16, query_cache_dir='solver_cache/temp/tool_cache/')
+        
+    except Exception as e:
+        print("Error loading metadata: " + str(e))
+        execution = {"error": "Failed to load metadata: " + str(e), "status": "failed"}"""
+                )
+            else:
+                return ToolCommand(
+                    analysis=f"Error generating tool command: {str(e)}",
+                    explanation="Failed to generate proper command due to response format parsing error",
+                    command=f"execution = tool.execute(error='Command generation failed: {error_msg}')"
+                )
 
     def extract_explanation_and_command(self, response: ToolCommand) -> tuple:
         def normalize_code(code: str) -> str:
