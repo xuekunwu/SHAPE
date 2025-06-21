@@ -19,6 +19,7 @@ from uuid import uuid4
 import matplotlib.pyplot as plt
 from huggingface_hub import hf_hub_download
 import argparse
+import time
 import anndata
 import scanpy as sc
 
@@ -278,6 +279,29 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
         try:
             logger.info(f"Starting fibroblast state analysis for {len(cell_crops)} cells")
             
+            # Enhanced input validation
+            if not cell_crops:
+                return {
+                    "error": "No cell crops provided for analysis",
+                    "summary": "Analysis failed - no input data"
+                }
+            
+            # Validate that crop files exist
+            valid_crops = []
+            for crop_path in cell_crops:
+                if os.path.exists(crop_path) and os.path.getsize(crop_path) > 0:
+                    valid_crops.append(crop_path)
+                else:
+                    logger.warning(f"Invalid or missing crop file: {crop_path}")
+            
+            if not valid_crops:
+                return {
+                    "error": "No valid cell crop files found",
+                    "summary": "Analysis failed - no valid input files"
+                }
+            
+            logger.info(f"Found {len(valid_crops)} valid crop files out of {len(cell_crops)} provided")
+            
             # Check if model is trained and warn if not
             if not self._is_model_trained():
                 logger.warning("⚠️  WARNING: Using untrained model. Results may not be accurate!")
@@ -295,20 +319,14 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
             tool_cache_dir = os.path.join(query_cache_dir, "tool_cache")
             os.makedirs(tool_cache_dir, exist_ok=True)
             
-            # Process each cell
+            # Process each cell with enhanced error handling
             results = []
             valid_results = []
             failed_cells = []
             all_features_list = []
             
-            for i, crop_path in enumerate(cell_crops):
+            for i, crop_path in enumerate(valid_crops):
                 try:
-                    # Validate file exists
-                    if not os.path.exists(crop_path):
-                        logger.warning(f"Cell crop not found: {crop_path}")
-                        failed_cells.append({"path": crop_path, "error": "File not found"})
-                        continue
-                    
                     # Classify cell and extract features
                     result, features = self._classify_single_cell(crop_path)
                     
@@ -329,7 +347,7 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                     
                     # Progress logging
                     if (i + 1) % 50 == 0:
-                        logger.info(f"Processed {i + 1}/{len(cell_crops)} cells")
+                        logger.info(f"Processed {i + 1}/{len(valid_crops)} cells")
                         
                 except Exception as e:
                     logger.error(f"Error processing cell {crop_path}: {str(e)}")
@@ -349,7 +367,7 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                 if umap_path:
                     viz_paths.append(umap_path)
             
-            # Save detailed results
+            # Save detailed results with enhanced metadata
             results_path = os.path.join(tool_cache_dir, f"fibroblast_analysis_results_{uuid4().hex[:8]}.json")
             with open(results_path, 'w') as f:
                 json.dump({
@@ -359,19 +377,24 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                     "failed_cells": failed_cells,
                     "parameters": {
                         "confidence_threshold": threshold,
-                        "total_cells": len(cell_crops),
+                        "total_cells": len(valid_crops),
                         "valid_cells": len(valid_results),
-                        "failed_cells": len(failed_cells)
-                    }
+                        "failed_cells": len(failed_cells),
+                        "backbone_size": self.backbone_size,
+                        "model_path": self.model_path
+                    },
+                    "cell_state_descriptions": self.class_descriptions,
+                    "analysis_timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
                 }, f, indent=2)
             
             # Clear CUDA cache if using GPU
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
             
+            # Enhanced return format with better integration
             return {
-                "summary": f"Analyzed {len(valid_results)}/{len(cell_crops)} cells with confidence ≥ {threshold}",
-                "total_cells": len(cell_crops),
+                "summary": f"Analyzed {len(valid_results)}/{len(valid_crops)} cells with confidence ≥ {threshold}",
+                "total_cells": len(valid_crops),
                 "valid_cells": len(valid_results),
                 "failed_cells": len(failed_cells),
                 "cell_state_distribution": stats["class_distribution"],
@@ -381,7 +404,14 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                     "confidence_threshold": threshold,
                     "backbone_size": self.backbone_size,
                     "model_path": self.model_path
-                }
+                },
+                "cell_state_descriptions": self.class_descriptions,
+                "analysis_quality": {
+                    "success_rate": len(valid_results) / len(valid_crops) if valid_crops else 0,
+                    "average_confidence": stats["average_confidence"],
+                    "model_trained": self._is_model_trained()
+                },
+                "recommendations": self._generate_recommendations(stats, len(valid_crops), len(valid_results))
             }
             
         except Exception as e:
@@ -560,6 +590,36 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
             "class_descriptions": self.class_descriptions
         })
         return metadata
+
+    def _generate_recommendations(self, stats: Dict, total_cells: int, valid_cells: int) -> Dict[str, str]:
+        """Generate recommendations based on analysis results."""
+        recommendations = {}
+        
+        # Success rate recommendations
+        success_rate = valid_cells / total_cells if total_cells > 0 else 0
+        if success_rate < 0.5:
+            recommendations["success_rate"] = "Low success rate detected. Consider: 1) Lowering confidence threshold, 2) Improving image quality, 3) Adjusting preprocessing parameters"
+        elif success_rate < 0.8:
+            recommendations["success_rate"] = "Moderate success rate. Consider fine-tuning parameters for better results"
+        else:
+            recommendations["success_rate"] = "Good success rate achieved"
+        
+        # Confidence recommendations
+        avg_confidence = stats.get("average_confidence", 0)
+        if avg_confidence < 0.6:
+            recommendations["confidence"] = "Low average confidence. Consider: 1) Using trained model, 2) Improving image quality, 3) Adjusting preprocessing"
+        elif avg_confidence < 0.8:
+            recommendations["confidence"] = "Moderate confidence. Results are acceptable but could be improved"
+        else:
+            recommendations["confidence"] = "High confidence achieved"
+        
+        # Cell state distribution recommendations
+        class_dist = stats.get("class_distribution", {})
+        if class_dist:
+            dominant_state = max(class_dist.items(), key=lambda x: x[1]["count"])
+            recommendations["distribution"] = f"Dominant cell state: {dominant_state[0]} ({dominant_state[1]['percentage']:.1f}%). This may indicate the sample's activation status."
+        
+        return recommendations
 
 
 if __name__ == "__main__":
