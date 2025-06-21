@@ -13,6 +13,7 @@ from typing import Dict, Any, List, Optional
 import uuid
 from contextlib import redirect_stdout, redirect_stderr
 import traceback
+import json
 
 class TimeoutError(Exception):
     pass
@@ -64,6 +65,7 @@ Instructions:
 5. Use appropriate values for parameters based on the given context, particularly the `Context` field which may contain relevant information from previous steps.
 6. If multiple steps are needed to prepare data for the tool, include them in the command construction.
 7. CRITICAL: If the tool requires an image parameter, use the exact image path "{safe_path}" provided above.
+8. CRITICAL: Include ALL necessary import statements (e.g., import json, import os, etc.) if the command requires them.
 
 Output Format:
 <analysis>: a step-by-step analysis of the context, sub-goal, and selected tool to guide the command construction.
@@ -88,6 +90,7 @@ Rules:
 9. Include ALL required parameters, data, and paths to execute the tool in the command itself.
 10. If preparation steps are needed, include them as separate Python statements before the `tool.execute()` calls.
 11. CRITICAL: If the tool requires an image parameter, use the exact image path "{safe_path}" provided above.
+12. CRITICAL: Include ALL necessary import statements at the beginning of the command if needed (e.g., import json, import os, etc.).
 
 Examples (Not to use directly unless relevant):
 
@@ -110,7 +113,26 @@ threshold = 0.5
 execution = tool.execute(image=image, labels=labels, threshold=threshold)
 ```
 
-Example 3 (Image captioning with actual image path):
+Example 3 (Data loading with imports):
+<analysis>: The tool requires data from a JSON file, so we need to import json and load the data.
+<explanation>: We import json, load the metadata file, extract the required data, and pass it to the tool.
+<command>:
+```python
+import json
+
+# Load metadata from JSON file
+with open('solver_cache/temp/tool_cache/cell_crops_metadata.json', 'r') as f:
+    metadata = json.load(f)
+
+# Extract required data
+cell_crops = [metadata['image_path'] for metadata in metadata['crops']]
+cell_metadata = [{'cell_id': metadata['cell_id']} for metadata in metadata['crops']]
+
+# Execute tool
+execution = tool.execute(cell_crops=cell_crops, cell_metadata=cell_metadata)
+```
+
+Example 4 (Image captioning with actual image path):
 <analysis>: The tool requires an image path and an optional prompt for captioning.
 <explanation>: We use the actual image path and provide a descriptive prompt.
 <command>:
@@ -132,7 +154,15 @@ execution = tool.execute(image="path/to/image", labels=["baseball"])
 ```
 Reason: Do not use placeholder paths like "path/to/image". Use the actual image path provided.
 
-Remember: Your <command> field MUST be valid Python code including any necessary data preparation steps and one or more `execution = tool.execute(` calls, without any additional explanatory text. The format `execution = tool.execute` must be strictly followed, and the last line must begin with `execution = tool.execute` to capture the final output. ALWAYS use the actual image path "{safe_path}" when the tool requires an image parameter.
+<command>:
+```python
+with open('data.json', 'r') as f:
+    data = json.load(f)
+execution = tool.execute(data=data)
+```
+Reason: Missing import json statement, which will cause "name 'json' is not defined" error.
+
+Remember: Your <command> field MUST be valid Python code including any necessary import statements, data preparation steps, and one or more `execution = tool.execute(` calls, without any additional explanatory text. The format `execution = tool.execute` must be strictly followed, and the last line must begin with `execution = tool.execute` to capture the final output. ALWAYS use the actual image path "{safe_path}" when the tool requires an image parameter. ALWAYS include necessary imports (e.g., import json) if your command requires them.
 """
 
         try:
@@ -150,12 +180,16 @@ Remember: Your <command> field MUST be valid Python code including any necessary
             )
 
     def extract_explanation_and_command(self, response: ToolCommand) -> tuple:
-        def normarlize_code(code: str) -> str:
-            return re.sub(r'^```python\s*', '', code).rstrip('```').strip()
+        def normalize_code(code: str) -> str:
+            # Remove ```python at the beginning
+            code = re.sub(r'^```python\s*', '', code)
+            # Remove ``` at the end (handle both with and without newlines)
+            code = re.sub(r'\s*```\s*$', '', code)
+            return code.strip()
         
         analysis = response.analysis.strip()
         explanation = response.explanation.strip()
-        command = normarlize_code(response.command.strip())
+        command = normalize_code(response.command.strip())
         return analysis, explanation, command
 
     def execute_tool_command(self, tool_name: str, command: str) -> Any:
