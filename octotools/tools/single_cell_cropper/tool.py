@@ -290,47 +290,47 @@ class Single_Cell_Cropper_Tool(BaseTool):
 
     def _create_summary_visualization(self, cell_crops, cell_metadata, stats, output_dir, min_area, margin):
         """
-        Create a summary visualization with filtering stats, area distribution, and sample crops.
+        Create a compact and well-structured summary visualization.
         """
         try:
             if not cell_crops:
                 return None
 
-            # Increase figure height to accommodate 4 rows of crops
+            # --- Layout Setup ---
             fig = plt.figure(figsize=(20, 24))
+            gs = fig.add_gridspec(3, 1, height_ratios=[0.5, 2, 2], hspace=0.3)
             
-            # Define a 6-row GridSpec for precise layout control:
-            # Row 0: Summary text and histogram
-            # Row 1: Title for the crop section
-            # Rows 2-5: The 4x10 grid of cell crops
-            gs = fig.add_gridspec(6, 1, height_ratios=[0.2, 0.05, 1, 1, 1, 1], hspace=0.8)
-
-            # --- Top Row: Contains a nested GridSpec for summary and histogram ---
-            gs_top = gs[0].subgridspec(1, 2, wspace=0.15)
-            
-            # Top Left: Summary Text
+            # Top part: Summary Text and Histogram
+            gs_top = gs[0].subgridspec(1, 2, wspace=0.2)
             ax_text = fig.add_subplot(gs_top[0])
+            ax_hist = fig.add_subplot(gs_top[1])
+
+            # Bottom part: Title and Crop Grid
+            gs_bottom = gs[1:].subgridspec(5, 1, height_ratios=[0.2, 1, 1, 1, 1], hspace=0)
+            ax_crop_title = fig.add_subplot(gs_bottom[0])
+            
+            # --- Content Generation ---
+            
+            # Top Left: Summary Text (Corrected newlines)
             ax_text.axis('off')
             summary_text = (
-                f"Single-Cell Cropping Summary\\n"
-                f"---------------------------------\\n"
-                f"Initial detected objects: {stats['initial_cell_count']}\\n"
-                f"Filtered (area < {min_area} px): {stats['filtered_by_area']}\\n"
-                f"Filtered (border objects): {stats['filtered_by_border']}\\n"
-                f"Filtered (invalid data): {stats['invalid_crop_data']}\\n"
-                f"---------------------------------\\n"
-                f"Final valid cells: {stats['final_cell_count']}\\n\\n"
-                f"Crop Parameters:\\n"
-                f" - Min Area Threshold: {min_area} pixels\\n"
-                f" - Margin: {margin} pixels\\n"
-                f"Status: Ready for downstream analysis"
+                f"Single-Cell Cropping Summary\n"
+                f"---------------------------------\n"
+                f"Initial detected objects: {stats['initial_cell_count']}\n"
+                f"Filtered (area < {min_area} px): {stats['filtered_by_area']}\n"
+                f"Filtered (border objects): {stats['filtered_by_border']}\n"
+                f"Filtered (invalid data): {stats['invalid_crop_data']}\n"
+                f"---------------------------------\n"
+                f"Final valid cells: {stats['final_cell_count']}\n\n"
+                f"Crop Parameters:\n"
+                f" - Min Area Threshold: {min_area} pixels\n"
+                f" - Margin: {margin} pixels"
             )
-            ax_text.text(0.02, 0.98, summary_text, transform=ax_text.transAxes,
+            ax_text.text(0, 0.95, summary_text, transform=ax_text.transAxes,
                          fontsize=16, verticalalignment='top', family='monospace',
                          bbox=dict(boxstyle='round,pad=0.5', fc='aliceblue', alpha=0.9))
 
-            # Top Right: Cell Area Distribution (height is now aligned with summary)
-            ax_hist = fig.add_subplot(gs_top[1])
+            # Top Right: Cell Area Distribution
             cell_areas = [md.get('area', 0) for md in cell_metadata]
             ax_hist.hist(cell_areas, bins=20, color='skyblue', edgecolor='black')
             ax_hist.set_title(f"Cell Area Distribution (Total: {stats['final_cell_count']} cells)", fontsize=18)
@@ -339,19 +339,18 @@ class Single_Cell_Cropper_Tool(BaseTool):
             ax_hist.tick_params(axis='both', which='major', labelsize=12)
             ax_hist.grid(True, linestyle='--', alpha=0.6)
 
-            # --- Middle Row: Title for the crop grid ---
-            ax_crop_title = fig.add_subplot(gs[1])
-            ax_crop_title.text(0.5, 0.5, f"Randomly Selected Single-Cell Crops (40 of {stats['final_cell_count']})",
+            # Crop Grid Title
+            ax_crop_title.text(0.5, 0.7, f"Randomly Selected Single-Cell Crops (40 of {stats['final_cell_count']})",
                                ha='center', va='center', fontsize=18, style='italic', color='dimgray')
             ax_crop_title.axis('off')
-
-            # --- Bottom 4 Rows: 40 Sample Crops ---
+            
+            # 4x10 Crop Grid with 3x vertical spacing
             sample_size = min(40, len(cell_crops))
             if sample_size > 0:
                 indices = np.random.choice(len(cell_crops), sample_size, replace=False)
                 
-                # Nested GridSpec for the 4x10 crop grid
-                gs_crops = gs[2:].subgridspec(4, 10, hspace=0.4, wspace=0.1)
+                # Using hspace for vertical spacing and wspace for horizontal
+                gs_crops = gs_bottom[1:].subgridspec(4, 10, hspace=0.6, wspace=0.2)
 
                 for i in range(sample_size):
                     ax_crop = fig.add_subplot(gs_crops[i // 10, i % 10])
@@ -362,13 +361,13 @@ class Single_Cell_Cropper_Tool(BaseTool):
                     except FileNotFoundError:
                         ax_crop.text(0.5, 0.5, 'Not Found', ha='center', va='center')
                     
-                    ax_crop.set_title(Path(crop_path).name, fontsize=10, y=-0.15)
+                    ax_crop.set_title(Path(crop_path).name, fontsize=10, y=-0.2)
                     ax_crop.axis('off')
 
             fig.suptitle("Single-Cell Cropper Analysis Report", fontsize=24, weight='bold')
-            plt.tight_layout(rect=[0, 0.03, 1, 0.96])
+            plt.tight_layout(rect=[0, 0.03, 1, 0.96], h_pad=3.0)
 
-            # Save visualization, explicitly setting format to PNG
+            # Save visualization
             viz_path = os.path.join(output_dir, f"cropping_summary_{uuid4().hex[:8]}.png")
             plt.savefig(viz_path, bbox_inches='tight', dpi=150, format='png')
             plt.close(fig)
