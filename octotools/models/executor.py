@@ -67,18 +67,39 @@ else:
         with open(latest_metadata_file, 'r') as f:
             metadata = json.load(f)
         
-        # Verify metadata is a list
-        if not isinstance(metadata, list):
-            raise ValueError("Metadata should be a list of cell data")
+        # Handle different metadata formats
+        if isinstance(metadata, list):
+            # Direct list format from single_cell_cropper
+            cell_metadata_list = metadata
+        elif isinstance(metadata, dict):
+            # Dictionary format - extract the list
+            if 'cell_metadata' in metadata:
+                cell_metadata_list = metadata['cell_metadata']
+            elif 'crops' in metadata:
+                cell_metadata_list = metadata['crops']
+            else:
+                # Try to find any list in the dictionary
+                cell_metadata_list = None
+                for key, value in metadata.items():
+                    if isinstance(value, list) and len(value) > 0:
+                        if isinstance(value[0], dict) and 'crop_path' in value[0]:
+                            cell_metadata_list = value
+                            break
+                if cell_metadata_list is None:
+                    raise ValueError("Could not find cell metadata list in dictionary format")
+        else:
+            raise ValueError(f"Unexpected metadata format: {type(metadata)}")
         
         # Extract required data safely
         cell_crops = []
         cell_metadata = []
         
-        for item in metadata:
+        for item in cell_metadata_list:
             if isinstance(item, dict) and 'crop_path' in item and 'cell_id' in item:
                 cell_crops.append(item['crop_path'])
                 cell_metadata.append({'cell_id': item['cell_id']})
+        
+        print(f"Found {len(cell_crops)} valid cell crops from metadata")
         
         # Execute tool
         execution = tool.execute(cell_crops=cell_crops, cell_metadata=cell_metadata, confidence_threshold=0.5, batch_size=16, query_cache_dir='solver_cache/temp/tool_cache/')
