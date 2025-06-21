@@ -45,6 +45,9 @@ class Executor:
         actual_image_path = image if not bytes_mode else 'image.jpg'
         safe_path = actual_image_path.replace("\\", "\\\\") if actual_image_path else ""
         
+        # Escape curly braces in tool_metadata to prevent f-string formatting errors
+        safe_tool_metadata = str(tool_metadata).replace("{", "{{").replace("}", "}}")
+        
         prompt_generate_tool_command = f"""
 Task: Generate a precise command to execute the selected tool based on the given information.
 
@@ -53,7 +56,7 @@ Image Path: {safe_path}
 Context: {context}
 Sub-Goal: {sub_goal}
 Selected Tool: {tool_name}
-Tool Metadata: {tool_metadata}
+Tool Metadata: {safe_tool_metadata}
 
 IMPORTANT: When the tool requires an image parameter, you MUST use the exact image path provided above: "{safe_path}"
 
@@ -125,8 +128,8 @@ with open('solver_cache/temp/tool_cache/cell_crops_metadata.json', 'r') as f:
     metadata = json.load(f)
 
 # Extract required data
-cell_crops = [metadata['image_path'] for metadata in metadata['crops']]
-cell_metadata = [{'cell_id': metadata['cell_id']} for metadata in metadata['crops']]
+cell_crops = [item['image_path'] for item in metadata['crops']]
+cell_metadata = [{{'cell_id': item['cell_id']}} for item in metadata['crops']]
 
 # Execute tool
 execution = tool.execute(cell_crops=cell_crops, cell_metadata=cell_metadata)
