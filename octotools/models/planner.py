@@ -79,9 +79,9 @@ Query: {question}
 
 Instructions:
 1. Carefully read and understand the query and any accompanying inputs.
-2. Identify the main objectives or tasks within the query.
+2. Identify the main objectives or tasks within the query. This includes both intermediate data processing steps and the final analysis goal.
 3. List the specific skills that would be necessary to address the query comprehensively.
-4. Examine the available tools in the toolbox and determine which ones might relevant and useful for addressing the query. Make sure to consider the user metadata for each tool, including limitations and potential applications (if available).
+4. Examine the available tools in the toolbox and determine which ones are relevant. CRITICAL: Your selection must cover the entire workflow, from initial data preparation (e.g., preprocessing, segmentation) to the final analysis (e.g., classification, state analysis). If the query asks for analysis, you MUST include the relevant analysis tool.
 5. Provide a brief explanation for each skill and tool you've identified, describing how it would contribute to answering the query.
 
 Your response should include:
