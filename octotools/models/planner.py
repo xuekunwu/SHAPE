@@ -107,7 +107,6 @@ Please present your analysis in a clear, structured format.
         return str(self.query_analysis).strip()
 
     def extract_context_subgoal_and_tool(self, response: NextStep) -> Tuple[str, str, str]:
-
         def normalize_tool_name(tool_name: str) -> str:
             # Normalize the tool name to match the available tools
             for tool in self.available_tools:
@@ -116,9 +115,17 @@ Please present your analysis in a clear, structured format.
             return "No matched tool given: " + tool_name
         
         try:
-            context = response.context.strip()
-            sub_goal = response.sub_goal.strip()
-            tool_name = normalize_tool_name(response.tool_name.strip())
+            # Handle both dictionary and object responses for resilience
+            if isinstance(response, dict):
+                context = response.get('context', '').strip()
+                sub_goal = response.get('sub_goal', '').strip()
+                tool_name_raw = response.get('tool_name', '')
+            else:
+                context = response.context.strip()
+                sub_goal = response.sub_goal.strip()
+                tool_name_raw = response.tool_name
+
+            tool_name = normalize_tool_name(tool_name_raw.strip())
             return context, sub_goal, tool_name
         except Exception as e:
             print(f"Error extracting context, sub-goal, and tool name: {str(e)}")
@@ -271,12 +278,15 @@ Response Format:
         return stop_verification
 
     def extract_conclusion(self, response: MemoryVerification) -> str:
-        analysis = response.analysis
-        stop_signal = response.stop_signal
-        if stop_signal:
-            return analysis, 'STOP'
+        # Handle both dictionary and object responses for resilience
+        if isinstance(response, dict):
+            analysis = response.get('analysis', '')
+            conclusion = response.get('conclusion', '')
         else:
-            return analysis, 'CONTINUE'
+            analysis = response.analysis
+            conclusion = response.conclusion
+
+        return analysis, conclusion
 
     def generate_final_output(self, question: str, image: str, memory: Memory, bytes_mode: bool = False) -> str:
         if bytes_mode:
