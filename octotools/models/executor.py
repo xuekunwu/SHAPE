@@ -183,7 +183,7 @@ else:
         for item in metadata:
             if isinstance(item, dict) and 'crop_path' in item and 'cell_id' in item:
                 cell_crops.append(item['crop_path'])
-                cell_metadata.append({{'cell_id': item['cell_id']}})
+                cell_metadata.append({'cell_id': item['cell_id']})
         
         # Execute tool
         execution = tool.execute(cell_crops=cell_crops, cell_metadata=cell_metadata, confidence_threshold=0.5, batch_size=16, query_cache_dir='solver_cache/temp/tool_cache/')
