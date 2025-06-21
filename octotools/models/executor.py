@@ -127,7 +127,9 @@ import json
 with open('solver_cache/temp/tool_cache/cell_crops_metadata.json', 'r') as f:
     metadata = json.load(f)
 
-# Extract required data (metadata is a list, not a dict with 'crops' key)
+# IMPORTANT: metadata is a list of dictionaries, not a dict with 'crops' key
+# Each item in the list has: cell_id, crop_path, original_bbox, crop_bbox, area, centroid, crop_size
+# Extract required data directly from the list
 cell_crops = [item['crop_path'] for item in metadata]
 cell_metadata = [{{'cell_id': item['cell_id']}} for item in metadata]
 
@@ -135,7 +137,40 @@ cell_metadata = [{{'cell_id': item['cell_id']}} for item in metadata]
 execution = tool.execute(cell_crops=cell_crops, cell_metadata=cell_metadata)
 ```
 
-Example 4 (Image captioning with actual image path):
+Example 4 (Data loading with error handling):
+<analysis>: The tool requires data from a JSON file with proper error handling.
+<explanation>: We import json, load the metadata file with error handling, verify the structure, and extract data safely.
+<command>:
+```python
+import json
+
+# Load metadata from JSON file with error handling
+try:
+    with open('solver_cache/temp/tool_cache/cell_crops_metadata.json', 'r') as f:
+        metadata = json.load(f)
+    
+    # Verify metadata is a list
+    if not isinstance(metadata, list):
+        raise ValueError("Metadata should be a list of cell data")
+    
+    # Extract required data safely
+    cell_crops = []
+    cell_metadata = []
+    
+    for item in metadata:
+        if isinstance(item, dict) and 'crop_path' in item and 'cell_id' in item:
+            cell_crops.append(item['crop_path'])
+            cell_metadata.append({{'cell_id': item['cell_id']}})
+    
+    # Execute tool
+    execution = tool.execute(cell_crops=cell_crops, cell_metadata=cell_metadata)
+    
+except Exception as e:
+    print(f"Error loading metadata: {{e}}")
+    execution = {{"error": f"Failed to load metadata: {{e}}", "status": "failed"}}
+```
+
+Example 5 (Image captioning with actual image path):
 <analysis>: The tool requires an image path and an optional prompt for captioning.
 <explanation>: We use the actual image path and provide a descriptive prompt.
 <command>:
@@ -164,6 +199,24 @@ with open('data.json', 'r') as f:
 execution = tool.execute(data=data)
 ```
 Reason: Missing import json statement, which will cause "name 'json' is not defined" error.
+
+<command>:
+```python
+import json
+with open('metadata.json', 'r') as f:
+    metadata = json.load(f)
+cell_crops = [item['image_path'] for item in metadata['crops']]
+```
+Reason: Wrong structure assumption. metadata is a list, not a dict with 'crops' key. Use 'crop_path' not 'image_path'.
+
+<command>:
+```python
+import json
+with open('metadata.json', 'r') as f:
+    metadata = json.load(f)
+cell_crops = [item['crop_path'] for item in metadata['crops']]
+```
+Reason: Wrong structure assumption. metadata is a list, not a dict with 'crops' key. Access items directly: `[item['crop_path'] for item in metadata]`.
 
 Remember: Your <command> field MUST be valid Python code including any necessary import statements, data preparation steps, and one or more `execution = tool.execute(` calls, without any additional explanatory text. The format `execution = tool.execute` must be strictly followed, and the last line must begin with `execution = tool.execute` to capture the final output. ALWAYS use the actual image path "{safe_path}" when the tool requires an image parameter. ALWAYS include necessary imports (e.g., import json) if your command requires them.
 """
