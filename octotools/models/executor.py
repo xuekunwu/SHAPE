@@ -144,9 +144,17 @@ Remember: Your <command> field MUST be valid Python code including any necessary
         def normarlize_code(code: str) -> str:
             return re.sub(r'^```python\s*', '', code).rstrip('```').strip()
         
-        analysis = response.analysis.strip()
-        explanation = response.explanation.strip()
-        command = normarlize_code(response.command.strip())
+        # Handle both dictionary and object responses for resilience
+        if isinstance(response, dict):
+            analysis = response.get('analysis', '').strip()
+            explanation = response.get('explanation', '').strip()
+            command_raw = response.get('command', '')
+        else:
+            analysis = response.analysis.strip()
+            explanation = response.explanation.strip()
+            command_raw = response.command
+        
+        command = normarlize_code(command_raw.strip())
         return analysis, explanation, command
 
     def execute_tool_command(self, tool_name: str, command: str) -> Any:
