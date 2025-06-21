@@ -81,6 +81,8 @@ SPECIAL HANDLING FOR FIBROBLAST_STATE_ANALYZER_TOOL:
 - Look for cell crop information in the context from previous steps
 - If cell crops are available from Single_Cell_Cropper_Tool, extract the crop paths and metadata
 - Use appropriate confidence_threshold and batch_size parameters
+- CRITICAL: Always extract cell_crops from the metadata file, do not hardcode paths
+- CRITICAL: Ensure the command syntax is valid Python code without problematic comments
 
 Output Format:
 <analysis>: a step-by-step analysis of the context, sub-goal, and selected tool to guide the command construction.
@@ -133,11 +135,10 @@ Example 3 (Fibroblast State Analyzer with cell crops):
 <command>:
 ```python
 import json
-# Load cell crops and metadata from previous step
 with open("cell_crops_metadata.json", "r") as f:
     metadata_data = json.load(f)
-cell_crops = metadata_data["cell_crops_paths"]
-cell_metadata = metadata_data["cell_metadata"]
+cell_crops = [metadata['crop_path'] for metadata in metadata_data]
+cell_metadata = metadata_data
 execution = tool.execute(cell_crops=cell_crops, cell_metadata=cell_metadata, confidence_threshold=0.5, batch_size=16)
 ```
 
