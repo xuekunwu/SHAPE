@@ -21,6 +21,7 @@ from huggingface_hub import hf_hub_download
 import argparse
 import time
 from sklearn.decomposition import PCA
+import glob
 
 # Configure logging first
 logging.basicConfig(level=logging.INFO)
@@ -243,7 +244,7 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
             logger.error(f"Error preprocessing image {image_path}: {str(e)}")
             raise
     
-    def _classify_single_cell(self, image_path: str) -> Tuple[Dict[str, Any], Optional[torch.Tensor]]:
+    def _classify_single_cell(self, image_path: str, model: nn.Module, confidence_threshold: float) -> Tuple[Dict[str, Any], Optional[torch.Tensor]]:
         """Classify a single cell image and return result with features."""
         try:
             # Preprocess image
@@ -252,16 +253,16 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
             # Get predictions and features
             with torch.no_grad():
                 # Get features from backbone (before classification head)
-                if hasattr(self.model.backbone, 'forward_features'):
-                    features = self.model.backbone.forward_features(img_tensor)
+                if hasattr(model.backbone, 'forward_features'):
+                    features = model.backbone.forward_features(img_tensor)
                 else:
                     # Fallback: use the last layer before classification
-                    features = self.model.backbone(img_tensor)
+                    features = model.backbone(img_tensor)
                     if hasattr(features, 'last_hidden_state'):
                         features = features.last_hidden_state.mean(dim=1)  # Global average pooling
                 
                 # Get classification logits
-                logits = self.model(img_tensor)
+                logits = model(img_tensor)
                 probs = torch.softmax(logits, dim=1)
                 pred_idx = probs.argmax(dim=1).item()
                 confidence = probs[0][pred_idx].item()
@@ -288,163 +289,275 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                 "error": str(e)
             }, None
     
-    def execute(self, cell_crops: List[str], cell_metadata: Optional[List[Dict]] = None, 
-                confidence_threshold: Optional[float] = None, batch_size: int = 16, 
-                query_cache_dir: Optional[str] = None, visualization_method: str = "auto") -> Dict[str, Any]:
+    def execute(self, cell_crops=None, cell_metadata=None, confidence_threshold=0.5, 
+                batch_size=16, query_cache_dir='solver_cache/temp/tool_cache/', 
+                visualization_type='auto', **kwargs):
         """
         Execute fibroblast state analysis on cell crops.
         
         Args:
             cell_crops: List of paths to cell crop images
-            cell_metadata: Optional metadata for each cell crop
-            confidence_threshold: Minimum confidence threshold for classification
+            cell_metadata: List of metadata dictionaries for each cell
+            confidence_threshold: Minimum confidence for classification
             batch_size: Batch size for processing
             query_cache_dir: Directory for caching results
-            visualization_method: Visualization method ("pca", "umap", or "auto")
-        
+            visualization_type: 'pca', 'umap', or 'auto' for automatic selection
+            **kwargs: Additional arguments
+            
         Returns:
             Dictionary containing analysis results
         """
         try:
-            # Set confidence threshold
-            threshold = confidence_threshold if confidence_threshold is not None else self.confidence_threshold
-            
-            # Create output directory
-            if query_cache_dir is None:
-                query_cache_dir = os.path.join(os.getcwd(), "fibroblast_analysis_output")
+            # Ensure cache directory exists
             os.makedirs(query_cache_dir, exist_ok=True)
             
-            logger.info(f"Starting fibroblast state analysis on {len(cell_crops)} cell crops")
-            logger.info(f"Confidence threshold: {threshold}")
-            logger.info(f"Visualization method: {visualization_method}")
+            # If cell_crops not provided, try to load from metadata
+            if cell_crops is None or cell_metadata is None:
+                print("Loading cell data from metadata files...")
+                cell_crops, cell_metadata = self._load_cell_data_from_metadata(query_cache_dir)
+                
+                if not cell_crops:
+                    # Get detailed metadata file information for debugging
+                    metadata_files = self._list_metadata_files(query_cache_dir)
+                    return {
+                        "error": "No cell crops found. Please ensure metadata files exist and contain valid crop paths.",
+                        "status": "failed",
+                        "debug_info": {
+                            "cache_dir": query_cache_dir,
+                            "metadata_files_found": metadata_files,
+                            "suggestion": "Check if metadata files were accidentally deleted or moved during task execution."
+                        }
+                    }
             
-            # Process cell crops
+            # Normalize file paths to handle Windows/Unix path differences
+            cell_crops = [os.path.normpath(crop_path) for crop_path in cell_crops]
+            
+            # Verify all crop files exist
+            missing_files = [crop for crop in cell_crops if not os.path.exists(crop)]
+            if missing_files:
+                return {
+                    "error": f"Missing crop files: {missing_files[:5]}... (showing first 5)",
+                    "status": "failed",
+                    "debug_info": {
+                        "total_crops": len(cell_crops),
+                        "missing_count": len(missing_files),
+                        "cache_dir": query_cache_dir
+                    }
+                }
+            
+            print(f"Processing {len(cell_crops)} cell crops...")
+            
+            # Load model
+            model = self._load_model()
+            if model is None:
+                return {"error": "Failed to load model", "status": "failed"}
+            
+            # Process cells
             results = []
-            failed_cells = []
-            all_features = []
+            features_list = []
             
-            # Process in batches
             for i in range(0, len(cell_crops), batch_size):
                 batch_crops = cell_crops[i:i + batch_size]
-                logger.info(f"Processing batch {i//batch_size + 1}/{(len(cell_crops) + batch_size - 1)//batch_size}")
+                batch_metadata = cell_metadata[i:i + batch_size] if cell_metadata else [{}] * len(batch_crops)
                 
-                for crop_path in batch_crops:
+                for crop_path, metadata in zip(batch_crops, batch_metadata):
                     try:
-                        result, features = self._classify_single_cell(crop_path)
-                        if result.get("confidence", 0) >= threshold:
+                        result, features = self._classify_single_cell(crop_path, model, confidence_threshold)
+                        if result:
                             results.append(result)
-                            if features is not None and isinstance(features, torch.Tensor):
-                                all_features.append(features)
-                        else:
-                            failed_cells.append({
-                                "image_path": crop_path,
-                                "reason": f"Confidence {result.get('confidence', 0):.3f} below threshold {threshold}"
-                            })
+                            if features is not None:
+                                features_list.append(features)
                     except Exception as e:
-                        logger.error(f"Error processing {crop_path}: {str(e)}")
-                        failed_cells.append({
-                            "image_path": crop_path,
-                            "reason": str(e)
-                        })
+                        print(f"Error processing {crop_path}: {str(e)}")
+                        continue
+            
+            if not results:
+                return {"error": "No cells were successfully analyzed", "status": "failed"}
+            
+            # Generate visualizations
+            visual_outputs = self._generate_visualizations(results, features_list, query_cache_dir, visualization_type)
             
             # Calculate statistics
-            stats = self._calculate_statistics(results)
-            
-            # Create visualizations
-            viz_paths = self._create_visualizations(results, stats, query_cache_dir)
-            
-            # Create feature space visualization based on method choice
-            if all_features is not None and len(all_features) > 0:
-                all_features_tensor = torch.stack(all_features)
-                
-                if visualization_method == "auto":
-                    # Auto-select based on availability
-                    if ANNDATA_AVAILABLE:
-                        viz_method = "umap"
-                        logger.info("Auto-selecting UMAP visualization (anndata available)")
-                    else:
-                        viz_method = "pca"
-                        logger.info("Auto-selecting PCA visualization (anndata not available)")
-                else:
-                    viz_method = visualization_method
-                
-                if viz_method == "umap" and ANNDATA_AVAILABLE:
-                    umap_viz_path = self._create_umap_visualization(results, all_features_tensor, query_cache_dir)
-                    if umap_viz_path:
-                        viz_paths.append(umap_viz_path)
-                        logger.info("UMAP visualization created successfully")
-                elif viz_method == "umap" and not ANNDATA_AVAILABLE:
-                    logger.warning("UMAP requested but anndata not available. Falling back to PCA.")
-                    pca_viz_path = self._create_pca_visualization(results, all_features_tensor, query_cache_dir)
-                    if pca_viz_path:
-                        viz_paths.append(pca_viz_path)
-                else:
-                    # PCA visualization
-                    pca_viz_path = self._create_pca_visualization(results, all_features_tensor, query_cache_dir)
-                    if pca_viz_path:
-                        viz_paths.append(pca_viz_path)
-                        logger.info("PCA visualization created successfully")
-            
-            # Save detailed results
-            results_path = os.path.join(query_cache_dir, f"fibroblast_analysis_results_{uuid4().hex[:8]}.json")
-            with open(results_path, 'w') as f:
-                json.dump({
-                    "analysis_summary": {
-                        "total_cells_processed": len(cell_crops),
-                        "successful_classifications": len(results),
-                        "success_rate": len(results) / len(cell_crops) if cell_crops else 0,
-                        "confidence_threshold": threshold,
-                        "model_backbone": self.backbone_size,
-                        "visualization_method": viz_method if 'viz_method' in locals() else "none"
-                    },
-                    "cell_state_distribution": stats["class_distribution"],
-                    "average_confidence": stats["average_confidence"],
-                    "visual_outputs": viz_paths + [results_path],
-                    "parameters": {
-                        "confidence_threshold": threshold,
-                        "backbone_size": self.backbone_size,
-                        "model_path": self.model_path,
-                        "anndata_available": ANNDATA_AVAILABLE
-                    },
-                    "cell_state_descriptions": self.class_descriptions,
-                    "analysis_quality": {
-                        "success_rate": len(results) / len(cell_crops) if cell_crops else 0,
-                        "average_confidence": stats["average_confidence"],
-                        "model_trained": self._is_model_trained()
-                    },
-                    "recommendations": self._generate_recommendations(stats, len(cell_crops), len(results))
-                }, f, indent=2)
-            
-            logger.info(f"Analysis completed. {len(results)} cells successfully classified out of {len(cell_crops)} total")
+            summary = self._calculate_statistics(results)
             
             return {
-                "summary": f"Successfully analyzed {len(results)} out of {len(cell_crops)} cells",
-                "cell_state_distribution": stats["class_distribution"],
-                "average_confidence": stats["average_confidence"],
-                "visual_outputs": viz_paths + [results_path],
+                "summary": summary,
+                "cell_state_distribution": self._get_state_distribution(results),
+                "average_confidence": np.mean([r['confidence'] for r in results]),
+                "visual_outputs": visual_outputs,
                 "parameters": {
-                    "confidence_threshold": threshold,
-                    "backbone_size": self.backbone_size,
-                    "model_path": self.model_path
+                    "confidence_threshold": confidence_threshold,
+                    "backbone_size": "large",
+                    "model_path": None
                 },
                 "cell_state_descriptions": self.class_descriptions,
-                "analysis_quality": {
-                    "success_rate": len(results) / len(cell_crops) if cell_crops else 0,
-                    "average_confidence": stats["average_confidence"],
-                    "model_trained": self._is_model_trained()
-                },
-                "recommendations": self._generate_recommendations(stats, len(cell_crops), len(results))
+                "analysis_quality": self._assess_quality(results),
+                "recommendations": self._generate_recommendations(results),
+                "metadata_info": {
+                    "total_crops_processed": len(cell_crops),
+                    "successful_analyses": len(results),
+                    "metadata_files_used": self._list_metadata_files(query_cache_dir)
+                }
             }
             
         except Exception as e:
-            logger.error(f"Error in fibroblast state analysis: {str(e)}")
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-            return {
-                "error": f"Error during fibroblast state analysis: {str(e)}",
-                "summary": "Failed to analyze cell states"
-            }
-    
+            return {"error": f"Analysis failed: {str(e)}", "status": "failed"}
+
+    def _load_cell_data_from_metadata(self, cache_dir):
+        """
+        Load cell crops and metadata from the most recent metadata file.
+        Enhanced with file protection and backup functionality.
+        
+        Args:
+            cache_dir: Directory containing metadata files
+            
+        Returns:
+            Tuple of (cell_crops, cell_metadata)
+        """
+        try:
+            # Find all metadata files
+            metadata_files = glob.glob(os.path.join(cache_dir, 'cell_crops_metadata_*.json'))
+            
+            if not metadata_files:
+                print(f"No metadata files found in {cache_dir}")
+                return [], []
+            
+            # Sort by modification time (newest first)
+            metadata_files.sort(key=os.path.getmtime, reverse=True)
+            latest_file = metadata_files[0]
+            
+            print(f"Using metadata file: {latest_file}")
+            
+            # Create backup of the metadata file before processing
+            backup_path = self._create_metadata_backup(latest_file)
+            if backup_path:
+                print(f"Created backup: {backup_path}")
+            
+            with open(latest_file, 'r') as f:
+                metadata = json.load(f)
+            
+            # Handle different metadata formats
+            if isinstance(metadata, list):
+                cell_metadata_list = metadata
+            elif isinstance(metadata, dict):
+                if 'cell_metadata' in metadata:
+                    cell_metadata_list = metadata['cell_metadata']
+                elif 'crops' in metadata:
+                    cell_metadata_list = metadata['crops']
+                else:
+                    # Try to find any list in the dictionary
+                    cell_metadata_list = None
+                    for key, value in metadata.items():
+                        if isinstance(value, list) and len(value) > 0:
+                            if isinstance(value[0], dict) and 'crop_path' in value[0]:
+                                cell_metadata_list = value
+                                break
+                    if cell_metadata_list is None:
+                        raise ValueError("Could not find cell metadata list in dictionary format")
+            else:
+                raise ValueError(f"Unexpected metadata format: {type(metadata)}")
+            
+            # Extract required data safely
+            cell_crops = []
+            cell_metadata = []
+            
+            for item in cell_metadata_list:
+                if isinstance(item, dict) and 'crop_path' in item and 'cell_id' in item:
+                    # Normalize the crop path
+                    crop_path = os.path.normpath(item['crop_path'])
+                    cell_crops.append(crop_path)
+                    cell_metadata.append({'cell_id': item['cell_id']})
+            
+            print(f"Found {len(cell_crops)} valid cell crops from metadata")
+            
+            # Verify crop files exist
+            existing_files, missing_files = self._verify_crop_files(cell_crops)
+            if missing_files:
+                print(f"Warning: {len(missing_files)} crop files are missing")
+                print(f"Missing files: {missing_files[:3]}...")  # Show first 3
+            
+            return cell_crops, cell_metadata
+            
+        except Exception as e:
+            print(f"Error loading metadata: {str(e)}")
+            return [], []
+
+    def _create_metadata_backup(self, file_path):
+        """
+        Create a backup of metadata file with timestamp.
+        
+        Args:
+            file_path: Path to the metadata file
+            
+        Returns:
+            Backup file path or None if failed
+        """
+        try:
+            from datetime import datetime
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            backup_path = file_path.replace('.json', f'_backup_{timestamp}.json')
+            
+            import shutil
+            shutil.copy2(file_path, backup_path)
+            return backup_path
+        except Exception as e:
+            print(f"Failed to create backup: {e}")
+            return None
+
+    def _verify_crop_files(self, cell_crops):
+        """
+        Verify that all crop files exist.
+        
+        Args:
+            cell_crops: List of crop file paths
+            
+        Returns:
+            Tuple of (existing_files, missing_files)
+        """
+        existing_files = []
+        missing_files = []
+        
+        for crop_path in cell_crops:
+            if os.path.exists(crop_path):
+                existing_files.append(crop_path)
+            else:
+                missing_files.append(crop_path)
+        
+        return existing_files, missing_files
+
+    def _list_metadata_files(self, cache_dir):
+        """
+        List all metadata files in the cache directory.
+        
+        Args:
+            cache_dir: Directory to search
+            
+        Returns:
+            List of metadata file information
+        """
+        try:
+            metadata_files = glob.glob(os.path.join(cache_dir, 'cell_crops_metadata_*.json'))
+            file_info = []
+            
+            for file_path in metadata_files:
+                try:
+                    stat = os.stat(file_path)
+                    file_info.append({
+                        "filename": os.path.basename(file_path),
+                        "size": stat.st_size,
+                        "modified": stat.st_mtime,
+                        "path": file_path
+                    })
+                except Exception as e:
+                    file_info.append({
+                        "filename": os.path.basename(file_path),
+                        "error": str(e)
+                    })
+            
+            return file_info
+        except Exception as e:
+            return [{"error": f"Failed to list files: {str(e)}"}]
+
     def _calculate_statistics(self, results: List[Dict]) -> Dict[str, Any]:
         """Calculate statistics from classification results."""
         if not results:
