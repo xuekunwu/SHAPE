@@ -19,6 +19,8 @@ from uuid import uuid4
 import matplotlib.pyplot as plt
 from huggingface_hub import hf_hub_download
 import argparse
+import anndata
+import scanpy as sc
 
 # Add the project root to the Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -216,20 +218,26 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
             logger.error(f"Error preprocessing image {image_path}: {str(e)}")
             raise
     
-    def _classify_single_cell(self, image_path: str) -> Dict[str, Any]:
-        """Classify a single cell image."""
+    def _classify_single_cell(self, image_path: str) -> Tuple[Dict[str, Any], Optional[torch.Tensor]]:
+        """Classify a single cell image and extract its features."""
         try:
             # Preprocess image
             img_tensor = self._preprocess_image(image_path)
             
-            # Get predictions
             with torch.no_grad():
+                # --- 1) Predict with the real head ---
                 logits = self.model(img_tensor)
                 probs = torch.softmax(logits, dim=1)
                 pred_idx = probs.argmax(dim=1).item()
                 confidence = probs[0][pred_idx].item()
+
+                # --- 2) Extract CLS features by swapping in an Identity head ---
+                original_head = self.model.backbone.head
+                self.model.backbone.head = nn.Identity()
+                features = self.model.backbone(img_tensor).cpu()
+                self.model.backbone.head = original_head # Restore for next iteration
             
-            # Create result
+            # Create result dictionary
             result = {
                 "image_path": image_path,
                 "predicted_class": self.class_names[pred_idx],
@@ -240,7 +248,7 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                 }
             }
             
-            return result
+            return result, features
             
         except Exception as e:
             logger.error(f"Error classifying cell {image_path}: {str(e)}")
@@ -249,7 +257,7 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                 "predicted_class": "unknown",
                 "confidence": 0.0,
                 "error": str(e)
-            }
+            }, None
     
     def execute(self, cell_crops: List[str], cell_metadata: Optional[List[Dict]] = None, 
                 confidence_threshold: Optional[float] = None, batch_size: int = 16, 
@@ -291,6 +299,7 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
             results = []
             valid_results = []
             failed_cells = []
+            all_features_list = []
             
             for i, crop_path in enumerate(cell_crops):
                 try:
@@ -300,8 +309,11 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                         failed_cells.append({"path": crop_path, "error": "File not found"})
                         continue
                     
-                    # Classify cell
-                    result = self._classify_single_cell(crop_path)
+                    # Classify cell and extract features
+                    result, features = self._classify_single_cell(crop_path)
+                    
+                    if features is not None:
+                        all_features_list.append(features)
                     
                     # Add metadata if available
                     if cell_metadata and i < len(cell_metadata):
@@ -329,6 +341,13 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
             
             # Create visualizations
             viz_paths = self._create_visualizations(valid_results, stats, tool_cache_dir)
+            
+            # Create UMAP visualization from features
+            if all_features_list:
+                all_features = torch.cat(all_features_list, dim=0)
+                umap_path = self._create_umap_visualization(results, all_features, tool_cache_dir)
+                if umap_path:
+                    viz_paths.append(umap_path)
             
             # Save detailed results
             results_path = os.path.join(tool_cache_dir, f"fibroblast_analysis_results_{uuid4().hex[:8]}.json")
@@ -413,36 +432,55 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
         viz_paths = []
         
         try:
-            # 1. Class distribution pie chart
+            # 1. Class distribution pie chart with specific colors, legend, and external percentages
             if stats["class_distribution"]:
-                fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
+                fig, ax = plt.subplots(figsize=(12, 8)) # Adjusted for legend
                 
-                # Pie chart
-                classes = list(stats["class_distribution"].keys())
-                counts = [stats["class_distribution"][cls]["count"] for cls in classes]
-                percentages = [stats["class_distribution"][cls]["percentage"] for cls in classes]
+                # User-defined colors
+                color_map = {
+                    'dead': '#808080', 
+                    'np-MyoFb': '#A65A9F', 
+                    'p-MyoFb': '#D6B8D8', 
+                    'proto-MyoFb': '#F8BD6F', 
+                    'q-Fb': '#66B22F'
+                }
+
+                # Prepare data for pie chart
+                labels = list(stats["class_distribution"].keys())
+                sizes = [stats["class_distribution"][label]["count"] for label in labels]
+                colors = [color_map.get(label, '#CCCCCC') for label in labels]
+
+                # Explode smaller slices to prevent percentage overlap
+                explode = [0.1 if (size / sum(sizes)) < 0.05 else 0 for size in sizes]
+
+                wedges, texts, autotexts = ax.pie(
+                    sizes, 
+                    autopct='%1.1f%%', 
+                    startangle=90,
+                    colors=colors,
+                    pctdistance=1.1,  # Move percentages outside the pie
+                    explode=explode,
+                    labels=None,       # Labels will be in the legend
+                    labeldistance=1.2  # Adjust label line distance if labels were present
+                )
                 
-                colors = plt.cm.Set3(np.linspace(0, 1, len(classes)))
-                wedges, texts, autotexts = ax1.pie(counts, labels=classes, autopct='%1.1f%%', 
-                                                   colors=colors, startangle=90)
-                ax1.set_title("Cell State Distribution")
+                plt.setp(autotexts, size=12, color="black") # Percentages are outside, so use black text
+                ax.set_title("Cell State Composition", fontsize=18)
+                ax.axis('equal')  # Equal aspect ratio ensures that pie is drawn as a circle.
                 
-                # Bar chart
-                ax2.bar(classes, counts, color=colors)
-                ax2.set_title("Cell Count by State")
-                ax2.set_ylabel("Number of Cells")
-                ax2.tick_params(axis='x', rotation=45)
-                
-                # Add percentage labels on bars
-                for i, (cls, count, pct) in enumerate(zip(classes, counts, percentages)):
-                    ax2.text(i, count + 0.5, f'{pct:.1f}%', ha='center', va='bottom')
-                
-                plt.tight_layout()
+                # Add a legend to the side
+                ax.legend(wedges, labels,
+                          title="Cell States",
+                          loc="center left",
+                          bbox_to_anchor=(0.95, 0.5), # Anchor legend to the right
+                          fontsize=12)
+
+                fig.tight_layout()
                 
                 # Save visualization
                 viz_path = os.path.join(output_dir, f"cell_state_distribution_{uuid4().hex[:8]}.png")
                 plt.savefig(viz_path, bbox_inches='tight', dpi=150, format='png')
-                plt.close()
+                plt.close(fig)
                 viz_paths.append(viz_path)
             
             # 2. Confidence distribution histogram
@@ -468,6 +506,47 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
             logger.error(f"Error creating visualizations: {str(e)}")
         
         return viz_paths
+    
+    def _create_umap_visualization(self, results: List[Dict], features: torch.Tensor, output_dir: str) -> Optional[str]:
+        """Generate a UMAP visualization from extracted features."""
+        try:
+            logger.info("Generating UMAP visualization...")
+            
+            # Create AnnData object
+            adata = anndata.AnnData(X=features.numpy())
+            adata.obs['predicted_class'] = [r['predicted_class'] for r in results]
+            adata.obs['image_name'] = [Path(r['image_path']).name for r in results]
+
+            # Run Scanpy workflow
+            sc.tl.pca(adata, n_comps=50)
+            sc.pp.neighbors(adata, n_neighbors=15, n_pcs=50)
+            sc.tl.umap(adata, min_dist=0.5, spread=2.5)
+            
+            # Plot UMAP
+            class_colors = {'dead': '#808080', 'np-MyoFb': '#A65A9F', 'p-MyoFb': '#D6B8D8', 'proto-MyoFb': '#F8BD6F', 'q-Fb': '#66B22F'}
+            fig, ax = plt.subplots(figsize=(8, 8))
+            sc.pl.umap(adata, color=['predicted_class'], show=False, palette=class_colors, size=120, alpha=0.7, title="", ax=ax)
+
+            if ax.get_legend() is not None:
+                ax.get_legend().remove()
+            
+            ax.set_xticks([]); ax.set_yticks([]); ax.set_xlabel(""); ax.set_ylabel("")
+            plt.grid(False)
+            for spine in ax.spines.values():
+                spine.set_visible(False)
+            plt.tight_layout()
+
+            # Save the plot
+            save_path = os.path.join(output_dir, f"umap_cell_features_{uuid4().hex[:8]}.png")
+            plt.savefig(save_path, format='png', dpi=300, bbox_inches='tight', transparent=True)
+            plt.close(fig)
+            
+            logger.info(f"UMAP visualization saved to: {save_path}")
+            return save_path
+
+        except Exception as e:
+            logger.error(f"Error creating UMAP visualization: {e}")
+            return None
     
     def get_metadata(self):
         """Returns the metadata for the Fibroblast_State_Analyzer_Tool."""
