@@ -79,9 +79,9 @@ Query: {question}
 
 Instructions:
 1. Carefully read and understand the query and any accompanying inputs.
-2. Identify the main objectives or tasks within the query. This includes both intermediate data processing steps and the final analysis goal.
+2. Identify the main objectives or tasks within the query.
 3. List the specific skills that would be necessary to address the query comprehensively.
-4. Examine the available tools in the toolbox and determine which ones are relevant. CRITICAL: Your selection must cover the entire workflow, from initial data preparation (e.g., preprocessing, segmentation) to the final analysis (e.g., classification, state analysis). If the query asks for analysis, you MUST include the relevant analysis tool.
+4. Examine the available tools in the toolbox and determine which ones might relevant and useful for addressing the query. Make sure to consider the user metadata for each tool, including limitations and potential applications (if available).
 5. Provide a brief explanation for each skill and tool you've identified, describing how it would contribute to answering the query.
 
 Your response should include:
@@ -107,6 +107,7 @@ Please present your analysis in a clear, structured format.
         return str(self.query_analysis).strip()
 
     def extract_context_subgoal_and_tool(self, response: NextStep) -> Tuple[str, str, str]:
+
         def normalize_tool_name(tool_name: str) -> str:
             # Normalize the tool name to match the available tools
             for tool in self.available_tools:
@@ -115,17 +116,9 @@ Please present your analysis in a clear, structured format.
             return "No matched tool given: " + tool_name
         
         try:
-            # Handle both dictionary and object responses for resilience
-            if isinstance(response, dict):
-                context = response.get('context', '').strip()
-                sub_goal = response.get('sub_goal', '').strip()
-                tool_name_raw = response.get('tool_name', '')
-            else:
-                context = response.context.strip()
-                sub_goal = response.sub_goal.strip()
-                tool_name_raw = response.tool_name
-
-            tool_name = normalize_tool_name(tool_name_raw.strip())
+            context = response.context.strip()
+            sub_goal = response.sub_goal.strip()
+            tool_name = normalize_tool_name(response.tool_name.strip())
             return context, sub_goal, tool_name
         except Exception as e:
             print(f"Error extracting context, sub-goal, and tool name: {str(e)}")
@@ -167,13 +160,9 @@ Instructions:
    - Actual analysis steps (classification, state analysis, feature extraction, etc.)
    - If data preparation is complete but analysis hasn't been performed, prioritize analysis tools
 
-4. CRITICAL: For fibroblast cell state analysis:
-   - If Single_Cell_Cropper_Tool has been executed and cell crops are available, the next step MUST be Fibroblast_State_Analyzer_Tool
-   - This ensures the actual cell state analysis is performed, not just data preparation
+4. Select ONE tool best suited for the next step, keeping in mind the limited number of remaining steps.
 
-5. Select ONE tool best suited for the next step, keeping in mind the limited number of remaining steps.
-
-6. Formulate a specific, achievable sub-goal for the selected tool that maximizes progress towards answering the query.
+5. Formulate a specific, achievable sub-goal for the selected tool that maximizes progress towards answering the query.
 
 Output Format:
 <justification>: detailed explanation of why the selected tool is the best choice for the next step, considering the context and previous outcomes.
@@ -239,12 +228,10 @@ Detailed Instructions:
       - Consider if all relevant information has been extracted from the image (if applicable).
       - IMPORTANT: For analysis tasks, ensure that the actual analysis has been performed, not just data preparation.
       - For example: If the query asks to "analyze cell states", ensure that cell state analysis has been performed, not just cell cropping.
-      - CRITICAL: If the query mentions "fibroblast cell states" and Single_Cell_Cropper_Tool has been used but Fibroblast_State_Analyzer_Tool has NOT been used, the analysis is INCOMPLETE.
 
    b) Unused Tools: Are there any unused tools that could provide additional relevant information?
       - Specify which unused tools might be helpful and why.
       - Pay special attention to analysis tools that could provide insights from prepared data.
-      - CRITICAL: If cell crops are available but Fibroblast_State_Analyzer_Tool has not been used, this tool MUST be recommended.
 
    c) Inconsistencies: Are there any contradictions or conflicts in the information provided?
       - If yes, explain the inconsistencies and suggest how they might be resolved.
@@ -262,7 +249,6 @@ Detailed Instructions:
    - Has the query been fully answered with actual analysis results?
    - Are there any analysis tools available that could provide insights from the prepared data?
    - Does the current state represent the final analysis, or just intermediate data preparation?
-   - For fibroblast cell state analysis: Has Fibroblast_State_Analyzer_Tool been executed after cell cropping?
 
 Response Format:
 <analysis>: Provide a detailed analysis of why the memory is sufficient or insufficient. Reference specific information from the memory and explain its relevance to each aspect of the task. Address how each main point of the query has been satisfied or what is still missing.
@@ -285,15 +271,12 @@ Response Format:
         return stop_verification
 
     def extract_conclusion(self, response: MemoryVerification) -> str:
-        # Handle both dictionary and object responses for resilience
-        if isinstance(response, dict):
-            analysis = response.get('analysis', '')
-            conclusion = response.get('conclusion', '')
+        analysis = response.analysis
+        stop_signal = response.stop_signal
+        if stop_signal:
+            return analysis, 'STOP'
         else:
-            analysis = response.analysis
-            conclusion = response.conclusion
-
-        return analysis, conclusion
+            return analysis, 'CONTINUE'
 
     def generate_final_output(self, question: str, image: str, memory: Memory, bytes_mode: bool = False) -> str:
         if bytes_mode:
