@@ -723,6 +723,24 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
         else:
             recommendations["confidence"] = "High confidence levels achieved. Results are reliable."
         
+        # Cell state distribution recommendations
+        class_dist = stats.get("class_distribution", {})
+        if class_dist:
+            # Check for class imbalance
+            max_count = max([info["count"] for info in class_dist.values()])
+            min_count = min([info["count"] for info in class_dist.values()])
+            if max_count > 0 and min_count / max_count < 0.1:
+                recommendations["distribution"] = "Severe class imbalance detected. Consider collecting more samples of underrepresented classes."
+            elif max_count > 0 and min_count / max_count < 0.3:
+                recommendations["distribution"] = "Moderate class imbalance. Results may be biased towards dominant classes."
+            
+            # Check for specific cell states
+            if "dead" in class_dist and class_dist["dead"]["percentage"] > 30:
+                recommendations["dead_cells"] = "High proportion of dead cells detected. Check sample preparation and staining protocols."
+            
+            if "p-MyoFb" in class_dist and class_dist["p-MyoFb"]["percentage"] > 50:
+                recommendations["proliferation"] = "High proliferative myofibroblast population. Sample may be in active remodeling phase."
+        
         # Sample size recommendations
         if total_cells < 10:
             recommendations["sample_size"] = "Small sample size. Consider analyzing more cells for statistically reliable results."
