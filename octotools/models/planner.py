@@ -167,9 +167,13 @@ Instructions:
    - Actual analysis steps (classification, state analysis, feature extraction, etc.)
    - If data preparation is complete but analysis hasn't been performed, prioritize analysis tools
 
-4. Select ONE tool best suited for the next step, keeping in mind the limited number of remaining steps.
+4. CRITICAL: For fibroblast cell state analysis:
+   - If Single_Cell_Cropper_Tool has been executed and cell crops are available, the next step MUST be Fibroblast_State_Analyzer_Tool
+   - This ensures the actual cell state analysis is performed, not just data preparation
 
-5. Formulate a specific, achievable sub-goal for the selected tool that maximizes progress towards answering the query.
+5. Select ONE tool best suited for the next step, keeping in mind the limited number of remaining steps.
+
+6. Formulate a specific, achievable sub-goal for the selected tool that maximizes progress towards answering the query.
 
 Output Format:
 <justification>: detailed explanation of why the selected tool is the best choice for the next step, considering the context and previous outcomes.
@@ -235,10 +239,12 @@ Detailed Instructions:
       - Consider if all relevant information has been extracted from the image (if applicable).
       - IMPORTANT: For analysis tasks, ensure that the actual analysis has been performed, not just data preparation.
       - For example: If the query asks to "analyze cell states", ensure that cell state analysis has been performed, not just cell cropping.
+      - CRITICAL: If the query mentions "fibroblast cell states" and Single_Cell_Cropper_Tool has been used but Fibroblast_State_Analyzer_Tool has NOT been used, the analysis is INCOMPLETE.
 
    b) Unused Tools: Are there any unused tools that could provide additional relevant information?
       - Specify which unused tools might be helpful and why.
       - Pay special attention to analysis tools that could provide insights from prepared data.
+      - CRITICAL: If cell crops are available but Fibroblast_State_Analyzer_Tool has not been used, this tool MUST be recommended.
 
    c) Inconsistencies: Are there any contradictions or conflicts in the information provided?
       - If yes, explain the inconsistencies and suggest how they might be resolved.
@@ -256,6 +262,7 @@ Detailed Instructions:
    - Has the query been fully answered with actual analysis results?
    - Are there any analysis tools available that could provide insights from the prepared data?
    - Does the current state represent the final analysis, or just intermediate data preparation?
+   - For fibroblast cell state analysis: Has Fibroblast_State_Analyzer_Tool been executed after cell cropping?
 
 Response Format:
 <analysis>: Provide a detailed analysis of why the memory is sufficient or insufficient. Reference specific information from the memory and explain its relevance to each aspect of the task. Address how each main point of the query has been satisfied or what is still missing.
