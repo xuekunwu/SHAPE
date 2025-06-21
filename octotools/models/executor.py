@@ -130,7 +130,7 @@ import glob
 metadata_dir = 'solver_cache/temp/tool_cache'
 metadata_files = glob.glob(os.path.join(metadata_dir, 'cell_crops_metadata_*.json'))
 if not metadata_files:
-    execution = {{"error": "No metadata files found", "status": "failed"}}
+    execution = {"error": "No metadata files found", "status": "failed"}
 else:
     # Use the most recent metadata file
     latest_metadata_file = max(metadata_files, key=os.path.getctime)
