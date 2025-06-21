@@ -442,11 +442,18 @@ class Solver:
             messages.append(ChatMessage(role="assistant", content="<br>"))
             direct_output = self.planner.generate_direct_output(user_query, img_path, self.memory)
             
-            # Ensure direct_output is a string before stripping
-            if isinstance(direct_output, dict):
-                conclusion = str(direct_output)
+            # Extract conclusion from the final answer
+            conclusion = ""
+            if "### Conclusion:" in direct_output:
+                conclusion = direct_output.split("### Conclusion:")[1].strip()
+            elif "Conclusion:" in direct_output:
+                conclusion = direct_output.split("Conclusion:")[1].strip()
+            elif "**Conclusion:**" in direct_output:
+                conclusion = direct_output.split("**Conclusion:**")[1].strip()
             else:
-                conclusion = direct_output.strip() if direct_output else "Task concluded based on analysis."
+                # If no clear conclusion section, use the entire output
+                # This ensures we always have content to display
+                conclusion = direct_output.strip()
             
             final_answer = f"🐙 **Conclusion:**\n{conclusion}"
             # Remove the ChatMessage that displays final answer in reasoning steps
@@ -836,13 +843,13 @@ def main(args):
                                  "examples/A5_01_1_1_Phase Contrast_001.png",
                                  "Segment and count the nuclei in this fibroblast image.", 
                                  ["Image_Preprocessor_Tool", "Nuclei_Segmenter_Tool"],
-                                 "There are 268 cells in this image, and the nuclei are segmented."],
+                                 "There are 605 cells in this image, and the nuclei are segmented."],
 
                                 [ "Fibroblast State Analysis",
                                  "examples/A5_01_1_1_Phase Contrast_001.png",
-                                 "Analyze fibroblast cell states of individual cell within the image.", 
+                                 "Analyze fibroblast cell states from individual cell crops.", 
                                  ["Image_Preprocessor_Tool", "Nuclei_Segmenter_Tool", "Single_Cell_Cropper_Tool", "Fibroblast_State_Analyzer_Tool"],
-                                 "There are 268 cells in this image. The fibroblast state is analyzed."],
+                                 "There are 605 cells in this image. The fibroblast state is analyzed."],
 
                                 [ "Medical Image Analysis",
                                  "examples/lung.jpg", 
