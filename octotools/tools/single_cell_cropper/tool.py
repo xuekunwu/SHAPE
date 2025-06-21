@@ -97,28 +97,31 @@ class Single_Cell_Cropper_Tool(BaseTool):
                     "statistics": stats
                 }
             
-            # Save metadata
+            # Combine paths and metadata for JSON output
+            output_data = {
+                'cell_count': stats['final_cell_count'],
+                'cell_crops_paths': cell_crops,
+                'cell_metadata': cell_metadata,
+                'statistics': stats,
+                "parameters": {
+                    "min_area": min_area,
+                    "margin": margin
+                }
+            }
             metadata_path = os.path.join(tool_cache_dir, f"cell_crops_metadata_{uuid4().hex[:8]}.json")
             with open(metadata_path, 'w') as f:
-                json.dump(cell_metadata, f, indent=2)
-            
-            # Create a summary visualization instead of individual crop display
+                json.dump(output_data, f, indent=2)
+
+            # Create a summary visualization
             summary_viz_path = self._create_summary_visualization(
                 cell_crops, cell_metadata, stats, tool_cache_dir, min_area, margin
             )
             
             return {
-                "summary": f"Successfully generated {len(cell_crops)} single-cell crops for downstream analysis.",
-                "cell_count": len(cell_crops),
-                "cell_crops": cell_crops,
-                "cell_metadata": cell_metadata,
-                "visual_outputs": [summary_viz_path, metadata_path] if summary_viz_path else [metadata_path],
-                "parameters": {
-                    "min_area": min_area,
-                    "margin": margin,
-                    "output_format": output_format
-                },
-                "statistics": stats
+                "summary": f"Successfully generated {stats['final_cell_count']} single-cell crops. All paths and metadata are saved in '{Path(metadata_path).name}'.",
+                "cell_count": stats['final_cell_count'],
+                "cell_crops_metadata_path": metadata_path,
+                "visual_outputs": [summary_viz_path] if summary_viz_path else [],
             }
             
         except Exception as e:
@@ -344,13 +347,13 @@ class Single_Cell_Cropper_Tool(BaseTool):
                                ha='center', va='center', fontsize=18, style='italic', color='dimgray')
             ax_crop_title.axis('off')
             
-            # 4x10 Crop Grid with 3x vertical spacing
+            # 4x10 Crop Grid with adjusted vertical spacing
             sample_size = min(40, len(cell_crops))
             if sample_size > 0:
                 indices = np.random.choice(len(cell_crops), sample_size, replace=False)
                 
-                # Using hspace for vertical spacing and wspace for horizontal
-                gs_crops = gs_bottom[1:].subgridspec(4, 10, hspace=0.6, wspace=0.2)
+                # Using hspace for vertical spacing and wspace for horizontal. Reduced hspace.
+                gs_crops = gs_bottom[1:].subgridspec(4, 10, hspace=0.4, wspace=0.2)
 
                 for i in range(sample_size):
                     ax_crop = fig.add_subplot(gs_crops[i // 10, i % 10])
@@ -361,7 +364,7 @@ class Single_Cell_Cropper_Tool(BaseTool):
                     except FileNotFoundError:
                         ax_crop.text(0.5, 0.5, 'Not Found', ha='center', va='center')
                     
-                    ax_crop.set_title(Path(crop_path).name, fontsize=10, y=-0.2)
+                    ax_crop.set_title(Path(crop_path).name, fontsize=10, y=-0.4) # Adjusted y for new hspace
                     ax_crop.axis('off')
 
             fig.suptitle("Single-Cell Cropper Analysis Report", fontsize=24, weight='bold')
