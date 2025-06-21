@@ -243,14 +243,24 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
             logger.error(f"Error preprocessing image {image_path}: {str(e)}")
             raise
     
-    def _classify_single_cell(self, image_path: str) -> Dict[str, Any]:
-        """Classify a single cell image."""
+    def _classify_single_cell(self, image_path: str) -> Tuple[Dict[str, Any], Optional[torch.Tensor]]:
+        """Classify a single cell image and return result with features."""
         try:
             # Preprocess image
             img_tensor = self._preprocess_image(image_path)
             
-            # Get predictions
+            # Get predictions and features
             with torch.no_grad():
+                # Get features from backbone (before classification head)
+                if hasattr(self.model.backbone, 'forward_features'):
+                    features = self.model.backbone.forward_features(img_tensor)
+                else:
+                    # Fallback: use the last layer before classification
+                    features = self.model.backbone(img_tensor)
+                    if hasattr(features, 'last_hidden_state'):
+                        features = features.last_hidden_state.mean(dim=1)  # Global average pooling
+                
+                # Get classification logits
                 logits = self.model(img_tensor)
                 probs = torch.softmax(logits, dim=1)
                 pred_idx = probs.argmax(dim=1).item()
@@ -267,7 +277,7 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                 }
             }
             
-            return result
+            return result, features
             
         except Exception as e:
             logger.error(f"Error classifying cell {image_path}: {str(e)}")
@@ -276,7 +286,7 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                 "predicted_class": "unknown",
                 "confidence": 0.0,
                 "error": str(e)
-            }
+            }, None
     
     def execute(self, cell_crops: List[str], cell_metadata: Optional[List[Dict]] = None, 
                 confidence_threshold: Optional[float] = None, batch_size: int = 16, 
