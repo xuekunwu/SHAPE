@@ -19,6 +19,7 @@ from uuid import uuid4
 import matplotlib.pyplot as plt
 from huggingface_hub import hf_hub_download
 import argparse
+import traceback
 
 # Add the project root to the Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -268,6 +269,56 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
             Dict containing analysis results and statistics
         """
         try:
+            # Add type checking and debugging information
+            logger.info(f"=== DEBUG: Input validation for Fibroblast_State_Analyzer_Tool ===")
+            logger.info(f"cell_crops type: {type(cell_crops)}")
+            logger.info(f"cell_crops length: {len(cell_crops) if isinstance(cell_crops, list) else 'Not a list'}")
+            if isinstance(cell_crops, list) and len(cell_crops) > 0:
+                logger.info(f"First cell_crops item type: {type(cell_crops[0])}")
+                logger.info(f"First cell_crops item: {cell_crops[0]}")
+            
+            logger.info(f"cell_metadata type: {type(cell_metadata)}")
+            if cell_metadata is not None:
+                logger.info(f"cell_metadata length: {len(cell_metadata) if isinstance(cell_metadata, list) else 'Not a list'}")
+                if isinstance(cell_metadata, list) and len(cell_metadata) > 0:
+                    logger.info(f"First cell_metadata item type: {type(cell_metadata[0])}")
+                    logger.info(f"First cell_metadata item: {cell_metadata[0]}")
+            
+            # Type validation
+            if not isinstance(cell_crops, list):
+                error_msg = f"cell_crops should be a list, got {type(cell_crops)}"
+                logger.error(error_msg)
+                return {
+                    "error": error_msg,
+                    "summary": "Invalid input type for cell_crops"
+                }
+            
+            if not all(isinstance(x, str) for x in cell_crops):
+                error_msg = "All elements in cell_crops should be strings (image paths)"
+                logger.error(error_msg)
+                return {
+                    "error": error_msg,
+                    "summary": "Invalid cell_crops content type"
+                }
+            
+            if cell_metadata is not None:
+                if not isinstance(cell_metadata, list):
+                    error_msg = f"cell_metadata should be a list, got {type(cell_metadata)}"
+                    logger.error(error_msg)
+                    return {
+                        "error": error_msg,
+                        "summary": "Invalid input type for cell_metadata"
+                    }
+                
+                if not all(isinstance(x, dict) for x in cell_metadata):
+                    error_msg = "All elements in cell_metadata should be dictionaries"
+                    logger.error(error_msg)
+                    return {
+                        "error": error_msg,
+                        "summary": "Invalid cell_metadata content type"
+                    }
+            
+            logger.info(f"=== Input validation passed ===")
             logger.info(f"Starting fibroblast state analysis for {len(cell_crops)} cells")
             
             # Check if model is trained and warn if not
@@ -305,7 +356,11 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                     
                     # Add metadata if available
                     if cell_metadata and i < len(cell_metadata):
-                        result.update(cell_metadata[i])
+                        # Additional safety check for metadata item
+                        if isinstance(cell_metadata[i], dict):
+                            result.update(cell_metadata[i])
+                        else:
+                            logger.warning(f"Invalid metadata item at index {i}: {type(cell_metadata[i])}")
                     
                     results.append(result)
                     
@@ -367,6 +422,7 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
             
         except Exception as e:
             logger.error(f"Error in fibroblast state analysis: {str(e)}")
+            logger.error(f"Full traceback: {traceback.format_exc()}")
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
             return {
