@@ -843,13 +843,13 @@ def main(args):
                                  "examples/A5_01_1_1_Phase Contrast_001.png",
                                  "Segment and count the nuclei in this fibroblast image.", 
                                  ["Image_Preprocessor_Tool", "Nuclei_Segmenter_Tool"],
-                                 "There are 605 cells in this image, and the nuclei are segmented."],
+                                 "There are 268 cells in this image, and the nuclei are segmented."],
 
                                 [ "Fibroblast State Analysis",
                                  "examples/A5_01_1_1_Phase Contrast_001.png",
-                                 "Analyze fibroblast cell states from individual cell crops.", 
+                                 "Analyze fibroblast cell states of individual cell within the image.", 
                                  ["Image_Preprocessor_Tool", "Nuclei_Segmenter_Tool", "Single_Cell_Cropper_Tool", "Fibroblast_State_Analyzer_Tool"],
-                                 "There are 605 cells in this image. The fibroblast state is analyzed."],
+                                 "There are 268 cells in this image. The fibroblast state is analyzed."],
 
                                 [ "Medical Image Analysis",
                                  "examples/lung.jpg", 
