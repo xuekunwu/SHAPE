@@ -352,8 +352,8 @@ class Single_Cell_Cropper_Tool(BaseTool):
             if sample_size > 0:
                 indices = np.random.choice(len(cell_crops), sample_size, replace=False)
                 
-                # Using hspace for vertical spacing and wspace for horizontal. Reduced hspace.
-                gs_crops = gs_bottom[1:].subgridspec(4, 10, hspace=0.4, wspace=0.2)
+                # Using hspace for vertical spacing and wspace for horizontal. Made hspace similar to wspace for a grid look.
+                gs_crops = gs_bottom[1:].subgridspec(4, 10, hspace=0.2, wspace=0.2)
 
                 for i in range(sample_size):
                     ax_crop = fig.add_subplot(gs_crops[i // 10, i % 10])
@@ -364,7 +364,7 @@ class Single_Cell_Cropper_Tool(BaseTool):
                     except FileNotFoundError:
                         ax_crop.text(0.5, 0.5, 'Not Found', ha='center', va='center')
                     
-                    ax_crop.set_title(Path(crop_path).name, fontsize=10, y=-0.4) # Adjusted y for new hspace
+                    ax_crop.set_title(Path(crop_path).name, fontsize=10, y=-0.3) # Adjusted y for new hspace
                     ax_crop.axis('off')
 
             fig.suptitle("Single-Cell Cropper Analysis Report", fontsize=24, weight='bold')
