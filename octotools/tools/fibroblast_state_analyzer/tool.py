@@ -19,7 +19,22 @@ from uuid import uuid4
 import matplotlib.pyplot as plt
 from huggingface_hub import hf_hub_download
 import argparse
-import traceback
+import time
+from sklearn.decomposition import PCA
+
+# Configure logging first
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Try to import anndata and scanpy for advanced visualizations
+try:
+    import anndata
+    import scanpy as sc
+    ANNDATA_AVAILABLE = True
+    logger.info("anndata and scanpy are available for advanced visualizations")
+except ImportError:
+    ANNDATA_AVAILABLE = False
+    logger.warning("anndata and scanpy not available. Using PCA for visualization only.")
 
 # Add the project root to the Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -27,10 +42,6 @@ project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(c
 sys.path.insert(0, project_root)
 
 from octotools.tools.base import BaseTool
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 class DinoV2Classifier(nn.Module):
     """
@@ -55,26 +66,32 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
     def __init__(self, model_path=None, backbone_size="large", confidence_threshold=0.5):
         super().__init__(
             tool_name="Fibroblast_State_Analyzer_Tool",
-            tool_description="Analyzes fibroblast cell states using deep learning to classify individual cells into different activation states.",
+            tool_description="Analyzes fibroblast cell states using deep learning to classify individual cells into different activation states. Supports both PCA and UMAP visualizations.",
             tool_version="1.0.0",
             input_types={
                 "cell_crops": "List[str] - Paths to individual cell crop images",
                 "cell_metadata": "List[dict] - Metadata for each cell crop",
                 "confidence_threshold": "float - Minimum confidence threshold for classification (default: 0.5)",
                 "batch_size": "int - Batch size for processing (default: 16)",
-                "query_cache_dir": "str - Directory for caching results"
+                "query_cache_dir": "str - Directory for caching results",
+                "visualization_method": "str - Visualization method: 'pca', 'umap', or 'auto' (default: 'auto')"
             },
             output_type="dict - Analysis results with cell state classifications and statistics",
             demo_commands=[
                 {
                     "command": 'execution = tool.execute(cell_crops=["cell_0001.png", "cell_0002.png"], cell_metadata=[{"cell_id": 1}, {"cell_id": 2}])',
                     "description": "Analyze cell states for individual fibroblast crops"
+                },
+                {
+                    "command": 'execution = tool.execute(cell_crops=["cell_0001.png"], visualization_method="umap")',
+                    "description": "Analyze with UMAP visualization (requires anndata/scanpy)"
                 }
             ],
             user_metadata={
                 "limitation": "Requires GPU for optimal performance. Model accuracy depends on image quality and cell visibility. May struggle with very small or overlapping cells.",
                 "best_practice": "Use with high-quality cell crops from Single_Cell_Cropper_Tool. Ensure cells are well-separated and clearly visible in crops.",
-                "cell_states": "Classifies cells into: dead, np-MyoFb (non-proliferative myofibroblast), p-MyoFb (proliferative myofibroblast), proto-MyoFb (proto-myofibroblast), q-Fb (quiescent fibroblast)"
+                "cell_states": "Classifies cells into: dead, np-MyoFb (non-proliferative myofibroblast), p-MyoFb (proliferative myofibroblast), proto-MyoFb (proto-myofibroblast), q-Fb (quiescent fibroblast)",
+                "visualization": "Supports PCA (fast, interpretable) and UMAP (advanced, requires anndata/scanpy). Auto-selects based on availability."
             }
         )
         
@@ -87,7 +104,7 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
         self.backbone_size = backbone_size
         self.confidence_threshold = confidence_threshold
         
-        # Cell state classes
+        # Cell state classes with specific colors
         self.class_names = ["dead", "np-MyoFb", "p-MyoFb", "proto-MyoFb", "q-Fb"]
         self.class_descriptions = {
             "dead": "Dead or dying cells",
@@ -95,6 +112,15 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
             "p-MyoFb": "Proliferative myofibroblasts", 
             "proto-MyoFb": "Proto-myofibroblasts",
             "q-Fb": "Quiescent fibroblasts"
+        }
+        
+        # Color mapping for visualizations
+        self.color_map = {
+            'dead': '#808080', 
+            'np-MyoFb': '#A65A9F', 
+            'p-MyoFb': '#D6B8D8', 
+            'proto-MyoFb': '#F8BD6F', 
+            'q-Fb': '#66B22F'
         }
         
         # Initialize model
@@ -254,162 +280,135 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
     
     def execute(self, cell_crops: List[str], cell_metadata: Optional[List[Dict]] = None, 
                 confidence_threshold: Optional[float] = None, batch_size: int = 16, 
-                query_cache_dir: Optional[str] = None) -> Dict[str, Any]:
+                query_cache_dir: Optional[str] = None, visualization_method: str = "auto") -> Dict[str, Any]:
         """
         Execute fibroblast state analysis on cell crops.
         
         Args:
             cell_crops: List of paths to cell crop images
-            cell_metadata: Optional metadata for each cell
-            confidence_threshold: Minimum confidence for classification
+            cell_metadata: Optional metadata for each cell crop
+            confidence_threshold: Minimum confidence threshold for classification
             batch_size: Batch size for processing
             query_cache_dir: Directory for caching results
-            
+            visualization_method: Visualization method ("pca", "umap", or "auto")
+        
         Returns:
-            Dict containing analysis results and statistics
+            Dictionary containing analysis results
         """
         try:
-            # Add type checking and debugging information
-            logger.info(f"=== DEBUG: Input validation for Fibroblast_State_Analyzer_Tool ===")
-            logger.info(f"cell_crops type: {type(cell_crops)}")
-            logger.info(f"cell_crops length: {len(cell_crops) if isinstance(cell_crops, list) else 'Not a list'}")
-            if isinstance(cell_crops, list) and len(cell_crops) > 0:
-                logger.info(f"First cell_crops item type: {type(cell_crops[0])}")
-                logger.info(f"First cell_crops item: {cell_crops[0]}")
-            
-            logger.info(f"cell_metadata type: {type(cell_metadata)}")
-            if cell_metadata is not None:
-                logger.info(f"cell_metadata length: {len(cell_metadata) if isinstance(cell_metadata, list) else 'Not a list'}")
-                if isinstance(cell_metadata, list) and len(cell_metadata) > 0:
-                    logger.info(f"First cell_metadata item type: {type(cell_metadata[0])}")
-                    logger.info(f"First cell_metadata item: {cell_metadata[0]}")
-            
-            # Type validation
-            if not isinstance(cell_crops, list):
-                error_msg = f"cell_crops should be a list, got {type(cell_crops)}"
-                logger.error(error_msg)
-                return {
-                    "error": error_msg,
-                    "summary": "Invalid input type for cell_crops"
-                }
-            
-            if not all(isinstance(x, str) for x in cell_crops):
-                error_msg = "All elements in cell_crops should be strings (image paths)"
-                logger.error(error_msg)
-                return {
-                    "error": error_msg,
-                    "summary": "Invalid cell_crops content type"
-                }
-            
-            if cell_metadata is not None:
-                if not isinstance(cell_metadata, list):
-                    error_msg = f"cell_metadata should be a list, got {type(cell_metadata)}"
-                    logger.error(error_msg)
-                    return {
-                        "error": error_msg,
-                        "summary": "Invalid input type for cell_metadata"
-                    }
-                
-                if not all(isinstance(x, dict) for x in cell_metadata):
-                    error_msg = "All elements in cell_metadata should be dictionaries"
-                    logger.error(error_msg)
-                    return {
-                        "error": error_msg,
-                        "summary": "Invalid cell_metadata content type"
-                    }
-            
-            logger.info(f"=== Input validation passed ===")
-            logger.info(f"Starting fibroblast state analysis for {len(cell_crops)} cells")
-            
-            # Check if model is trained and warn if not
-            if not self._is_model_trained():
-                logger.warning("⚠️  WARNING: Using untrained model. Results may not be accurate!")
-                logger.warning("To get accurate results, please:")
-                logger.warning("1. Set HUGGINGFACE_TOKEN environment variable for remote model access")
-                logger.warning("2. Provide a local model_path parameter with trained weights")
-                logger.warning("3. Contact the model owner for access to the trained model")
-            
-            # Use provided confidence threshold or default
+            # Set confidence threshold
             threshold = confidence_threshold if confidence_threshold is not None else self.confidence_threshold
             
-            # Setup output directory
+            # Create output directory
             if query_cache_dir is None:
-                query_cache_dir = "solver_cache/temp"
-            tool_cache_dir = os.path.join(query_cache_dir, "tool_cache")
-            os.makedirs(tool_cache_dir, exist_ok=True)
+                query_cache_dir = os.path.join(os.getcwd(), "fibroblast_analysis_output")
+            os.makedirs(query_cache_dir, exist_ok=True)
             
-            # Process each cell
+            logger.info(f"Starting fibroblast state analysis on {len(cell_crops)} cell crops")
+            logger.info(f"Confidence threshold: {threshold}")
+            logger.info(f"Visualization method: {visualization_method}")
+            
+            # Process cell crops
             results = []
-            valid_results = []
             failed_cells = []
+            all_features = []
             
-            for i, crop_path in enumerate(cell_crops):
-                try:
-                    # Validate file exists
-                    if not os.path.exists(crop_path):
-                        logger.warning(f"Cell crop not found: {crop_path}")
-                        failed_cells.append({"path": crop_path, "error": "File not found"})
-                        continue
-                    
-                    # Classify cell
-                    result = self._classify_single_cell(crop_path)
-                    
-                    # Add metadata if available
-                    if cell_metadata and i < len(cell_metadata):
-                        # Additional safety check for metadata item
-                        if isinstance(cell_metadata[i], dict):
-                            result.update(cell_metadata[i])
+            # Process in batches
+            for i in range(0, len(cell_crops), batch_size):
+                batch_crops = cell_crops[i:i + batch_size]
+                logger.info(f"Processing batch {i//batch_size + 1}/{(len(cell_crops) + batch_size - 1)//batch_size}")
+                
+                for crop_path in batch_crops:
+                    try:
+                        result, features = self._classify_single_cell(crop_path)
+                        if result.get("confidence", 0) >= threshold:
+                            results.append(result)
+                            if features is not None:
+                                all_features.append(features)
                         else:
-                            logger.warning(f"Invalid metadata item at index {i}: {type(cell_metadata[i])}")
-                    
-                    results.append(result)
-                    
-                    # Check confidence threshold
-                    if result.get("confidence", 0) >= threshold:
-                        valid_results.append(result)
-                    else:
-                        logger.warning(f"Low confidence ({result.get('confidence', 0):.3f}) for {crop_path}")
-                    
-                    # Progress logging
-                    if (i + 1) % 50 == 0:
-                        logger.info(f"Processed {i + 1}/{len(cell_crops)} cells")
-                        
-                except Exception as e:
-                    logger.error(f"Error processing cell {crop_path}: {str(e)}")
-                    failed_cells.append({"path": crop_path, "error": str(e)})
-                    continue
+                            failed_cells.append({
+                                "image_path": crop_path,
+                                "reason": f"Confidence {result.get('confidence', 0):.3f} below threshold {threshold}"
+                            })
+                    except Exception as e:
+                        logger.error(f"Error processing {crop_path}: {str(e)}")
+                        failed_cells.append({
+                            "image_path": crop_path,
+                            "reason": str(e)
+                        })
             
             # Calculate statistics
-            stats = self._calculate_statistics(valid_results)
+            stats = self._calculate_statistics(results)
             
             # Create visualizations
-            viz_paths = self._create_visualizations(valid_results, stats, tool_cache_dir)
+            viz_paths = self._create_visualizations(results, stats, query_cache_dir)
+            
+            # Create feature space visualization based on method choice
+            if all_features is not None and len(all_features) > 0:
+                all_features_tensor = torch.stack(all_features)
+                
+                if visualization_method == "auto":
+                    # Auto-select based on availability
+                    if ANNDATA_AVAILABLE:
+                        viz_method = "umap"
+                        logger.info("Auto-selecting UMAP visualization (anndata available)")
+                    else:
+                        viz_method = "pca"
+                        logger.info("Auto-selecting PCA visualization (anndata not available)")
+                else:
+                    viz_method = visualization_method
+                
+                if viz_method == "umap" and ANNDATA_AVAILABLE:
+                    umap_viz_path = self._create_umap_visualization(results, all_features_tensor, query_cache_dir)
+                    if umap_viz_path:
+                        viz_paths.append(umap_viz_path)
+                        logger.info("UMAP visualization created successfully")
+                elif viz_method == "umap" and not ANNDATA_AVAILABLE:
+                    logger.warning("UMAP requested but anndata not available. Falling back to PCA.")
+                    pca_viz_path = self._create_pca_visualization(results, all_features_tensor, query_cache_dir)
+                    if pca_viz_path:
+                        viz_paths.append(pca_viz_path)
+                else:
+                    # PCA visualization
+                    pca_viz_path = self._create_pca_visualization(results, all_features_tensor, query_cache_dir)
+                    if pca_viz_path:
+                        viz_paths.append(pca_viz_path)
+                        logger.info("PCA visualization created successfully")
             
             # Save detailed results
-            results_path = os.path.join(tool_cache_dir, f"fibroblast_analysis_results_{uuid4().hex[:8]}.json")
+            results_path = os.path.join(query_cache_dir, f"fibroblast_analysis_results_{uuid4().hex[:8]}.json")
             with open(results_path, 'w') as f:
                 json.dump({
-                    "all_results": results,
-                    "valid_results": valid_results,
-                    "statistics": stats,
-                    "failed_cells": failed_cells,
+                    "analysis_summary": {
+                        "total_cells_processed": len(cell_crops),
+                        "successful_classifications": len(results),
+                        "success_rate": len(results) / len(cell_crops) if cell_crops else 0,
+                        "confidence_threshold": threshold,
+                        "model_backbone": self.backbone_size,
+                        "visualization_method": viz_method if 'viz_method' in locals() else "none"
+                    },
+                    "cell_state_distribution": stats["class_distribution"],
+                    "average_confidence": stats["average_confidence"],
+                    "visual_outputs": viz_paths + [results_path],
                     "parameters": {
                         "confidence_threshold": threshold,
-                        "total_cells": len(cell_crops),
-                        "valid_cells": len(valid_results),
-                        "failed_cells": len(failed_cells)
-                    }
+                        "backbone_size": self.backbone_size,
+                        "model_path": self.model_path,
+                        "anndata_available": ANNDATA_AVAILABLE
+                    },
+                    "cell_state_descriptions": self.class_descriptions,
+                    "analysis_quality": {
+                        "success_rate": len(results) / len(cell_crops) if cell_crops else 0,
+                        "average_confidence": stats["average_confidence"],
+                        "model_trained": self._is_model_trained()
+                    },
+                    "recommendations": self._generate_recommendations(stats, len(cell_crops), len(results))
                 }, f, indent=2)
             
-            # Clear CUDA cache if using GPU
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+            logger.info(f"Analysis completed. {len(results)} cells successfully classified out of {len(cell_crops)} total")
             
             return {
-                "summary": f"Analyzed {len(valid_results)}/{len(cell_crops)} cells with confidence ≥ {threshold}",
-                "total_cells": len(cell_crops),
-                "valid_cells": len(valid_results),
-                "failed_cells": len(failed_cells),
+                "summary": f"Successfully analyzed {len(results)} out of {len(cell_crops)} cells",
                 "cell_state_distribution": stats["class_distribution"],
                 "average_confidence": stats["average_confidence"],
                 "visual_outputs": viz_paths + [results_path],
@@ -417,12 +416,18 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                     "confidence_threshold": threshold,
                     "backbone_size": self.backbone_size,
                     "model_path": self.model_path
-                }
+                },
+                "cell_state_descriptions": self.class_descriptions,
+                "analysis_quality": {
+                    "success_rate": len(results) / len(cell_crops) if cell_crops else 0,
+                    "average_confidence": stats["average_confidence"],
+                    "model_trained": self._is_model_trained()
+                },
+                "recommendations": self._generate_recommendations(stats, len(cell_crops), len(results))
             }
             
         except Exception as e:
             logger.error(f"Error in fibroblast state analysis: {str(e)}")
-            logger.error(f"Full traceback: {traceback.format_exc()}")
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
             return {
@@ -469,50 +474,74 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
         viz_paths = []
         
         try:
-            # 1. Class distribution pie chart
+            # 1. Class distribution pie chart with specific colors, legend, and external percentages
             if stats["class_distribution"]:
-                fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
+                fig, ax = plt.subplots(figsize=(12, 8)) # Adjusted for legend
                 
-                # Pie chart
-                classes = list(stats["class_distribution"].keys())
-                counts = [stats["class_distribution"][cls]["count"] for cls in classes]
-                percentages = [stats["class_distribution"][cls]["percentage"] for cls in classes]
+                # Prepare data for pie chart
+                labels = list(stats["class_distribution"].keys())
+                sizes = [stats["class_distribution"][label]["count"] for label in labels]
+                colors = [self.color_map.get(label, '#CCCCCC') for label in labels]
+
+                # Explode smaller slices to prevent percentage overlap
+                explode = [0.1 if (size / sum(sizes)) < 0.05 else 0 for size in sizes]
+
+                wedges, texts, autotexts = ax.pie(
+                    sizes, 
+                    autopct='%1.1f%%', 
+                    startangle=90,
+                    colors=colors,
+                    pctdistance=1.1,  # Move percentages outside the pie
+                    explode=explode,
+                    labels=None,       # Labels will be in the legend
+                    labeldistance=1.2  # Adjust label line distance if labels were present
+                )
                 
-                colors = plt.cm.Set3(np.linspace(0, 1, len(classes)))
-                wedges, texts, autotexts = ax1.pie(counts, labels=classes, autopct='%1.1f%%', 
-                                                   colors=colors, startangle=90)
-                ax1.set_title("Cell State Distribution")
+                plt.setp(autotexts, size=12, color="black") # Percentages are outside, so use black text
+                ax.set_title("Cell State Composition", fontsize=18)
+                ax.axis('equal')  # Equal aspect ratio ensures that pie is drawn as a circle.
                 
-                # Bar chart
-                ax2.bar(classes, counts, color=colors)
-                ax2.set_title("Cell Count by State")
-                ax2.set_ylabel("Number of Cells")
-                ax2.tick_params(axis='x', rotation=45)
-                
-                # Add percentage labels on bars
-                for i, (cls, count, pct) in enumerate(zip(classes, counts, percentages)):
-                    ax2.text(i, count + 0.5, f'{pct:.1f}%', ha='center', va='bottom')
-                
-                plt.tight_layout()
+                # Add a legend to the side
+                ax.legend(wedges, labels,
+                          title="Cell States",
+                          loc="center left",
+                          bbox_to_anchor=(0.95, 0.5), # Anchor legend to the right
+                          fontsize=12)
+
+                fig.tight_layout()
                 
                 # Save visualization
                 viz_path = os.path.join(output_dir, f"cell_state_distribution_{uuid4().hex[:8]}.png")
                 plt.savefig(viz_path, bbox_inches='tight', dpi=150, format='png')
-                plt.close()
+                plt.close(fig)
                 viz_paths.append(viz_path)
             
-            # 2. Confidence distribution histogram
+            # 2. Confidence distribution histogram with improved styling
             if results:
                 confidences = [r.get("confidence", 0) for r in results]
                 fig, ax = plt.subplots(figsize=(10, 6))
-                ax.hist(confidences, bins=20, alpha=0.7, color='skyblue', edgecolor='black')
-                ax.set_xlabel("Confidence Score")
-                ax.set_ylabel("Number of Cells")
-                ax.set_title("Confidence Distribution")
+                
+                # Create histogram with better styling
+                n, bins, patches = ax.hist(confidences, bins=20, alpha=0.7, color='skyblue', 
+                                         edgecolor='black', linewidth=1.2)
+                
+                # Add threshold line
                 ax.axvline(self.confidence_threshold, color='red', linestyle='--', 
-                          label=f'Threshold ({self.confidence_threshold})')
-                ax.legend()
+                          linewidth=2, label=f'Threshold ({self.confidence_threshold})')
+                
+                # Styling
+                ax.set_xlabel("Confidence Score", fontsize=12)
+                ax.set_ylabel("Number of Cells", fontsize=12)
+                ax.set_title("Confidence Distribution", fontsize=14, fontweight='bold')
+                ax.legend(fontsize=10)
                 ax.grid(True, alpha=0.3)
+                
+                # Add statistics text
+                mean_conf = np.mean(confidences)
+                std_conf = np.std(confidences)
+                ax.text(0.02, 0.98, f'Mean: {mean_conf:.3f}\nStd: {std_conf:.3f}', 
+                       transform=ax.transAxes, verticalalignment='top',
+                       bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
                 
                 # Save visualization
                 conf_viz_path = os.path.join(output_dir, f"confidence_distribution_{uuid4().hex[:8]}.png")
@@ -520,10 +549,144 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                 plt.close()
                 viz_paths.append(conf_viz_path)
             
+            # 3. Bar chart of cell state distribution
+            if stats["class_distribution"]:
+                fig, ax = plt.subplots(figsize=(10, 6))
+                
+                labels = list(stats["class_distribution"].keys())
+                counts = [stats["class_distribution"][label]["count"] for label in labels]
+                colors = [self.color_map.get(label, '#CCCCCC') for label in labels]
+                
+                bars = ax.bar(labels, counts, color=colors, alpha=0.8, edgecolor='black', linewidth=1)
+                
+                # Add value labels on bars
+                for bar, count in zip(bars, counts):
+                    height = bar.get_height()
+                    ax.text(bar.get_x() + bar.get_width()/2., height + 0.5,
+                           f'{count}', ha='center', va='bottom', fontweight='bold')
+                
+                ax.set_xlabel("Cell States", fontsize=12)
+                ax.set_ylabel("Number of Cells", fontsize=12)
+                ax.set_title("Cell State Distribution", fontsize=14, fontweight='bold')
+                ax.tick_params(axis='x', rotation=45)
+                ax.grid(True, alpha=0.3, axis='y')
+                
+                # Save visualization
+                bar_viz_path = os.path.join(output_dir, f"cell_state_bars_{uuid4().hex[:8]}.png")
+                plt.savefig(bar_viz_path, bbox_inches='tight', dpi=150, format='png')
+                plt.close()
+                viz_paths.append(bar_viz_path)
+            
         except Exception as e:
             logger.error(f"Error creating visualizations: {str(e)}")
         
         return viz_paths
+    
+    def _create_pca_visualization(self, results: List[Dict], features: torch.Tensor, output_dir: str) -> Optional[str]:
+        """Generate a PCA visualization from extracted features."""
+        try:
+            logger.info("Generating PCA visualization...")
+            
+            # Convert features to numpy array
+            features_np = features.numpy()
+            
+            # Apply PCA
+            pca = PCA(n_components=2)
+            features_2d = pca.fit_transform(features_np)
+            
+            # Create visualization
+            fig, ax = plt.subplots(figsize=(10, 8))
+            
+            # Plot each class with its specific color
+            for class_name in self.class_names:
+                class_indices = [i for i, r in enumerate(results) if r['predicted_class'] == class_name]
+                if class_indices:
+                    class_features = features_2d[class_indices]
+                    ax.scatter(class_features[:, 0], class_features[:, 1], 
+                             c=self.color_map.get(class_name, '#CCCCCC'), 
+                             label=class_name, alpha=0.7, s=60, edgecolors='black', linewidth=0.5)
+            
+            ax.set_xlabel(f'PC1 ({pca.explained_variance_ratio_[0]:.1%} variance)', fontsize=12)
+            ax.set_ylabel(f'PC2 ({pca.explained_variance_ratio_[1]:.1%} variance)', fontsize=12)
+            ax.set_title("Cell Feature Space (PCA)", fontsize=14, fontweight='bold')
+            ax.legend(title="Cell States", fontsize=10)
+            ax.grid(True, alpha=0.3)
+            
+            # Add explained variance information
+            total_variance = pca.explained_variance_ratio_.sum()
+            ax.text(0.02, 0.98, f'Total explained variance: {total_variance:.1%}', 
+                   transform=ax.transAxes, verticalalignment='top',
+                   bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.8))
+            
+            plt.tight_layout()
+            
+            # Save the plot
+            save_path = os.path.join(output_dir, f"pca_cell_features_{uuid4().hex[:8]}.png")
+            plt.savefig(save_path, format='png', dpi=300, bbox_inches='tight')
+            plt.close(fig)
+            
+            logger.info(f"PCA visualization saved to: {save_path}")
+            return save_path
+
+        except Exception as e:
+            logger.error(f"Error creating PCA visualization: {e}")
+            return None
+    
+    def _create_umap_visualization(self, results: List[Dict], features: torch.Tensor, output_dir: str) -> Optional[str]:
+        """Generate a UMAP visualization from extracted features using anndata and scanpy."""
+        if not ANNDATA_AVAILABLE:
+            logger.warning("UMAP visualization requested but anndata/scanpy not available")
+            return None
+            
+        try:
+            logger.info("Generating UMAP visualization...")
+            
+            # Create AnnData object
+            adata = anndata.AnnData(X=features.numpy())
+            adata.obs['predicted_class'] = [r['predicted_class'] for r in results]
+            adata.obs['image_name'] = [Path(r['image_path']).name for r in results]
+
+            # Run Scanpy workflow
+            sc.tl.pca(adata, n_comps=50)
+            sc.pp.neighbors(adata, n_neighbors=15, n_pcs=50)
+            sc.tl.umap(adata, min_dist=0.5, spread=2.5)
+            
+            # Plot UMAP
+            fig, ax = plt.subplots(figsize=(10, 8))
+            sc.pl.umap(adata, color=['predicted_class'], show=False, 
+                      palette=self.color_map, size=120, alpha=0.7, title="", ax=ax)
+
+            if ax.get_legend() is not None:
+                ax.get_legend().remove()
+            
+            ax.set_xticks([]); ax.set_yticks([]); ax.set_xlabel(""); ax.set_ylabel("")
+            plt.grid(False)
+            for spine in ax.spines.values():
+                spine.set_visible(False)
+            
+            # Add title and legend
+            ax.set_title("Cell Feature Space (UMAP)", fontsize=14, fontweight='bold')
+            
+            # Create custom legend
+            from matplotlib.patches import Patch
+            legend_elements = [Patch(facecolor=color, label=state) 
+                             for state, color in self.color_map.items()]
+            ax.legend(handles=legend_elements, title="Cell States", 
+                     loc='upper right', fontsize=10)
+            
+            plt.tight_layout()
+
+            # Save the plot
+            save_path = os.path.join(output_dir, f"umap_cell_features_{uuid4().hex[:8]}.png")
+            plt.savefig(save_path, format='png', dpi=300, bbox_inches='tight')
+            plt.close(fig)
+            
+            logger.info(f"UMAP visualization saved to: {save_path}")
+            return save_path
+
+        except Exception as e:
+            logger.error(f"Error creating UMAP visualization: {e}")
+            return None
     
     def get_metadata(self):
         """Returns the metadata for the Fibroblast_State_Analyzer_Tool."""
@@ -537,6 +700,38 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
             "class_descriptions": self.class_descriptions
         })
         return metadata
+
+    def _generate_recommendations(self, stats: Dict, total_cells: int, valid_cells: int) -> Dict[str, str]:
+        """Generate recommendations based on analysis results."""
+        recommendations = {}
+        
+        # Success rate recommendations
+        success_rate = valid_cells / total_cells if total_cells > 0 else 0
+        if success_rate < 0.5:
+            recommendations["success_rate"] = "Low success rate detected. Consider improving image quality or adjusting confidence threshold."
+        elif success_rate < 0.8:
+            recommendations["success_rate"] = "Moderate success rate. Some cells may need better preprocessing or higher quality crops."
+        else:
+            recommendations["success_rate"] = "High success rate achieved. Analysis quality is good."
+        
+        # Confidence recommendations
+        avg_confidence = stats.get("average_confidence", 0)
+        if avg_confidence < 0.6:
+            recommendations["confidence"] = "Low average confidence. Consider using higher quality images or retraining the model."
+        elif avg_confidence < 0.8:
+            recommendations["confidence"] = "Moderate confidence levels. Results are acceptable but could be improved."
+        else:
+            recommendations["confidence"] = "High confidence levels achieved. Results are reliable."
+        
+        # Sample size recommendations
+        if total_cells < 10:
+            recommendations["sample_size"] = "Small sample size. Consider analyzing more cells for statistically reliable results."
+        elif total_cells < 50:
+            recommendations["sample_size"] = "Moderate sample size. Results are informative but larger samples would improve statistical power."
+        else:
+            recommendations["sample_size"] = "Good sample size for reliable statistical analysis."
+        
+        return recommendations
 
 
 if __name__ == "__main__":
