@@ -143,7 +143,7 @@ else:
     # Each item in the list has: cell_id, crop_path, original_bbox, crop_bbox, area, centroid, crop_size
     # Extract required data directly from the list
     cell_crops = [item['crop_path'] for item in metadata]
-    cell_metadata = [{{'cell_id': item['cell_id']}} for item in metadata]
+    cell_metadata = [{'cell_id': item['cell_id']} for item in metadata]
 
     # Execute tool
     execution = tool.execute(cell_crops=cell_crops, cell_metadata=cell_metadata)
@@ -162,7 +162,7 @@ import glob
 metadata_dir = 'solver_cache/temp/tool_cache'
 metadata_files = glob.glob(os.path.join(metadata_dir, 'cell_crops_metadata_*.json'))
 if not metadata_files:
-    execution = {{"error": "No metadata files found", "status": "failed"}}
+    execution = {"error": "No metadata files found", "status": "failed"}
 else:
     # Use the most recent metadata file
     latest_metadata_file = max(metadata_files, key=os.path.getctime)
@@ -190,7 +190,7 @@ else:
         
     except Exception as e:
         print("Error loading metadata: " + str(e))
-        execution = {{"error": "Failed to load metadata: " + str(e), "status": "failed"}}
+        execution = {"error": "Failed to load metadata: " + str(e), "status": "failed"}
 ```
 
 Example 5 (Image captioning with actual image path):
