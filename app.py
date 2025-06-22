@@ -16,6 +16,7 @@ import gradio as gr
 from gradio import ChatMessage
 from pathlib import Path
 from huggingface_hub import CommitScheduler
+from octotools.tools.base import ToolCommand
 
 # Add the project root to the Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -27,6 +28,13 @@ from octotools.models.planner import Planner
 from octotools.models.memory import Memory
 from octotools.models.executor import Executor
 from octotools.models.utils import make_json_serializable, VisualizationConfig
+
+# Custom JSON encoder to handle ToolCommand objects
+class CustomEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, ToolCommand):
+            return str(obj)  # Convert ToolCommand to its string representation
+        return super().default(obj)
 
 # Get Huggingface token from environment variable
 HF_TOKEN = os.getenv("HUGGINGFACE_TOKEN")
@@ -119,7 +127,7 @@ def save_steps_data(query_id: str, memory: Memory) -> None:
     print("Memory actions: ", memory_actions)
 
     with steps_file.open("w") as f:
-        json.dump(memory_actions, f, indent=4)
+        json.dump(memory_actions, f, indent=4, cls=CustomEncoder)
 
     
 def save_module_data(query_id: str, key: str, value: Any) -> None:
@@ -129,7 +137,7 @@ def save_module_data(query_id: str, key: str, value: Any) -> None:
         module_file = DATASET_DIR / query_id / f"{key}.json"
         value = make_json_serializable(value)  # NOTE: make the value serializable
         with module_file.open("a") as f:
-            json.dump(value, f, indent=4)
+            json.dump(value, f, indent=4, cls=CustomEncoder)
     except Exception as e:
         print(f"Warning: Failed to save as JSON: {e}")
         # Fallback to saving as text file
