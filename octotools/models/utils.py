@@ -132,17 +132,23 @@ class VisualizationConfig:
         return output_dir
     
     @classmethod
-    def clear_output_dir(cls, query_cache_dir: str = None):
+    def clear_output_dir(cls, query_cache_dir: str = None, force_clear: bool = False):
         """
-        Clear the output directory (called at the start of a new query).
+        Clear the output directory (only when explicitly requested).
         
         Args:
             query_cache_dir: Optional cache directory
+            force_clear: If True, clear the directory. If False, preserve all files (default: False)
         """
         output_dir = cls.get_output_dir(query_cache_dir)
-        if os.path.exists(output_dir):
+        if force_clear and os.path.exists(output_dir):
             import shutil
             shutil.rmtree(output_dir)
+            print(f"🧹 Cleared output directory: {output_dir}")
+        elif not force_clear:
+            print(f"📁 Preserving output directory: {output_dir}")
+        
+        # Always ensure directory exists
         os.makedirs(output_dir, exist_ok=True)
     
     @classmethod
