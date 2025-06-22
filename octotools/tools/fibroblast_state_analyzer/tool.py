@@ -348,7 +348,8 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
             print(f"Processing {len(cell_crops)} cell crops...")
             
             # Load model
-            model = self._load_model()
+            self._initialize_model()
+            model = self.model
             if model is None:
                 return {"error": "Failed to load model", "status": "failed"}
             
@@ -374,11 +375,11 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
             if not results:
                 return {"error": "No cells were successfully analyzed", "status": "failed"}
             
-            # Generate visualizations
-            visual_outputs = self._generate_visualizations(results, features_list, query_cache_dir, visualization_type)
-            
             # Calculate statistics
             summary = self._calculate_statistics(results)
+            
+            # Generate visualizations
+            visual_outputs = self._create_visualizations(results, summary, query_cache_dir)
             
             return {
                 "summary": summary,
@@ -392,7 +393,7 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                 },
                 "cell_state_descriptions": self.class_descriptions,
                 "analysis_quality": self._assess_quality(results),
-                "recommendations": self._generate_recommendations(results),
+                "recommendations": self._generate_recommendations(results, len(results), len(results)),
                 "metadata_info": {
                     "total_crops_processed": len(cell_crops),
                     "successful_analyses": len(results),
@@ -828,51 +829,92 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
         """Generate recommendations based on analysis results."""
         recommendations = {}
         
-        # Success rate recommendations
-        success_rate = valid_cells / total_cells if total_cells > 0 else 0
-        if success_rate < 0.5:
-            recommendations["success_rate"] = "Low success rate detected. Consider improving image quality or adjusting confidence threshold."
-        elif success_rate < 0.8:
-            recommendations["success_rate"] = "Moderate success rate. Some cells may need better preprocessing or higher quality crops."
+        # Check data quality
+        if valid_cells < 10:
+            recommendations["data_quality"] = "Warning: Very few cells analyzed. Consider using more cell crops for reliable results."
+        elif valid_cells < 50:
+            recommendations["data_quality"] = "Moderate cell count. Results may be more reliable with additional cell crops."
         else:
-            recommendations["success_rate"] = "High success rate achieved. Analysis quality is good."
+            recommendations["data_quality"] = "Good cell count for analysis."
         
-        # Confidence recommendations
+        # Check confidence distribution
         avg_confidence = stats.get("average_confidence", 0)
         if avg_confidence < 0.6:
-            recommendations["confidence"] = "Low average confidence. Consider using higher quality images or retraining the model."
+            recommendations["confidence"] = "Low average confidence. Consider adjusting confidence threshold or improving image quality."
         elif avg_confidence < 0.8:
-            recommendations["confidence"] = "Moderate confidence levels. Results are acceptable but could be improved."
+            recommendations["confidence"] = "Moderate confidence. Results are acceptable but could be improved."
         else:
-            recommendations["confidence"] = "High confidence levels achieved. Results are reliable."
+            recommendations["confidence"] = "High confidence in classifications."
         
-        # Cell state distribution recommendations
+        # Check class distribution
         class_dist = stats.get("class_distribution", {})
-        if class_dist:
-            # Check for class imbalance
-            max_count = max([info["count"] for info in class_dist.values()])
-            min_count = min([info["count"] for info in class_dist.values()])
-            if max_count > 0 and min_count / max_count < 0.1:
-                recommendations["distribution"] = "Severe class imbalance detected. Consider collecting more samples of underrepresented classes."
-            elif max_count > 0 and min_count / max_count < 0.3:
-                recommendations["distribution"] = "Moderate class imbalance. Results may be biased towards dominant classes."
-            
-            # Check for specific cell states
-            if "dead" in class_dist and class_dist["dead"]["percentage"] > 30:
-                recommendations["dead_cells"] = "High proportion of dead cells detected. Check sample preparation and staining protocols."
-            
-            if "p-MyoFb" in class_dist and class_dist["p-MyoFb"]["percentage"] > 50:
-                recommendations["proliferation"] = "High proliferative myofibroblast population. Sample may be in active remodeling phase."
-        
-        # Sample size recommendations
-        if total_cells < 10:
-            recommendations["sample_size"] = "Small sample size. Consider analyzing more cells for statistically reliable results."
-        elif total_cells < 50:
-            recommendations["sample_size"] = "Moderate sample size. Results are informative but larger samples would improve statistical power."
+        if len(class_dist) < 2:
+            recommendations["diversity"] = "Limited cell state diversity detected. This may indicate a homogeneous sample or classification issues."
         else:
-            recommendations["sample_size"] = "Good sample size for reliable statistical analysis."
+            recommendations["diversity"] = "Good diversity of cell states detected."
         
         return recommendations
+    
+    def _get_state_distribution(self, results: List[Dict]) -> Dict[str, Any]:
+        """Get cell state distribution from results."""
+        if not results:
+            return {}
+        
+        class_counts = {}
+        for result in results:
+            predicted_class = result.get("predicted_class", "unknown")
+            class_counts[predicted_class] = class_counts.get(predicted_class, 0) + 1
+        
+        total_cells = len(results)
+        return {
+            class_name: {
+                "count": count,
+                "percentage": (count / total_cells) * 100
+            }
+            for class_name, count in class_counts.items()
+        }
+    
+    def _assess_quality(self, results: List[Dict]) -> Dict[str, Any]:
+        """Assess the quality of analysis results."""
+        if not results:
+            return {"overall_quality": "poor", "issues": ["No results to assess"]}
+        
+        # Calculate quality metrics
+        confidences = [r.get("confidence", 0) for r in results]
+        avg_confidence = np.mean(confidences)
+        std_confidence = np.std(confidences)
+        
+        # Count high-confidence predictions
+        high_conf_count = sum(1 for c in confidences if c >= 0.8)
+        high_conf_ratio = high_conf_count / len(results)
+        
+        # Assess overall quality
+        if avg_confidence >= 0.8 and high_conf_ratio >= 0.7:
+            overall_quality = "excellent"
+        elif avg_confidence >= 0.6 and high_conf_ratio >= 0.5:
+            overall_quality = "good"
+        elif avg_confidence >= 0.4:
+            overall_quality = "fair"
+        else:
+            overall_quality = "poor"
+        
+        # Identify potential issues
+        issues = []
+        if avg_confidence < 0.6:
+            issues.append("Low average confidence")
+        if std_confidence > 0.3:
+            issues.append("High confidence variability")
+        if len(results) < 10:
+            issues.append("Small sample size")
+        
+        return {
+            "overall_quality": overall_quality,
+            "average_confidence": avg_confidence,
+            "confidence_std": std_confidence,
+            "high_confidence_ratio": high_conf_ratio,
+            "total_cells": len(results),
+            "issues": issues
+        }
 
 
 if __name__ == "__main__":
