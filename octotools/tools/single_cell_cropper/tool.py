@@ -295,50 +295,47 @@ class Single_Cell_Cropper_Tool(BaseTool):
     def _create_summary_visualization(self, original_img, mask, cell_crops, stats, output_dir, min_area, margin):
         """Creates a professional and robust summary visualization of the cropping process."""
         vis_config = VisualizationConfig()
-        output_path = os.path.join(output_dir, f"single_cell_cropper_summary.png") # Use a fixed name
+        output_path = os.path.join(output_dir, f"single_cell_cropper_summary.png")
 
         try:
-            # Create a 2x2 grid for visualization using a more robust Gridspec layout
-            fig = plt.figure(figsize=(22, 22))
-            gs = fig.add_gridspec(2, 2, width_ratios=[1, 1], height_ratios=[1, 1], hspace=0.3, wspace=0.2)
-            
+            # Create a 2x2 grid for visualization using the most robust method
+            fig, axs = plt.subplots(2, 2, figsize=(22, 22), dpi=300)
             fig.suptitle("Single-Cell Cropping Summary", 
                          fontsize=vis_config.PROFESSIONAL_STYLE['axes.titlesize'] + 6, 
                          fontweight='bold')
 
-            # --- Subplots ---
-            ax1 = fig.add_subplot(gs[0, 0])
-            ax2 = fig.add_subplot(gs[0, 1])
-            ax3 = fig.add_subplot(gs[1, 0])
-            ax4 = fig.add_subplot(gs[1, 1])
-            
             # 1. Original Image
-            ax1.imshow(original_img, cmap='gray')
-            vis_config.apply_professional_styling(ax1, title="Original Image")
-            ax1.axis('off')
+            axs[0, 0].imshow(original_img, cmap='gray')
+            axs[0, 0].set_title("Original Image", fontsize=vis_config.PROFESSIONAL_STYLE['axes.titlesize'])
+            axs[0, 0].axis('off')
 
             # 2. Nuclei Mask Overlay
             from cellpose import plot
             overlay = plot.mask_overlay(original_img, mask)
-            ax2.imshow(overlay)
-            vis_config.apply_professional_styling(ax2, title="Nuclei Mask Overlay")
-            ax2.axis('off')
+            axs[0, 1].imshow(overlay)
+            axs[0, 1].set_title("Nuclei Mask Overlay", fontsize=vis_config.PROFESSIONAL_STYLE['axes.titlesize'])
+            axs[0, 1].axis('off')
 
             # 3. Sample Crops Grid
-            ax3.set_title("Sample Cell Crops", fontsize=vis_config.PROFESSIONAL_STYLE['axes.titlesize'], fontweight='bold', pad=20)
-            ax3.axis('off')
-            if cell_crops:
-                from mpl_toolkits.axes_grid1 import ImageGrid
-                grid = ImageGrid(fig, gs[1, 0], nrows_ncols=(4, 4), axes_pad=0.2)
-                for i, ax_grid in enumerate(grid):
-                    if i < len(cell_crops) and i < 16:
-                        try:
-                            crop_img = Image.open(cell_crops[i])
-                            ax_grid.imshow(crop_img, cmap='gray')
-                        except FileNotFoundError:
-                            pass # Skip if file not found
-                    ax_grid.axis('off')
+            axs[1, 0].set_title("Sample Cell Crops", fontsize=vis_config.PROFESSIONAL_STYLE['axes.titlesize'])
+            axs[1, 0].axis('off') # Turn off axis for the placeholder subplot
             
+            # Create a grid of sample crops on top of the placeholder axis
+            if cell_crops:
+                sample_indices = np.random.choice(len(cell_crops), size=min(16, len(cell_crops)), replace=False)
+                grid_container = axs[1, 0].inset_axes([0, 0, 1, 1])
+                grid_container.set_facecolor('white') # Avoids transparency issues
+                
+                inner_gs = grid_container.get_subplotspec().subgridspec(4, 4, wspace=0.1, hspace=0.1)
+                for i, idx in enumerate(sample_indices):
+                    ax_grid = fig.add_subplot(inner_gs[i])
+                    try:
+                        crop_img = Image.open(cell_crops[idx])
+                        ax_grid.imshow(crop_img, cmap='gray')
+                    except FileNotFoundError:
+                        pass  # Skip if a crop file is missing
+                    ax_grid.axis('off')
+
             # 4. Statistics and Parameters Text
             stats_text = (
                 f"Initial Nuclei Detected: {stats.get('initial_cell_count', 'N/A')}\n"
@@ -349,18 +346,20 @@ class Single_Cell_Cropper_Tool(BaseTool):
                 f"  - Min Area: {min_area} pixels\n"
                 f"  - Margin: {margin} pixels"
             )
-            ax4.text(0.5, 0.5, stats_text, ha='center', va='center', transform=ax4.transAxes,
-                     fontsize=vis_config.PROFESSIONAL_STYLE['font.size'] + 2,
-                     bbox=dict(boxstyle='round,pad=0.5', facecolor='lightblue', alpha=0.8))
-            vis_config.apply_professional_styling(ax4, title="Processing Statistics")
-            ax4.axis('off')
+            axs[1, 1].text(0.5, 0.5, stats_text, ha='center', va='center', transform=axs[1, 1].transAxes,
+                           fontsize=vis_config.PROFESSIONAL_STYLE['font.size'] + 2,
+                           bbox=dict(boxstyle='round,pad=0.5', facecolor='lightblue', alpha=0.8))
+            axs[1, 1].set_title("Processing Statistics", fontsize=vis_config.PROFESSIONAL_STYLE['axes.titlesize'])
+            axs[1, 1].axis('off')
 
+            plt.tight_layout(rect=[0, 0, 1, 0.96])
             vis_config.save_professional_figure(fig, output_path)
             plt.close(fig)
 
+            print(f"✅ Summary visualization successfully created at {output_path}")
             return output_path
         except Exception as e:
-            print(f"Error creating summary visualization: {e}")
+            print(f"❌ Error creating summary visualization: {e}")
             import traceback
             traceback.print_exc()
             return None
