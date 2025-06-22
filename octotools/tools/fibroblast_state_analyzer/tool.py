@@ -363,6 +363,8 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
             results = []
             features_list = []
             
+            print(f"Starting to process {len(cell_crops)} cell crops...")
+            
             for i in range(0, len(cell_crops), batch_size):
                 batch_crops = cell_crops[i:i + batch_size]
                 batch_metadata = cell_metadata[i:i + batch_size] if cell_metadata else [{}] * len(batch_crops)
@@ -374,9 +376,13 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                             results.append(result)
                             if features is not None:
                                 features_list.append(features)
+                                if len(features_list) % 50 == 0:  # Print progress every 50 cells
+                                    print(f"Processed {len(results)} cells, extracted {len(features_list)} features")
                     except Exception as e:
                         print(f"Error processing {crop_path}: {str(e)}")
                         continue
+            
+            print(f"Processing completed. Total results: {len(results)}, Total features: {len(features_list)}")
             
             if not results:
                 return {"error": "No cells were successfully analyzed", "status": "failed"}
@@ -390,21 +396,35 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
             # Generate advanced visualizations (PCA/UMAP) if features are available
             if features_list and len(features_list) > 0:
                 try:
+                    print(f"Generating advanced visualizations with {len(features_list)} features...")
                     # Stack features into a tensor
                     features_tensor = torch.stack(features_list)
+                    print(f"Features tensor shape: {features_tensor.shape}")
                     
                     # Create PCA visualization
+                    print("Creating PCA visualization...")
                     pca_viz_path = self._create_pca_visualization(results, features_tensor, query_cache_dir)
                     if pca_viz_path:
                         visual_outputs.append(pca_viz_path)
+                        print(f"PCA visualization created: {pca_viz_path}")
+                    else:
+                        print("PCA visualization failed")
                     
                     # Create UMAP visualization if anndata is available
+                    print("Creating UMAP visualization...")
                     umap_viz_path = self._create_umap_visualization(results, features_tensor, query_cache_dir)
                     if umap_viz_path:
                         visual_outputs.append(umap_viz_path)
+                        print(f"UMAP visualization created: {umap_viz_path}")
+                    else:
+                        print("UMAP visualization failed")
                         
                 except Exception as e:
                     print(f"Warning: Failed to create advanced visualizations: {str(e)}")
+                    import traceback
+                    traceback.print_exc()
+            else:
+                print(f"No features available for advanced visualizations. features_list length: {len(features_list) if features_list else 0}")
             
             return {
                 "summary": summary,
