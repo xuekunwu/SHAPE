@@ -293,67 +293,76 @@ class Single_Cell_Cropper_Tool(BaseTool):
         return cell_crops, cell_metadata, stats
 
     def _create_summary_visualization(self, original_img, mask, cell_crops, stats, output_dir, min_area, margin):
-        """Creates a professional summary visualization of the cropping process."""
+        """Creates a professional and robust summary visualization of the cropping process."""
         vis_config = VisualizationConfig()
-        output_path = os.path.join(output_dir, f"single_cell_cropper_summary_{uuid4().hex[:8]}.png")
+        output_path = os.path.join(output_dir, f"single_cell_cropper_summary.png") # Use a fixed name
 
         try:
-            # Create a 2x2 grid for visualization
-            fig, axs = vis_config.create_professional_figure(figsize=(20, 20), nrows=2, ncols=2)
+            # Create a 2x2 grid for visualization using a more robust Gridspec layout
+            fig = plt.figure(figsize=(22, 22))
+            gs = fig.add_gridspec(2, 2, width_ratios=[1, 1], height_ratios=[1, 1], hspace=0.3, wspace=0.2)
+            
             fig.suptitle("Single-Cell Cropping Summary", 
-                         fontsize=vis_config.PROFESSIONAL_STYLE['figure.titlesize'] + 4, 
-                         fontweight='bold', y=0.97)
+                         fontsize=vis_config.PROFESSIONAL_STYLE['axes.titlesize'] + 6, 
+                         fontweight='bold')
 
+            # --- Subplots ---
+            ax1 = fig.add_subplot(gs[0, 0])
+            ax2 = fig.add_subplot(gs[0, 1])
+            ax3 = fig.add_subplot(gs[1, 0])
+            ax4 = fig.add_subplot(gs[1, 1])
+            
             # 1. Original Image
-            axs[0, 0].imshow(original_img, cmap='gray')
-            vis_config.apply_professional_styling(axs[0, 0], title="Original Image")
-            axs[0, 0].axis('off')
+            ax1.imshow(original_img, cmap='gray')
+            vis_config.apply_professional_styling(ax1, title="Original Image")
+            ax1.axis('off')
 
             # 2. Nuclei Mask Overlay
+            from cellpose import plot
             overlay = plot.mask_overlay(original_img, mask)
-            axs[0, 1].imshow(overlay)
-            vis_config.apply_professional_styling(axs[0, 1], title="Nuclei Mask Overlay")
-            axs[0, 1].axis('off')
+            ax2.imshow(overlay)
+            vis_config.apply_professional_styling(ax2, title="Nuclei Mask Overlay")
+            ax2.axis('off')
 
             # 3. Sample Crops Grid
-            axs[1, 0].set_title("Sample Cell Crops", 
-                                fontsize=vis_config.PROFESSIONAL_STYLE['axes.titlesize'], 
-                                fontweight='bold', pad=20)
-            axs[1, 0].axis('off')
-            
-            # Create a grid within the subplot for sample crops
+            ax3.set_title("Sample Cell Crops", fontsize=vis_config.PROFESSIONAL_STYLE['axes.titlesize'], fontweight='bold', pad=20)
+            ax3.axis('off')
             if cell_crops:
                 from mpl_toolkits.axes_grid1 import ImageGrid
-                grid = ImageGrid(fig, 121, nrows_ncols=(4, 4), axes_pad=0.1)
+                grid = ImageGrid(fig, gs[1, 0], nrows_ncols=(4, 4), axes_pad=0.2)
                 for i, ax_grid in enumerate(grid):
                     if i < len(cell_crops) and i < 16:
-                        crop_img = Image.open(cell_crops[i])
-                        ax_grid.imshow(crop_img, cmap='gray')
+                        try:
+                            crop_img = Image.open(cell_crops[i])
+                            ax_grid.imshow(crop_img, cmap='gray')
+                        except FileNotFoundError:
+                            pass # Skip if file not found
                     ax_grid.axis('off')
             
             # 4. Statistics and Parameters Text
             stats_text = (
-                f"Initial Nuclei Detected: {stats['initial_cell_count']}\n"
-                f"Filtered by Area (<{min_area}px): {stats['filtered_by_area']}\n"
-                f"Filtered by Border: {stats['filtered_by_border']}\n"
-                f"Final Valid Crops: {stats['final_cell_count']}\n\n"
+                f"Initial Nuclei Detected: {stats.get('initial_cell_count', 'N/A')}\n"
+                f"Filtered by Area (<{min_area}px): {stats.get('filtered_by_area', 'N/A')}\n"
+                f"Filtered by Border: {stats.get('filtered_by_border', 'N/A')}\n"
+                f"Final Valid Crops: {stats.get('final_cell_count', 'N/A')}\n\n"
                 f"Parameters Used:\n"
                 f"  - Min Area: {min_area} pixels\n"
                 f"  - Margin: {margin} pixels"
             )
-            axs[1, 1].text(0.5, 0.5, stats_text, ha='center', va='center', 
-                           fontsize=vis_config.PROFESSIONAL_STYLE['font.size'],
-                           bbox=dict(boxstyle='round,pad=0.5', facecolor='lightblue', alpha=0.8))
-            vis_config.apply_professional_styling(axs[1, 1], title="Processing Statistics")
-            axs[1, 1].axis('off')
+            ax4.text(0.5, 0.5, stats_text, ha='center', va='center', transform=ax4.transAxes,
+                     fontsize=vis_config.PROFESSIONAL_STYLE['font.size'] + 2,
+                     bbox=dict(boxstyle='round,pad=0.5', facecolor='lightblue', alpha=0.8))
+            vis_config.apply_professional_styling(ax4, title="Processing Statistics")
+            ax4.axis('off')
 
-            plt.tight_layout(rect=[0, 0.03, 1, 0.95])
             vis_config.save_professional_figure(fig, output_path)
             plt.close(fig)
 
             return output_path
         except Exception as e:
             print(f"Error creating summary visualization: {e}")
+            import traceback
+            traceback.print_exc()
             return None
 
     def get_metadata(self):
