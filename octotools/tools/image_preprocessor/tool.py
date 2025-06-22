@@ -126,7 +126,7 @@ class Image_Preprocessor_Tool(BaseTool):
         
         # Add overall title with professional styling
         fig.suptitle(f"Image Preprocessing: {os.path.basename(filename)}", 
-                     fontsize=vis_config.PROFESSIONAL_STYLE['figure.titlesize'], 
+                     fontsize=vis_config.PROFESSIONAL_STYLE['axes.titlesize'], 
                      fontweight='bold', y=1.02)
         plt.tight_layout()
         
