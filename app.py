@@ -829,11 +829,11 @@ def main(args):
                         lambda: fibroblast_tools, outputs=enabled_fibroblast_tools
                     )
                     gr.Button("Select All Tools", size="sm").click(
-                        lambda: fibroblast_tools + general_tools, 
+                        lambda: (fibroblast_tools, general_tools), 
                         outputs=[enabled_fibroblast_tools, enabled_general_tools]
                     )
                     gr.Button("Clear Selection", size="sm").click(
-                        lambda: [[], []], 
+                        lambda: ([], []), 
                         outputs=[enabled_fibroblast_tools, enabled_general_tools]
                     )
 
@@ -897,82 +897,48 @@ def main(args):
                         
                         # Define example lists
                         fibroblast_examples = [
-                            [ "Image Preprocessing",
-                             "examples/A5_01_1_1_Phase Contrast_001.png",
-                             "Normalize this phase contrast image.",
-                             ["Image_Preprocessor_Tool"],
-                             [],
-                             "Illumination-corrected and brightness-normalized phase contrast image."],
-
-                            [ "Cell identification",
-                             "examples/A5_01_1_1_Phase Contrast_001.png",
-                             "How many cells are there in this image.",
-                             ["Image_Preprocessor_Tool", "Nuclei_Segmenter_Tool"],
-                             [],
-                             "286 cells are identified and their nuclei are labeled."],
-
-                            [ "Single-Cell Cropping",
-                             "examples/A5_01_1_1_Phase Contrast_001.png",
-                             "Crop single cells from the segmented nuclei in this image.",
-                             ["Image_Preprocessor_Tool", "Nuclei_Segmenter_Tool", "Single_Cell_Cropper_Tool"],
-                             [],
-                             "Individual cell crops extracted from the image."],
-
-                            [ "Fibroblast State Analysis",
-                             "examples/fibroblast.png",
-                             "Analyze the fibroblast cell states in this image.",
-                             ["Image_Preprocessor_Tool", "Nuclei_Segmenter_Tool", "Single_Cell_Cropper_Tool", "Fibroblast_State_Analyzer_Tool"],
-                             [],
-                             "Comprehensive analysis of fibroblast cell states with visualizations."],
+                            ["Image Preprocessing", "examples/A5_01_1_1_Phase Contrast_001.png", "Normalize this phase contrast image.", 
+                             "Image_Preprocessor_Tool", "Illumination-corrected and brightness-normalized phase contrast image."],
+                            ["Cell Identification", "examples/A5_01_1_1_Phase Contrast_001.png", "How many cells are there in this image.", 
+                             "Image_Preprocessor_Tool, Nuclei_Segmenter_Tool", "286 cells are identified and their nuclei are labeled."],
+                            ["Single-Cell Cropping", "examples/A5_01_1_1_Phase Contrast_001.png", "Crop single cells from the segmented nuclei in this image.", 
+                             "Image_Preprocessor_Tool, Nuclei_Segmenter_Tool, Single_Cell_Cropper_Tool", "Individual cell crops extracted from the image."],
+                            ["Fibroblast State Analysis", "examples/fibroblast.png", "Analyze the fibroblast cell states in this image.", 
+                             "Image_Preprocessor_Tool, Nuclei_Segmenter_Tool, Single_Cell_Cropper_Tool, Fibroblast_State_Analyzer_Tool", "Comprehensive analysis of fibroblast cell states with visualizations."]
                         ]
                         
                         general_examples = [
-                            [ "Pathology Diagnosis",
-                                "examples/pathology.jpg", 
-                                "What are the cell types in this image?", 
-                                ["Generalist_Solution_Generator_Tool", "Image_Captioner_Tool", "Relevant_Patch_Zoomer_Tool"],
-                                "Need expert insights."],
-
-                            [ "Visual Reasoning",  
-                                "examples/rotting_kiwi.png", 
-                                "You are given a 3 x 3 grid in which each cell can contain either no kiwi, one fresh kiwi, or one rotten kiwi. Every minute, any fresh kiwi that is 4-directionally adjacent to a rotten kiwi also becomes rotten. What is the minimum number of minutes that must elapse until no cell has a fresh kiwi?", ["Image_Captioner_Tool"], 
-                                "4 minutes"],
-
-                            [ "Scientific Research",
-                                None, 
-                                "What are the research trends in tool agents with large language models for scientific discovery? Please consider the latest literature from ArXiv, PubMed, Nature, and news sources.", ["ArXiv_Paper_Searcher_Tool", "Pubmed_Search_Tool", "Nature_News_Fetcher_Tool"],
-                                "Open-ended question. No reference answer."],
+                            ["Pathology Diagnosis", "examples/pathology.jpg", "What are the cell types in this image?", 
+                             "Generalist_Solution_Generator_Tool, Image_Captioner_Tool, Relevant_Patch_Zoomer_Tool", "Need expert insights."],
+                            ["Visual Reasoning", "examples/rotting_kiwi.png", "You are given a 3 x 3 grid in which each cell can contain either no kiwi, one fresh kiwi, or one rotten kiwi. Every minute, any fresh kiwi that is 4-directionally adjacent to a rotten kiwi also becomes rotten. What is the minimum number of minutes that must elapse until no cell has a fresh kiwi?", 
+                             "Image_Captioner_Tool", "4 minutes"],
+                            ["Scientific Research", None, "What are the research trends in tool agents with large language models for scientific discovery? Please consider the latest literature from ArXiv, PubMed, Nature, and news sources.", 
+                             "ArXiv_Paper_Searcher_Tool, Pubmed_Search_Tool, Nature_News_Fetcher_Tool", "Open-ended question. No reference answer."]
                         ]
-                        
+
+                        # Helper function to distribute tools
+                        def distribute_tools(img, q, tools_str, ans):
+                            selected_tools = [tool.strip() for tool in tools_str.split(',')]
+                            selected_fibroblast = [tool for tool in selected_tools if tool in fibroblast_tools]
+                            selected_general = [tool for tool in selected_tools if tool in general_tools]
+                            return img, q, selected_fibroblast, selected_general
+
                         gr.Markdown("#### 🧬 Fibroblast Analysis Examples")
                         gr.Examples(
                             examples=fibroblast_examples,
-                            inputs=[
-                                gr.Textbox(visible=False, label="Category"),
-                                user_image,
-                                user_query,
-                                enabled_fibroblast_tools,
-                                enabled_general_tools,
-                                gr.Textbox(visible=False, label="Reference Answer")
-                            ],
+                            inputs=[user_image, user_query, gr.Textbox(label="Select Tools"), gr.Textbox(label="Reference Answer", visible=False)],
                             outputs=[user_image, user_query, enabled_fibroblast_tools, enabled_general_tools],
-                            fn=lambda cat, img, q, f_tools, g_tools, ans: (img, q, f_tools, g_tools),
+                            fn=distribute_tools,
                             cache_examples=False
                         )
                         
                         gr.Markdown("#### 🧩 General Purpose Examples")
                         gr.Examples(
                             examples=general_examples,
-                            inputs=[
-                                gr.Textbox(visible=False, label="Category"),
-                                user_image,
-                                user_query,
-                                enabled_fibroblast_tools,
-                                enabled_general_tools,
-                                gr.Textbox(visible=False, label="Reference Answer")
-                            ],
+                            label="General Purpose Examples",
+                            inputs=[user_image, user_query, gr.Textbox(label="Select Tools"), gr.Textbox(label="Reference Answer", visible=False)],
                             outputs=[user_image, user_query, enabled_fibroblast_tools, enabled_general_tools],
-                            fn=lambda cat, img, q, f_tools, g_tools, ans: (img, q, f_tools, g_tools),
+                            fn=distribute_tools,
                             cache_examples=False
                         )
 
