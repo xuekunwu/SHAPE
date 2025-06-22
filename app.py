@@ -16,7 +16,7 @@ import gradio as gr
 from gradio import ChatMessage
 from pathlib import Path
 from huggingface_hub import CommitScheduler
-from octotools.tools.base import ToolCommand
+from octotools.models.formatters import ToolCommand
 
 # Add the project root to the Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
