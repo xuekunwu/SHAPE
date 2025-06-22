@@ -791,12 +791,7 @@ def main(args):
                     "Image_Preprocessor_Tool",
                     "Nuclei_Segmenter_Tool",
                     "Single_Cell_Cropper_Tool",
-                    "Fibroblast_State_Analyzer_Tool",
-                    "Object_Detector_Tool",
-                    "Image_Captioner_Tool", 
-                    "Relevant_Patch_Zoomer_Tool",
-                    "Text_Detector_Tool",
-                    "Advanced_Object_Detector_Tool"
+                    "Fibroblast_State_Analyzer_Tool"
                 ]
                 
                 # General tools
@@ -808,7 +803,12 @@ def main(args):
                     "Nature_News_Fetcher_Tool",
                     "Google_Search_Tool",
                     "Wikipedia_Knowledge_Searcher_Tool",
-                    "URL_Text_Extractor_Tool"
+                    "URL_Text_Extractor_Tool",
+                    "Object_Detector_Tool",
+                    "Image_Captioner_Tool", 
+                    "Relevant_Patch_Zoomer_Tool",
+                    "Text_Detector_Tool",
+                    "Advanced_Object_Detector_Tool"
                 ]
                 
                 with gr.Accordion("🧬 Fibroblas Tools", open=True):
@@ -899,17 +899,17 @@ def main(args):
                         fibroblast_examples = [
                             [ "Image Preprocessing",
                              "examples/A5_01_1_1_Phase Contrast_001.png",
-                             "Preprocess this phase contrast image to correct illumination and adjust brightness.",
+                             "Normalize this phase contrast image.",
                              ["Image_Preprocessor_Tool"],
                              [],
                              "Illumination-corrected and brightness-normalized phase contrast image."],
 
-                            [ "Nuclei Segmentation",
+                            [ "Cell identification",
                              "examples/A5_01_1_1_Phase Contrast_001.png",
-                             "Segment the nuclei from this preprocessed phase contrast image.",
+                             "How many cells are there in this image.",
                              ["Image_Preprocessor_Tool", "Nuclei_Segmenter_Tool"],
                              [],
-                             "Segmented nuclei mask from the phase contrast image."],
+                             "286 cells are identified and their nuclei are labeled."],
 
                             [ "Single-Cell Cropping",
                              "examples/A5_01_1_1_Phase Contrast_001.png",
@@ -918,35 +918,30 @@ def main(args):
                              [],
                              "Individual cell crops extracted from the image."],
 
-                            [ "Full Fibroblast Analysis",
+                            [ "Fibroblast State Analysis",
                              "examples/fibroblast.png",
-                             "Analyze the fibroblast cell states in this image, including preprocessing, segmentation, and classification.",
+                             "Analyze the fibroblast cell states in this image.",
                              ["Image_Preprocessor_Tool", "Nuclei_Segmenter_Tool", "Single_Cell_Cropper_Tool", "Fibroblast_State_Analyzer_Tool"],
                              [],
                              "Comprehensive analysis of fibroblast cell states with visualizations."],
                         ]
                         
                         general_examples = [
-                            [ "Object Detection (Baseball)",
-                             "examples/baseball.png",
-                             "Detect the baseball in this image and provide its bounding box.",
-                             ["Object_Detector_Tool"],
-                             [],
-                             "Detected baseball with bounding box coordinates."],
+                            [ "Pathology Diagnosis",
+                                "examples/pathology.jpg", 
+                                "What are the cell types in this image?", 
+                                ["Generalist_Solution_Generator_Tool", "Image_Captioner_Tool", "Relevant_Patch_Zoomer_Tool"],
+                                "Need expert insights."],
 
-                            [ "Code Generation (Fibonacci)",
-                             None,
-                             "Write a Python function to calculate the nth Fibonacci number.",
-                             [],
-                             ["Python_Code_Generator_Tool"],
-                             "A Python function that computes Fibonacci numbers."],
+                            [ "Visual Reasoning",  
+                                "examples/rotting_kiwi.png", 
+                                "You are given a 3 x 3 grid in which each cell can contain either no kiwi, one fresh kiwi, or one rotten kiwi. Every minute, any fresh kiwi that is 4-directionally adjacent to a rotten kiwi also becomes rotten. What is the minimum number of minutes that must elapse until no cell has a fresh kiwi?", ["Image_Captioner_Tool"], 
+                                "4 minutes"],
 
-                            [ "Scientific Search (Quantum Computing)",
-                             None,
-                             "Find recent papers on quantum computing from ArXiv.",
-                             [],
-                             ["ArXiv_Paper_Searcher_Tool"],
-                             "A list of recent ArXiv papers on quantum computing."]
+                            [ "Scientific Research",
+                                None, 
+                                "What are the research trends in tool agents with large language models for scientific discovery? Please consider the latest literature from ArXiv, PubMed, Nature, and news sources.", ["ArXiv_Paper_Searcher_Tool", "Pubmed_Search_Tool", "Nature_News_Fetcher_Tool"],
+                                "Open-ended question. No reference answer."],
                         ]
                         
                         gr.Markdown("#### 🧬 Fibroblast Analysis Examples")
