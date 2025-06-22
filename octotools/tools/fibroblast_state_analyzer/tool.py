@@ -283,10 +283,8 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                 "image_path": image_path,
                 "predicted_class": self.class_names[pred_idx],
                 "confidence": confidence,
-                "all_probabilities": {
-                    cls_name: prob.item() 
-                    for cls_name, prob in zip(self.class_names, probs[0])
-                }
+                "is_above_threshold": confidence >= confidence_threshold,
+                "features": features.squeeze(0).cpu().numpy()
             }
             
             return result, features.squeeze(0)  # Remove batch dimension
@@ -362,23 +360,45 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
             
             print(f"Starting to process {len(cell_crops)} cell crops...")
             
+            # Batch processing loop
             for i in range(0, len(cell_crops), batch_size):
-                batch_crops = cell_crops[i:i + batch_size]
-                batch_metadata = cell_metadata[i:i + batch_size] if cell_metadata else [{}] * len(batch_crops)
-                
-                for crop_path, metadata in zip(batch_crops, batch_metadata):
+                batch_paths = cell_crops[i:i+batch_size]
+                img_tensors = []
+                for path in batch_paths:
                     try:
-                        result, features = self._classify_single_cell(crop_path, model, confidence_threshold)
-                        if result:
-                            results.append(result)
-                            if features is not None:
-                                features_list.append(features)
-                                if len(features_list) % 50 == 0:  # Print progress every 50 cells
-                                    print(f"Processed {len(results)} cells, extracted {len(features_list)} features")
+                        img_tensors.append(self._preprocess_image(path).squeeze(0))
                     except Exception as e:
-                        print(f"Error processing {crop_path}: {str(e)}")
-                        continue
-            
+                        logger.warning(f"Skipping problematic crop {path}: {e}")
+                        continue # Skip this crop
+                
+                if not img_tensors:
+                    logger.warning(f"Skipping empty batch from index {i}")
+                    continue
+
+                batch_tensor = torch.stack(img_tensors)
+                
+                # Get model output in no_grad context
+                features = self.model.backbone.forward_features(batch_tensor)
+                logits = self.model.backbone.head(features)
+                probs = F.softmax(logits, dim=1)
+                confidences, predictions = torch.max(probs, dim=1)
+                
+                # Process batch results
+                for j, path in enumerate(batch_paths):
+                    # Ensure we have a valid prediction for this item
+                    if j < len(predictions):
+                        pred_index = predictions[j].item()
+                        confidence = confidences[j].item()
+                        
+                        result = {
+                            "image_path": path,
+                            "predicted_class": self.class_names[pred_index],
+                            "confidence": confidence,
+                            "is_above_threshold": confidence >= confidence_threshold,
+                            "features": features[j].cpu().numpy() # Add features directly to result
+                        }
+                        results.append(result)
+
             print(f"Processing completed. Total results: {len(results)}, Total features: {len(features_list)}")
             
             if not results:
@@ -390,7 +410,19 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
             # Generate final summary and visualizations
             if len(features_list) > 0:
                 logger.info("Generating final summary and visualizations...")
-                features_list = np.vstack([r['features'] for r in results if r['features'] is not None])
+                # Safely extract features from results that definitely have them
+                features_list = np.array([r['features'] for r in results if 'features' in r])
+                
+                if len(features_list) == 0:
+                    logger.warning("No features were successfully extracted, skipping visualizations.")
+                    # Return partial results without visualizations
+                    return {
+                        "summary": "Analysis completed, but no features were successfully extracted for visualization.",
+                        "cell_count": len(results),
+                        "visual_outputs": [],
+                        "statistics": self._calculate_statistics(results)
+                    }
+
                 summary = self._calculate_statistics(results)
 
                 # Save results and get persistent output dir
