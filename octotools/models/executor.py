@@ -48,7 +48,7 @@ class Executor:
         if tool_name == "Fibroblast_State_Analyzer_Tool":
             return ToolCommand(
                 analysis="Using dynamic metadata file discovery for Fibroblast_State_Analyzer_Tool",
-                explanation="Automatically finding the most recent metadata file and loading cell data",
+                explanation="Automatically finding the most recent metadata file and loading cell data with improved format handling",
                 command="""import json
 import os
 import glob
@@ -64,45 +64,18 @@ else:
     print("Using metadata file: " + latest_metadata_file)
     
     try:
-        with open(latest_metadata_file, 'r') as f:
-            metadata = json.load(f)
+        # Use the tool's improved metadata loading method
+        execution = tool._load_cell_data_from_metadata(latest_metadata_file, 'solver_cache/temp/tool_cache/')
         
-        # Handle different metadata formats
-        if isinstance(metadata, list):
-            # Direct list format from single_cell_cropper
-            cell_metadata_list = metadata
-        elif isinstance(metadata, dict):
-            # Dictionary format - extract the list
-            if 'cell_metadata' in metadata:
-                cell_metadata_list = metadata['cell_metadata']
-            elif 'crops' in metadata:
-                cell_metadata_list = metadata['crops']
-            else:
-                # Try to find any list in the dictionary
-                cell_metadata_list = None
-                for key, value in metadata.items():
-                    if isinstance(value, list) and len(value) > 0:
-                        if isinstance(value[0], dict) and 'crop_path' in value[0]:
-                            cell_metadata_list = value
-                            break
-                if cell_metadata_list is None:
-                    raise ValueError("Could not find cell metadata list in dictionary format")
-        else:
-            raise ValueError(f"Unexpected metadata format: {type(metadata)}")
-        
-        # Extract required data safely
-        cell_crops = []
-        cell_metadata = []
-        
-        for item in cell_metadata_list:
-            if isinstance(item, dict) and 'crop_path' in item and 'cell_id' in item:
-                cell_crops.append(item['crop_path'])
-                cell_metadata.append({'cell_id': item['cell_id']})
-        
-        print(f"Found {len(cell_crops)} valid cell crops from metadata")
-        
-        # Execute tool
-        execution = tool.execute(cell_crops=cell_crops, cell_metadata=cell_metadata, confidence_threshold=0.5, batch_size=16, query_cache_dir='solver_cache/temp/tool_cache/')
+        if execution.get('status') == 'success':
+            # Execute the tool with loaded data
+            execution = tool.execute(
+                cell_crops=execution['cell_crops'], 
+                cell_metadata=execution['cell_metadata'], 
+                confidence_threshold=0.5, 
+                batch_size=16, 
+                query_cache_dir='solver_cache/temp/tool_cache/'
+            )
         
     except Exception as e:
         print("Error loading metadata: " + str(e))
