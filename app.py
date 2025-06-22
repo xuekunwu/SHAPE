@@ -927,7 +927,7 @@ def main(args):
                         ]
 
                         # Helper function to distribute tools
-                        def distribute_tools(img, q, tools_str, ans):
+                        def distribute_tools(category, img, q, tools_str, ans):
                             selected_tools = [tool.strip() for tool in tools_str.split(',')]
                             selected_fibroblast = [tool for tool in selected_tools if tool in fibroblast_tools]
                             selected_general = [tool for tool in selected_tools if tool in general_tools]
@@ -936,7 +936,7 @@ def main(args):
                         gr.Markdown("#### 🧬 Fibroblast Analysis Examples")
                         gr.Examples(
                             examples=fibroblast_examples,
-                            inputs=[user_image, user_query, gr.Textbox(label="Select Tools"), gr.Textbox(label="Reference Answer", visible=False)],
+                            inputs=[gr.Textbox(label="Category", visible=False), user_image, user_query, gr.Textbox(label="Select Tools"), gr.Textbox(label="Reference Answer", visible=False)],
                             outputs=[user_image, user_query, enabled_fibroblast_tools, enabled_general_tools],
                             fn=distribute_tools,
                             cache_examples=False
@@ -946,7 +946,7 @@ def main(args):
                         gr.Examples(
                             examples=general_examples,
                             label="General Purpose Examples",
-                            inputs=[user_image, user_query, gr.Textbox(label="Select Tools"), gr.Textbox(label="Reference Answer", visible=False)],
+                            inputs=[gr.Textbox(label="Category", visible=False), user_image, user_query, gr.Textbox(label="Select Tools"), gr.Textbox(label="Reference Answer", visible=False)],
                             outputs=[user_image, user_query, enabled_fibroblast_tools, enabled_general_tools],
                             fn=distribute_tools,
                             cache_examples=False
