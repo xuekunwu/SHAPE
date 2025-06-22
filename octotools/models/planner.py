@@ -182,6 +182,8 @@ Rules:
 - Avoid redundancy by considering previous steps and building on prior results.
 - For analysis workflows: If data is prepared (e.g., cell crops generated), prioritize analysis tools over further data preparation.
 
+CRITICAL RULE: For any query related to fibroblast analysis, if the memory is empty or does not contain a result from `Image_Preprocessor_Tool`, the first step (step_count=1) MUST be to use `Image_Preprocessor_Tool` to process the image. This ensures a standardized starting point for the analysis pipeline.
+
 Example (do not copy, use only as reference):
 <justification>: [Your detailed explanation here]
 <context>: Image path: "example/image.jpg", Previous detection results: [list of objects]
