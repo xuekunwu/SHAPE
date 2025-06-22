@@ -405,15 +405,17 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                     if j < len(predictions):
                         pred_index = predictions[j].item()
                         confidence = confidences[j].item()
+                        feature_vector = features[j].cpu().numpy()
                         
                         result = {
                             "image_path": path,
                             "predicted_class": self.class_names[pred_index],
                             "confidence": confidence,
                             "is_above_threshold": confidence >= self.confidence_threshold,
-                            "features": features[j].cpu().numpy()
+                            "features": feature_vector
                         }
                         results.append(result)
+                        features_list.append(feature_vector)  # Add features to the list
 
             print(f"Processing completed. Total results: {len(results)}, Total features: {len(features_list)}")
             
@@ -457,7 +459,11 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                 )
                 print(f"📁 Saving all visualizations to: {persistent_output_dir}")
                 
-                visual_outputs = self._create_visualizations(results, features_list, summary, persistent_output_dir)
+                # Convert features_list to numpy array for visualization
+                features_array = np.array(features_list)
+                print(f"🔍 Debug: Converted features_list to array with shape: {features_array.shape}")
+                
+                visual_outputs = self._create_visualizations(results, features_array, summary, persistent_output_dir)
                 print(f"📊 Visualizations created: {len(visual_outputs)}")
                 
                 # Add recommendations and quality assessment
@@ -718,6 +724,7 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
         Creates all visualizations based on the analysis results and returns their paths.
         This function now contains all centralized plotting logic.
         """
+        from octotools.models.utils import VisualizationConfig
         vis_config = VisualizationConfig()
         output_paths = []
 
