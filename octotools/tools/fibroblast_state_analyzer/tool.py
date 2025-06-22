@@ -396,40 +396,50 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
             summary = self._calculate_statistics(results)
             
             # Generate basic visualizations
-            visual_outputs = self._create_visualizations(results, summary, query_cache_dir)
+            persistent_output_dir = os.path.join(os.getcwd(), 'output_visualizations')
+            os.makedirs(persistent_output_dir, exist_ok=True)
+            print(f"📁 Saving all visualizations to: {persistent_output_dir}")
+            
+            visual_outputs = self._create_visualizations(results, summary, persistent_output_dir)
             
             # Generate advanced visualizations (PCA/UMAP) if features are available
             if features_list and len(features_list) > 0:
                 try:
-                    print(f"Generating advanced visualizations with {len(features_list)} features...")
+                    print(f"🎯 GENERATING ADVANCED VISUALIZATIONS with {len(features_list)} features...")
                     # Stack features into a tensor
                     features_tensor = torch.stack(features_list)
-                    print(f"Features tensor shape: {features_tensor.shape}")
+                    print(f"📊 Features tensor shape: {features_tensor.shape}")
+                    
+                    # Create a more persistent output directory
+                    persistent_output_dir = os.path.join(os.getcwd(), 'output_visualizations')
+                    os.makedirs(persistent_output_dir, exist_ok=True)
+                    print(f"📁 Saving visualizations to: {persistent_output_dir}")
                     
                     # Create PCA visualization
-                    print("Creating PCA visualization...")
-                    pca_viz_path = self._create_pca_visualization(results, features_tensor, query_cache_dir)
+                    print("🔍 Creating PCA visualization...")
+                    pca_viz_path = self._create_pca_visualization(results, features_tensor, persistent_output_dir)
                     if pca_viz_path:
                         visual_outputs.append(pca_viz_path)
-                        print(f"PCA visualization created: {pca_viz_path}")
+                        print(f"✅ PCA visualization created: {pca_viz_path}")
                     else:
-                        print("PCA visualization failed")
+                        print("❌ PCA visualization failed")
                     
                     # Create UMAP visualization if anndata is available
-                    print("Creating UMAP visualization...")
-                    umap_viz_path = self._create_umap_visualization(results, features_tensor, query_cache_dir)
+                    print("🌐 Creating UMAP visualization...")
+                    umap_viz_path = self._create_umap_visualization(results, features_tensor, persistent_output_dir)
                     if umap_viz_path:
                         visual_outputs.append(umap_viz_path)
-                        print(f"UMAP visualization created: {umap_viz_path}")
+                        print(f"✅ UMAP visualization created: {umap_viz_path}")
                     else:
-                        print("UMAP visualization failed")
+                        print("❌ UMAP visualization failed")
                         
                 except Exception as e:
-                    print(f"Warning: Failed to create advanced visualizations: {str(e)}")
+                    print(f"⚠️ Warning: Failed to create advanced visualizations: {str(e)}")
                     import traceback
                     traceback.print_exc()
             else:
-                print(f"No features available for advanced visualizations. features_list length: {len(features_list) if features_list else 0}")
+                print(f"❌ No features available for advanced visualizations. features_list length: {len(features_list) if features_list else 0}")
+                print(f"🔍 Debug: results length = {len(results) if results else 0}")
             
             return {
                 "summary": summary,
