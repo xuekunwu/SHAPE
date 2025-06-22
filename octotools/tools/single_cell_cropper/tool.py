@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 from skimage.measure import label, regionprops
 from pathlib import Path
 import json
+from octotools.models.utils import VisualizationConfig
 
 class Single_Cell_Cropper_Tool(BaseTool):
     def __init__(self):
@@ -114,7 +115,7 @@ class Single_Cell_Cropper_Tool(BaseTool):
 
             # Create a summary visualization
             summary_viz_path = self._create_summary_visualization(
-                cell_crops, cell_metadata, stats, tool_cache_dir, min_area, margin
+                original_img, mask, cell_crops, stats, query_cache_dir, min_area, margin
             )
             
             return {
@@ -291,91 +292,66 @@ class Single_Cell_Cropper_Tool(BaseTool):
 
         return cell_crops, cell_metadata, stats
 
-    def _create_summary_visualization(self, cell_crops, cell_metadata, stats, output_dir, min_area, margin):
-        """
-        Create a compact and well-structured summary visualization.
-        """
+    def _create_summary_visualization(self, original_img, mask, cell_crops, stats, output_dir, min_area, margin):
+        """Creates a professional summary visualization of the cropping process."""
+        vis_config = VisualizationConfig()
+        output_path = os.path.join(output_dir, f"single_cell_cropper_summary_{uuid4().hex[:8]}.png")
+
         try:
-            if not cell_crops:
-                return None
+            # Create a 2x2 grid for visualization
+            fig, axs = vis_config.create_professional_figure(figsize=(20, 20), nrows=2, ncols=2)
+            fig.suptitle("Single-Cell Cropping Summary", 
+                         fontsize=vis_config.PROFESSIONAL_STYLE['figure.titlesize'] + 4, 
+                         fontweight='bold', y=0.97)
 
-            # --- Layout Setup ---
-            fig = plt.figure(figsize=(20, 24))
-            gs = fig.add_gridspec(3, 1, height_ratios=[0.5, 2, 2], hspace=0.3)
-            
-            # Top part: Summary Text and Histogram
-            gs_top = gs[0].subgridspec(1, 2, wspace=0.2)
-            ax_text = fig.add_subplot(gs_top[0])
-            ax_hist = fig.add_subplot(gs_top[1])
+            # 1. Original Image
+            axs[0, 0].imshow(original_img, cmap='gray')
+            vis_config.apply_professional_styling(axs[0, 0], title="Original Image")
+            axs[0, 0].axis('off')
 
-            # Bottom part: Title and Crop Grid
-            gs_bottom = gs[1:].subgridspec(5, 1, height_ratios=[0.2, 1, 1, 1, 1], hspace=0)
-            ax_crop_title = fig.add_subplot(gs_bottom[0])
+            # 2. Nuclei Mask Overlay
+            overlay = plot.mask_overlay(original_img, mask)
+            axs[0, 1].imshow(overlay)
+            vis_config.apply_professional_styling(axs[0, 1], title="Nuclei Mask Overlay")
+            axs[0, 1].axis('off')
+
+            # 3. Sample Crops Grid
+            axs[1, 0].set_title("Sample Cell Crops", 
+                                fontsize=vis_config.PROFESSIONAL_STYLE['axes.titlesize'], 
+                                fontweight='bold', pad=20)
+            axs[1, 0].axis('off')
             
-            # --- Content Generation ---
+            # Create a grid within the subplot for sample crops
+            if cell_crops:
+                from mpl_toolkits.axes_grid1 import ImageGrid
+                grid = ImageGrid(fig, 121, nrows_ncols=(4, 4), axes_pad=0.1)
+                for i, ax_grid in enumerate(grid):
+                    if i < len(cell_crops) and i < 16:
+                        crop_img = Image.open(cell_crops[i])
+                        ax_grid.imshow(crop_img, cmap='gray')
+                    ax_grid.axis('off')
             
-            # Top Left: Summary Text (Corrected newlines)
-            ax_text.axis('off')
-            summary_text = (
-                f"Single-Cell Cropping Summary\n"
-                f"---------------------------------\n"
-                f"Initial detected objects: {stats['initial_cell_count']}\n"
-                f"Filtered (area < {min_area} px): {stats['filtered_by_area']}\n"
-                f"Filtered (border objects): {stats['filtered_by_border']}\n"
-                f"Filtered (invalid data): {stats['invalid_crop_data']}\n"
-                f"---------------------------------\n"
-                f"Final valid cells: {stats['final_cell_count']}\n\n"
-                f"Crop Parameters:\n"
-                f" - Min Area Threshold: {min_area} pixels\n"
-                f" - Margin: {margin} pixels"
+            # 4. Statistics and Parameters Text
+            stats_text = (
+                f"Initial Nuclei Detected: {stats['initial_cell_count']}\n"
+                f"Filtered by Area (<{min_area}px): {stats['filtered_by_area']}\n"
+                f"Filtered by Border: {stats['filtered_by_border']}\n"
+                f"Final Valid Crops: {stats['final_cell_count']}\n\n"
+                f"Parameters Used:\n"
+                f"  - Min Area: {min_area} pixels\n"
+                f"  - Margin: {margin} pixels"
             )
-            ax_text.text(0, 0.95, summary_text, transform=ax_text.transAxes,
-                         fontsize=16, verticalalignment='top', family='monospace',
-                         bbox=dict(boxstyle='round,pad=0.5', fc='aliceblue', alpha=0.9))
+            axs[1, 1].text(0.5, 0.5, stats_text, ha='center', va='center', 
+                           fontsize=vis_config.PROFESSIONAL_STYLE['font.size'],
+                           bbox=dict(boxstyle='round,pad=0.5', facecolor='lightblue', alpha=0.8))
+            vis_config.apply_professional_styling(axs[1, 1], title="Processing Statistics")
+            axs[1, 1].axis('off')
 
-            # Top Right: Cell Area Distribution
-            cell_areas = [md.get('area', 0) for md in cell_metadata]
-            ax_hist.hist(cell_areas, bins=20, color='skyblue', edgecolor='black')
-            ax_hist.set_title(f"Cell Area Distribution (Total: {stats['final_cell_count']} cells)", fontsize=18)
-            ax_hist.set_xlabel("Cell Area (pixels)", fontsize=14)
-            ax_hist.set_ylabel("Number of Cells", fontsize=14)
-            ax_hist.tick_params(axis='both', which='major', labelsize=12)
-            ax_hist.grid(True, linestyle='--', alpha=0.6)
-
-            # Crop Grid Title
-            ax_crop_title.text(0.5, 0.7, f"Randomly Selected Single-Cell Crops (40 of {stats['final_cell_count']})",
-                               ha='center', va='center', fontsize=18, style='italic', color='dimgray')
-            ax_crop_title.axis('off')
-            
-            # 4x10 Crop Grid with adjusted vertical spacing
-            sample_size = min(40, len(cell_crops))
-            if sample_size > 0:
-                indices = np.random.choice(len(cell_crops), sample_size, replace=False)
-                
-                # Using hspace for vertical spacing and wspace for horizontal. Made hspace similar to wspace for a grid look.
-                gs_crops = gs_bottom[1:].subgridspec(4, 10, hspace=0.2, wspace=0.2)
-
-                for i in range(sample_size):
-                    ax_crop = fig.add_subplot(gs_crops[i // 10, i % 10])
-                    crop_path = cell_crops[indices[i]]
-                    try:
-                        img = Image.open(crop_path)
-                        ax_crop.imshow(img, cmap='gray')
-                    except FileNotFoundError:
-                        ax_crop.text(0.5, 0.5, 'Not Found', ha='center', va='center')
-                    
-                    ax_crop.set_title(Path(crop_path).name, fontsize=10, y=-0.3) # Adjusted y for new hspace
-                    ax_crop.axis('off')
-
-            fig.suptitle("Single-Cell Cropper Analysis Report", fontsize=24, weight='bold')
-            plt.tight_layout(rect=[0, 0.03, 1, 0.96], h_pad=3.0)
-
-            # Save visualization
-            viz_path = os.path.join(output_dir, f"cropping_summary_{uuid4().hex[:8]}.png")
-            plt.savefig(viz_path, bbox_inches='tight', dpi=150, format='png')
+            plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+            vis_config.save_professional_figure(fig, output_path)
             plt.close(fig)
-            return viz_path
 
+            return output_path
         except Exception as e:
             print(f"Error creating summary visualization: {e}")
             return None
