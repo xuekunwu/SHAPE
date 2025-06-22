@@ -89,7 +89,7 @@ class Image_Preprocessor_Tool(BaseTool):
         
         return adjusted_image
 
-    def create_comparison_plot(self, original, corrected, normalized, filename):
+    def create_comparison_plot(self, original, corrected, normalized, filename, vis_config):
         """
         Create a comparison plot of original, corrected, and normalized images with professional styling.
         
@@ -98,40 +98,41 @@ class Image_Preprocessor_Tool(BaseTool):
             corrected: Illumination-corrected image
             normalized: Brightness-normalized image
             filename: Original filename for title
+            vis_config: An instance of VisualizationConfig
             
         Returns:
             Path to saved comparison plot
         """
-        # Use centralized output directory
-        output_dir = VisualizationConfig.get_output_dir()
+        # Use centralized output directory from the vis_config instance
+        output_dir = vis_config.get_output_dir()
         
         # Create figure with professional styling
-        fig, axs = VisualizationConfig.create_professional_figure(figsize=(18, 6), ncols=3)
+        fig, axs = vis_config.create_professional_figure(figsize=(18, 6), ncols=3)
         
         # Plot original image
         axs[0].imshow(original, cmap='gray')
-        VisualizationConfig.apply_professional_styling(axs[0], title="Original Image")
+        vis_config.apply_professional_styling(axs[0], title="Original Image")
         axs[0].axis('off')
         
         # Plot corrected image
         axs[1].imshow(corrected, cmap='gray')
-        VisualizationConfig.apply_professional_styling(axs[1], title="Illumination Corrected")
+        vis_config.apply_professional_styling(axs[1], title="Illumination Corrected")
         axs[1].axis('off')
         
         # Plot normalized image
         axs[2].imshow(normalized, cmap='gray')
-        VisualizationConfig.apply_professional_styling(axs[2], title="Brightness Normalized")
+        vis_config.apply_professional_styling(axs[2], title="Brightness Normalized")
         axs[2].axis('off')
         
         # Add overall title with professional styling
         fig.suptitle(f"Image Preprocessing: {os.path.basename(filename)}", 
-                     fontsize=VisualizationConfig.PROFESSIONAL_STYLE['figure.titlesize'], 
+                     fontsize=vis_config.PROFESSIONAL_STYLE['figure.titlesize'], 
                      fontweight='bold', y=1.02)
         plt.tight_layout()
         
         # Save with professional settings
         plot_path = os.path.join(output_dir, f"comparison_{os.path.splitext(os.path.basename(filename))[0]}.png")
-        VisualizationConfig.save_professional_figure(fig, plot_path)
+        vis_config.save_professional_figure(fig, plot_path)
         plt.close(fig)
         
         return plot_path
@@ -233,8 +234,13 @@ class Image_Preprocessor_Tool(BaseTool):
             if save_intermediate:
                 results["intermediate_paths"] = intermediate_paths
             
+            # Create an instance of the visualization config
+            vis_config = VisualizationConfig()
+            
             # Create the comparison plot for visualization
-            comparison_plot_path = self.create_comparison_plot(original_image, corrected_image, normalized_image, filename)
+            comparison_plot_path = self.create_comparison_plot(
+                original_image, corrected_image, normalized_image, filename, vis_config
+            )
             
             # Add visual outputs for Gradio
             visual_outputs = [comparison_plot_path, final_output_path]
