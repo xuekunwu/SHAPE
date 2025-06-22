@@ -252,16 +252,22 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
             
             # Get predictions and features
             with torch.no_grad():
-                # Get features from backbone (before classification head)
-                if hasattr(model.backbone, 'forward_features'):
-                    features = model.backbone.forward_features(img_tensor)
-                else:
-                    # Fallback: use the last layer before classification
-                    features = model.backbone(img_tensor)
-                    if hasattr(features, 'last_hidden_state'):
-                        features = features.last_hidden_state.mean(dim=1)  # Global average pooling
+                # Extract features from backbone (before classifier head)
+                # DINOv2 backbone returns a dict with 'x_norm_clstoken' as the CLS token
+                backbone_output = model.backbone(img_tensor)
                 
-                # Get classification logits
+                # Extract CLS token features (this is the embedding we want for UMAP)
+                if isinstance(backbone_output, dict):
+                    # DINOv2 returns dict with 'x_norm_clstoken' key
+                    features = backbone_output['x_norm_clstoken']  # Shape: [1, feat_dim]
+                else:
+                    # Fallback: if backbone returns tensor directly, use it
+                    features = backbone_output
+                    if features.dim() > 2:
+                        # If it's [1, seq_len, feat_dim], take the CLS token (first token)
+                        features = features[:, 0, :]  # Shape: [1, feat_dim]
+                
+                # Get classification logits through the full model
                 logits = model(img_tensor)
                 probs = torch.softmax(logits, dim=1)
                 pred_idx = probs.argmax(dim=1).item()
@@ -278,7 +284,7 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                 }
             }
             
-            return result, features
+            return result, features.squeeze(0)  # Remove batch dimension
             
         except Exception as e:
             logger.error(f"Error classifying cell {image_path}: {str(e)}")
@@ -822,9 +828,16 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
             adata.obs['predicted_class'] = [r['predicted_class'] for r in results]
             adata.obs['image_name'] = [Path(r['image_path']).name for r in results]
 
-            # Run Scanpy workflow
-            sc.tl.pca(adata, n_comps=50)
-            sc.pp.neighbors(adata, n_neighbors=15, n_pcs=50)
+            # Run Scanpy workflow with adaptive PCA components
+            n_samples = features.shape[0]
+            n_pcs = min(50, n_samples - 1)  # Ensure n_pcs <= n_samples - 1
+            
+            if n_pcs < 2:
+                logger.warning(f"Not enough samples ({n_samples}) for UMAP visualization. Need at least 3 samples.")
+                return None
+            
+            sc.tl.pca(adata, n_comps=n_pcs)
+            sc.pp.neighbors(adata, n_neighbors=min(15, n_samples - 1), n_pcs=n_pcs)
             sc.tl.umap(adata, min_dist=0.5, spread=2.5)
             
             # Plot UMAP
