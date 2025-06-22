@@ -738,7 +738,7 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
             
             wedges, texts, autotexts = ax.pie(
                 sizes, labels=None, autopct='%1.1f%%', startangle=140, 
-                colors=colors, wedgeprops=dict(width=0.4, edgecolor='w', linewidth=2)
+                colors=colors, wedgeprops=dict(edgecolor='w', linewidth=2)
             )
             plt.setp(autotexts, size=22, color="black", fontweight='bold')
             ax.axis('equal')
@@ -825,8 +825,31 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
 
                 fig, ax = plt.subplots(figsize=(10, 10), dpi=300)
                 
+                # Use a specific palette for cell states
+                palette = vis_config.get_professional_colors()
+                
+                # Let scanpy handle the legend creation initially
                 sc.pl.umap(adata, color='predicted_class', ax=ax, show=False, size=200,
-                           palette=vis_config.get_professional_colors(), legend_loc=None)
+                           palette=palette, legend_loc='on data')
+
+                # Customize the existing legend
+                legend = ax.get_legend()
+                if legend:
+                    legend.set_title("Cell States")
+                    legend.get_title().set_fontsize(vis_config.PROFESSIONAL_STYLE['legend.title_fontsize'])
+                    legend.get_title().set_fontweight('bold')
+                    for text in legend.get_texts():
+                        text.set_fontsize(vis_config.PROFESSIONAL_STYLE['legend.fontsize'])
+                    legend.set_frame_on(True)
+                    legend.set_bbox_to_anchor((1.05, 0.5))
+                    legend.set_loc('center left')
+                    legend.get_frame().set_edgecolor('black')
+                    legend.get_frame().set_linewidth(1.5)
+                    legend.get_frame().set_facecolor('#F0F0F0')
+                
+                # Remove default scanpy title if it exists, since we set a custom one
+                if ax.get_title():
+                    ax.set_title("")
 
                 ax.set_title("UMAP Embedding", fontsize=vis_config.PROFESSIONAL_STYLE['axes.titlesize'], fontweight='bold', pad=20)
                 ax.set_xlabel("UMAP 1", fontsize=vis_config.PROFESSIONAL_STYLE['axes.labelsize'], fontweight='bold')
@@ -836,14 +859,8 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                 ax.set_yticks([])
                 ax.set_aspect('equal', adjustable='box')
                 
-                fig.subplots_adjust(right=0.7)
-                handles, labels = ax.get_legend_handles_labels()
-                legend = ax.legend(handles, labels, title="Cell States", title_fontsize=18, fontsize=17, 
-                                 frameon=True, fancybox=True, shadow=True,
-                                 loc='center left', bbox_to_anchor=(1.05, 0.5))
-                legend.get_frame().set_facecolor('white')
-                legend.get_frame().set_alpha(1.0)
-                legend.get_frame().set_linewidth(1.5)
+                # Adjust layout to prevent legend from being cut off
+                fig.tight_layout(rect=[0, 0, 0.85, 1])
                 
                 output_path = os.path.join(output_dir, "umap_cell_features.png")
                 vis_config.save_professional_figure(fig, output_path)
