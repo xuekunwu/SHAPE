@@ -900,25 +900,29 @@ def main(args):
                             [ "Image Preprocessing",
                              "examples/A5_01_1_1_Phase Contrast_001.png",
                              "Preprocess this phase contrast image to correct illumination and adjust brightness.",
-                             [["Image_Preprocessor_Tool"], []],
+                             ["Image_Preprocessor_Tool"],
+                             [],
                              "Illumination-corrected and brightness-normalized phase contrast image."],
 
                             [ "Nuclei Segmentation",
                              "examples/A5_01_1_1_Phase Contrast_001.png",
                              "Segment the nuclei from this preprocessed phase contrast image.",
-                             [["Image_Preprocessor_Tool", "Nuclei_Segmenter_Tool"], []],
+                             ["Image_Preprocessor_Tool", "Nuclei_Segmenter_Tool"],
+                             [],
                              "Segmented nuclei mask from the phase contrast image."],
 
                             [ "Single-Cell Cropping",
                              "examples/A5_01_1_1_Phase Contrast_001.png",
                              "Crop single cells from the segmented nuclei in this image.",
-                             [["Image_Preprocessor_Tool", "Nuclei_Segmenter_Tool", "Single_Cell_Cropper_Tool"], []],
+                             ["Image_Preprocessor_Tool", "Nuclei_Segmenter_Tool", "Single_Cell_Cropper_Tool"],
+                             [],
                              "Individual cell crops extracted from the image."],
 
                             [ "Full Fibroblast Analysis",
                              "examples/fibroblast.png",
                              "Analyze the fibroblast cell states in this image, including preprocessing, segmentation, and classification.",
-                             [["Image_Preprocessor_Tool", "Nuclei_Segmenter_Tool", "Single_Cell_Cropper_Tool", "Fibroblast_State_Analyzer_Tool"], []],
+                             ["Image_Preprocessor_Tool", "Nuclei_Segmenter_Tool", "Single_Cell_Cropper_Tool", "Fibroblast_State_Analyzer_Tool"],
+                             [],
                              "Comprehensive analysis of fibroblast cell states with visualizations."],
                         ]
                         
@@ -926,37 +930,54 @@ def main(args):
                             [ "Object Detection (Baseball)",
                              "examples/baseball.png",
                              "Detect the baseball in this image and provide its bounding box.",
-                             [["Object_Detector_Tool"], []],
+                             ["Object_Detector_Tool"],
+                             [],
                              "Detected baseball with bounding box coordinates."],
 
                             [ "Code Generation (Fibonacci)",
                              None,
                              "Write a Python function to calculate the nth Fibonacci number.",
-                             [[], ["Python_Code_Generator_Tool"]],
+                             [],
+                             ["Python_Code_Generator_Tool"],
                              "A Python function that computes Fibonacci numbers."],
 
                             [ "Scientific Search (Quantum Computing)",
                              None,
                              "Find recent papers on quantum computing from ArXiv.",
-                             [[], ["ArXiv_Paper_Searcher_Tool"]],
+                             [],
+                             ["ArXiv_Paper_Searcher_Tool"],
                              "A list of recent ArXiv papers on quantum computing."]
                         ]
                         
                         gr.Markdown("#### 🧬 Fibroblast Analysis Examples")
                         gr.Examples(
                             examples=fibroblast_examples,
-                            inputs=[user_image, user_query, [enabled_fibroblast_tools, enabled_general_tools]],
-                            outputs=[user_image, user_query, [enabled_fibroblast_tools, enabled_general_tools]],
-                            fn=lambda img, q, tools: (img, q, (tools[0], tools[1])),
+                            inputs=[
+                                gr.Textbox(visible=False, label="Category"),
+                                user_image,
+                                user_query,
+                                enabled_fibroblast_tools,
+                                enabled_general_tools,
+                                gr.Textbox(visible=False, label="Reference Answer")
+                            ],
+                            outputs=[user_image, user_query, enabled_fibroblast_tools, enabled_general_tools],
+                            fn=lambda cat, img, q, f_tools, g_tools, ans: (img, q, f_tools, g_tools),
                             cache_examples=False
                         )
                         
                         gr.Markdown("#### 🧩 General Purpose Examples")
                         gr.Examples(
                             examples=general_examples,
-                            inputs=[user_image, user_query, [enabled_fibroblast_tools, enabled_general_tools]],
-                            outputs=[user_image, user_query, [enabled_fibroblast_tools, enabled_general_tools]],
-                            fn=lambda img, q, tools: (img, q, (tools[0], tools[1])),
+                            inputs=[
+                                gr.Textbox(visible=False, label="Category"),
+                                user_image,
+                                user_query,
+                                enabled_fibroblast_tools,
+                                enabled_general_tools,
+                                gr.Textbox(visible=False, label="Reference Answer")
+                            ],
+                            outputs=[user_image, user_query, enabled_fibroblast_tools, enabled_general_tools],
+                            fn=lambda cat, img, q, f_tools, g_tools, ans: (img, q, f_tools, g_tools),
                             cache_examples=False
                         )
 
