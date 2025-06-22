@@ -387,52 +387,22 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
             # Calculate statistics
             summary = self._calculate_statistics(results)
             
-            # Generate basic visualizations
-            persistent_output_dir = os.path.join(os.getcwd(), 'output_visualizations')
-            os.makedirs(persistent_output_dir, exist_ok=True)
-            print(f"📁 Saving all visualizations to: {persistent_output_dir}")
-            
-            visual_outputs = self._create_visualizations(results, summary, persistent_output_dir)
-            
-            # Generate advanced visualizations (PCA/UMAP) if features are available
-            if features_list and len(features_list) > 0:
-                try:
-                    print(f"🎯 GENERATING ADVANCED VISUALIZATIONS with {len(features_list)} features...")
-                    # Stack features into a tensor
-                    features_tensor = torch.stack(features_list)
-                    print(f"📊 Features tensor shape: {features_tensor.shape}")
-                    
-                    # Move to CPU for visualization
-                    features_cpu = features_tensor.cpu().numpy()
-                    print(f"📊 Features moved to CPU, shape: {features_cpu.shape}")
-                    
-                    # Create a more persistent output directory
-                    persistent_output_dir = os.path.join(os.getcwd(), 'output_visualizations')
-                    os.makedirs(persistent_output_dir, exist_ok=True)
-                    print(f"📁 Saving visualizations to: {persistent_output_dir}")
-                    
-                    # Create PCA visualization
-                    print("🔍 Creating PCA visualization...")
-                    pca_viz_path = self._create_pca_visualization(results, features_cpu, persistent_output_dir)
-                    if pca_viz_path:
-                        visual_outputs.append(pca_viz_path)
-                        print(f"✅ PCA visualization created: {pca_viz_path}")
-                    else:
-                        print("❌ PCA visualization failed")
-                    
-                    # Create UMAP visualization if anndata is available
-                    print("🌐 Creating UMAP visualization...")
-                    umap_viz_path = self._create_umap_visualization(results, features_cpu, persistent_output_dir)
-                    if umap_viz_path:
-                        visual_outputs.append(umap_viz_path)
-                        print(f"✅ UMAP visualization created: {umap_viz_path}")
-                    else:
-                        print("❌ UMAP visualization failed")
-                        
-                except Exception as e:
-                    print(f"⚠️ Warning: Failed to create advanced visualizations: {str(e)}")
-                    import traceback
-                    traceback.print_exc()
+            # Generate final summary and visualizations
+            if len(features_list) > 0:
+                logger.info("Generating final summary and visualizations...")
+                features_list = np.vstack([r['features'] for r in results if r['features'] is not None])
+                summary = self._calculate_statistics(results)
+
+                # Save results and get persistent output dir
+                persistent_output_dir = self._save_results(
+                    results, summary, query_cache_dir
+                )
+                print(f"📁 Saving all visualizations to: {persistent_output_dir}")
+                
+                visual_outputs = self._create_visualizations(results, features_list, summary, persistent_output_dir)
+                
+                # Add recommendations and quality assessment
+                recommendations = self._generate_recommendations(summary, len(cell_crops), len(results))
             else:
                 print(f"❌ No features available for advanced visualizations. features_list length: {len(features_list) if features_list else 0}")
                 print(f"🔍 Debug: results length = {len(results) if results else 0}")
@@ -449,7 +419,7 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                 },
                 "cell_state_descriptions": self.class_descriptions,
                 "analysis_quality": self._assess_quality(results),
-                "recommendations": self._generate_recommendations(summary, len(cell_crops), len(results)),
+                "recommendations": recommendations,
                 "metadata_info": {
                     "total_crops_processed": len(cell_crops),
                     "successful_analyses": len(results),
@@ -682,284 +652,137 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
             "total_cells": total_cells
         }
     
-    def _create_visualizations(self, results: List[Dict], stats: Dict, output_dir: str) -> List[str]:
-        """Create visualizations of analysis results."""
-        viz_paths = []
-        
+    def _create_visualizations(self, results: List[Dict], features: np.ndarray, stats: Dict, output_dir: str) -> List[str]:
+        """
+        Creates all visualizations based on the analysis results and returns their paths.
+        This function now contains all centralized plotting logic.
+        """
+        vis_config = VisualizationConfig()
+        output_paths = []
+
+        # 1. Cell State Distribution (Pie Chart)
         try:
-            # 1. Class distribution pie chart with specific colors, legend, and external percentages
-            if stats["class_distribution"]:
-                fig, ax = plt.subplots(figsize=(12, 8)) # Adjusted for legend
-                
-                # Prepare data for pie chart
-                labels = list(stats["class_distribution"].keys())
-                sizes = [stats["class_distribution"][label]["count"] for label in labels]
-                colors = [self.color_map.get(label, '#CCCCCC') for label in labels]
+            fig, ax = vis_config.create_professional_figure(figsize=(12, 8))
+            state_counts = stats.get('state_distribution', {})
+            labels = list(state_counts.keys())
+            sizes = list(state_counts.values())
+            colors = [vis_config.get_professional_colors().get(state, '#CCCCCC') for state in labels]
+            
+            wedges, texts, autotexts = ax.pie(
+                sizes, labels=None, autopct='%1.1f%%', startangle=140, 
+                colors=colors, wedgeprops=dict(width=0.4, edgecolor='w', linewidth=2)
+            )
+            plt.setp(autotexts, size=22, color="black", fontweight='bold')
+            ax.axis('equal')
+            vis_config.apply_professional_styling(ax, title="Cell State Composition")
+            
+            ax.legend(wedges, labels, title="Cell States", loc="center left",
+                      bbox_to_anchor=(1, 0, 0.5, 1),
+                      fontsize=vis_config.PROFESSIONAL_STYLE['legend.fontsize'],
+                      title_fontsize=vis_config.PROFESSIONAL_STYLE['legend.title_fontsize'])
+            
+            fig.tight_layout()
+            pie_path = os.path.join(output_dir, "cell_state_distribution.png")
+            vis_config.save_professional_figure(fig, pie_path)
+            plt.close(fig)
+            output_paths.append(pie_path)
+        except Exception as e:
+            logger.error(f"Error creating pie chart: {str(e)}")
 
-                # Explode smaller slices to prevent percentage overlap
-                explode = [0.1 if (size / sum(sizes)) < 0.05 else 0 for size in sizes]
+        # 2. Confidence Distribution (Histogram)
+        try:
+            fig, ax = vis_config.create_professional_figure(figsize=(12, 8))
+            confidences = [r['confidence'] for r in results]
+            n, bins, patches = ax.hist(confidences, bins=20, edgecolor='black', alpha=0.7)
+            
+            q_fb_color = vis_config.get_professional_colors().get('q-Fb', '#66B22F')
+            for i in range(len(patches)):
+                if bins[i] >= self.confidence_threshold:
+                    patches[i].set_fc(q_fb_color)
+            
+            vis_config.apply_professional_styling(
+                ax, title="Confidence Score Distribution",
+                xlabel="Confidence Score", ylabel="Number of Cells"
+            )
+            ax.axvline(self.confidence_threshold, color='red', linestyle='--', linewidth=2, 
+                       label=f'Threshold: {self.confidence_threshold}')
+            ax.legend()
+            
+            conf_path = os.path.join(output_dir, "confidence_distribution.png")
+            vis_config.save_professional_figure(fig, conf_path)
+            plt.close(fig)
+            output_paths.append(conf_path)
+        except Exception as e:
+            logger.error(f"Error creating confidence histogram: {str(e)}")
 
-                wedges, texts, autotexts = ax.pie(
-                    sizes, 
-                    autopct='%1.1f%%', 
-                    startangle=90,
-                    colors=colors,
-                    pctdistance=1.1,  # Move percentages outside the pie
-                    explode=explode,
-                    labels=None,       # Labels will be in the legend
-                    labeldistance=1.2  # Adjust label line distance if labels were present
-                )
-                
-                plt.setp(autotexts, size=12, color="black") # Percentages are outside, so use black text
-                ax.set_title("Cell State Composition", fontsize=18)
-                ax.axis('equal')  # Equal aspect ratio ensures that pie is drawn as a circle.
-                
-                # Add a legend to the side
-                ax.legend(wedges, labels,
-                          title="Cell States",
-                          loc="center left",
-                          bbox_to_anchor=(0.95, 0.5), # Anchor legend to the right
-                          fontsize=12)
+        # 3. Bar Chart of Cell States
+        try:
+            fig, ax = vis_config.create_professional_figure(figsize=(12, 8))
+            state_counts = stats.get('state_distribution', {})
+            labels = list(state_counts.keys())
+            sizes = list(state_counts.values())
+            colors = [vis_config.get_professional_colors().get(state, '#CCCCCC') for state in labels]
+            
+            ax.bar(labels, sizes, color=colors, edgecolor='black', linewidth=2)
+            vis_config.apply_professional_styling(
+                ax, title="Cell State Counts",
+                xlabel="Cell State", ylabel="Number of Cells"
+            )
+            ax.tick_params(axis='x', rotation=45)
+            fig.tight_layout()
+            
+            bar_path = os.path.join(output_dir, "cell_state_bars.png")
+            vis_config.save_professional_figure(fig, bar_path)
+            plt.close(fig)
+            output_paths.append(bar_path)
+        except Exception as e:
+            logger.error(f"Error creating bar chart: {str(e)}")
 
-                fig.tight_layout()
+        # 4. UMAP Visualization
+        if ANNDATA_AVAILABLE:
+            try:
+                logger.info("Creating UMAP visualization...")
+                adata = anndata.AnnData(X=features)
+                adata.obs['predicted_class'] = [r['predicted_class'] for r in results]
+
+                sc.pp.neighbors(adata, n_neighbors=min(10, len(adata) - 1), use_rep='X')
+                sc.tl.umap(adata)
+
+                fig, ax = plt.subplots(figsize=(10, 10), dpi=300)
                 
-                # Save visualization
-                viz_path = os.path.join(output_dir, f"cell_state_distribution_{uuid4().hex[:8]}.png")
-                plt.savefig(viz_path, bbox_inches='tight', dpi=150, format='png')
+                sc.pl.umap(adata, color='predicted_class', ax=ax, show=False, size=200,
+                           palette=vis_config.get_professional_colors(), legend_loc=None)
+
+                ax.set_title("UMAP Embedding", fontsize=vis_config.PROFESSIONAL_STYLE['axes.titlesize'], fontweight='bold', pad=20)
+                ax.set_xlabel("UMAP 1", fontsize=vis_config.PROFESSIONAL_STYLE['axes.labelsize'], fontweight='bold')
+                ax.set_ylabel("UMAP 2", fontsize=vis_config.PROFESSIONAL_STYLE['axes.labelsize'], fontweight='bold')
+                ax.grid(False)
+                ax.set_xticks([])
+                ax.set_yticks([])
+                ax.set_aspect('equal', adjustable='box')
+                
+                fig.subplots_adjust(right=0.7)
+                handles, labels = ax.get_legend_handles_labels()
+                legend = ax.legend(handles, labels, title="Cell States", title_fontsize=18, fontsize=17, 
+                                 frameon=True, fancybox=True, shadow=True,
+                                 loc='center left', bbox_to_anchor=(1.05, 0.5))
+                legend.get_frame().set_facecolor('white')
+                legend.get_frame().set_alpha(1.0)
+                legend.get_frame().set_linewidth(1.5)
+                
+                output_path = os.path.join(output_dir, "umap_cell_features.png")
+                vis_config.save_professional_figure(fig, output_path)
                 plt.close(fig)
-                viz_paths.append(viz_path)
-            
-            # 2. Confidence distribution histogram with improved styling
-            if results:
-                confidences = [r.get("confidence", 0) for r in results]
-                fig, ax = plt.subplots(figsize=(10, 6))
                 
-                # Create histogram with better styling
-                n, bins, patches = ax.hist(confidences, bins=20, alpha=0.7, color='skyblue', 
-                                         edgecolor='black', linewidth=1.2)
-                
-                # Add threshold line
-                ax.axvline(self.confidence_threshold, color='red', linestyle='--', 
-                          linewidth=2, label=f'Threshold ({self.confidence_threshold})')
-                
-                # Styling
-                ax.set_xlabel("Confidence Score", fontsize=12)
-                ax.set_ylabel("Number of Cells", fontsize=12)
-                ax.set_title("Confidence Distribution", fontsize=14, fontweight='bold')
-                ax.legend(fontsize=10)
-                ax.grid(True, alpha=0.3)
-                
-                # Add statistics text
-                mean_conf = np.mean(confidences)
-                std_conf = np.std(confidences)
-                ax.text(0.02, 0.98, f'Mean: {mean_conf:.3f}\nStd: {std_conf:.3f}', 
-                       transform=ax.transAxes, verticalalignment='top',
-                       bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
-                
-                # Save visualization
-                conf_viz_path = os.path.join(output_dir, f"confidence_distribution_{uuid4().hex[:8]}.png")
-                plt.savefig(conf_viz_path, bbox_inches='tight', dpi=150, format='png')
-                plt.close()
-                viz_paths.append(conf_viz_path)
-            
-            # 3. Bar chart of cell state distribution
-            if stats["class_distribution"]:
-                fig, ax = plt.subplots(figsize=(10, 6))
-                
-                labels = list(stats["class_distribution"].keys())
-                counts = [stats["class_distribution"][label]["count"] for label in labels]
-                colors = [self.color_map.get(label, '#CCCCCC') for label in labels]
-                
-                bars = ax.bar(labels, counts, color=colors, alpha=0.8, edgecolor='black', linewidth=1)
-                
-                # Add value labels on bars
-                for bar, count in zip(bars, counts):
-                    height = bar.get_height()
-                    ax.text(bar.get_x() + bar.get_width()/2., height + 0.5,
-                           f'{count}', ha='center', va='bottom', fontweight='bold')
-                
-                ax.set_xlabel("Cell States", fontsize=12)
-                ax.set_ylabel("Number of Cells", fontsize=12)
-                ax.set_title("Cell State Distribution", fontsize=14, fontweight='bold')
-                ax.tick_params(axis='x', rotation=45)
-                ax.grid(True, alpha=0.3, axis='y')
-                
-                # Save visualization
-                bar_viz_path = os.path.join(output_dir, f"cell_state_bars_{uuid4().hex[:8]}.png")
-                plt.savefig(bar_viz_path, bbox_inches='tight', dpi=150, format='png')
-                plt.close()
-                viz_paths.append(bar_viz_path)
-            
-        except Exception as e:
-            logger.error(f"Error creating visualizations: {str(e)}")
-        
-        return viz_paths
-    
-    def _create_pca_visualization(self, results: List[Dict], features: np.ndarray, output_dir: str) -> Optional[str]:
-        """Generate a PCA visualization from extracted features."""
-        try:
-            logger.info("Generating PCA visualization...")
-            
-            # Apply PCA
-            pca = PCA(n_components=2)
-            features_2d = pca.fit_transform(features)
-            
-            # Create visualization
-            fig, ax = plt.subplots(figsize=(10, 8))
-            
-            # Plot each class with its specific color
-            for class_name in self.class_names:
-                class_indices = [i for i, r in enumerate(results) if r['predicted_class'] == class_name]
-                if class_indices:
-                    class_features = features_2d[class_indices]
-                    ax.scatter(class_features[:, 0], class_features[:, 1], 
-                             c=self.color_map.get(class_name, '#CCCCCC'), 
-                             label=class_name, alpha=0.7, s=60, edgecolors='black', linewidth=0.5)
-            
-            ax.set_xlabel(f'PC1 ({pca.explained_variance_ratio_[0]:.1%} variance)', fontsize=12)
-            ax.set_ylabel(f'PC2 ({pca.explained_variance_ratio_[1]:.1%} variance)', fontsize=12)
-            ax.set_title("Cell Feature Space (PCA)", fontsize=14, fontweight='bold')
-            ax.legend(title="Cell States", fontsize=10)
-            ax.grid(True, alpha=0.3)
-            
-            # Add explained variance information
-            total_variance = pca.explained_variance_ratio_.sum()
-            ax.text(0.02, 0.98, f'Total explained variance: {total_variance:.1%}', 
-                   transform=ax.transAxes, verticalalignment='top',
-                   bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.8))
-            
-            plt.tight_layout()
-            
-            # Save the plot
-            save_path = os.path.join(output_dir, f"pca_cell_features_{uuid4().hex[:8]}.png")
-            plt.savefig(save_path, format='png', dpi=300, bbox_inches='tight')
-            plt.close(fig)
-            
-            logger.info(f"PCA visualization saved to: {save_path}")
-            return save_path
-
-        except Exception as e:
-            logger.error(f"Error creating PCA visualization: {e}")
-            return None
-    
-    def _create_umap_visualization(self, results: List[Dict], features: np.ndarray, output_dir: str) -> Optional[str]:
-        """Generate a UMAP visualization from extracted features using anndata and scanpy."""
-        if not ANNDATA_AVAILABLE:
-            logger.warning("UMAP visualization requested but anndata/scanpy not available")
-            return None
-            
-        try:
-            logger.info("Generating UMAP visualization...")
-            
-            # Create AnnData object
-            adata = anndata.AnnData(X=features)
-            adata.obs['predicted_class'] = [r['predicted_class'] for r in results]
-            adata.obs['image_name'] = [Path(r['image_path']).name for r in results]
-
-            # Run Scanpy workflow with adaptive parameters
-            n_samples = features.shape[0]
-            
-            # Check if we have enough samples
-            if n_samples < 3:
-                logger.warning(f"Not enough samples ({n_samples}) for UMAP visualization. Need at least 3 samples.")
-                return None
-            
-            # Adaptive PCA components
-            n_pcs = min(50, n_samples - 1, features.shape[1] - 1)
-            if n_pcs < 2:
-                n_pcs = 2
-            
-            # Adaptive neighbor parameters - more conservative for small samples
-            if n_samples < 10:
-                n_neighbors = max(2, n_samples - 1)
-                min_dist = 0.1
-                spread = 1.0
-            else:
-                n_neighbors = min(15, n_samples - 1)
-                min_dist = 0.5
-                spread = 2.5
-            
-            logger.info(f"UMAP parameters: n_samples={n_samples}, n_pcs={n_pcs}, n_neighbors={n_neighbors}")
-            
-            # Run PCA with error handling
-            try:
-                sc.tl.pca(adata, n_comps=n_pcs, use_highly_variable=False)
-                use_pca = True
+                logger.info(f"UMAP visualization saved to {output_path}")
+                output_paths.append(output_path)
             except Exception as e:
-                logger.warning(f"PCA failed, using raw features: {e}")
-                use_pca = False
-            
-            # Run neighbors with error handling
-            try:
-                if use_pca:
-                    sc.pp.neighbors(adata, n_neighbors=n_neighbors, n_pcs=n_pcs, use_rep='X_pca')
-                else:
-                    sc.pp.neighbors(adata, n_neighbors=n_neighbors, use_rep='X')
-            except Exception as e:
-                logger.warning(f"Neighbors computation failed, trying with reduced parameters: {e}")
-                # Try with even more conservative parameters
-                try:
-                    n_neighbors = max(2, min(n_neighbors - 1, n_samples - 1))
-                    if use_pca:
-                        sc.pp.neighbors(adata, n_neighbors=n_neighbors, n_pcs=min(n_pcs, 2), use_rep='X_pca')
-                    else:
-                        sc.pp.neighbors(adata, n_neighbors=n_neighbors, use_rep='X')
-                except Exception as e2:
-                    logger.error(f"Neighbors computation completely failed: {e2}")
-                    return None
-            
-            # Run UMAP with adaptive parameters
-            try:
-                sc.tl.umap(adata, min_dist=min_dist, spread=spread)
-            except Exception as e:
-                logger.warning(f"UMAP failed with standard parameters, trying with minimal settings: {e}")
-                try:
-                    sc.tl.umap(adata, min_dist=0.1, spread=1.0)
-                except Exception as e2:
-                    logger.error(f"UMAP computation completely failed: {e2}")
-                    return None
-            
-            # Plot UMAP
-            fig, ax = plt.subplots(figsize=(10, 8))
-            sc.pl.umap(adata, color=['predicted_class'], show=False, 
-                      palette=self.color_map, size=120, alpha=0.7, title="", ax=ax)
+                logger.error(f"Error creating UMAP visualization: {str(e)}")
 
-            if ax.get_legend() is not None:
-                ax.get_legend().remove()
-            
-            ax.set_xticks([]); ax.set_yticks([]); ax.set_xlabel(""); ax.set_ylabel("")
-            plt.grid(False)
-            for spine in ax.spines.values():
-                spine.set_visible(False)
-            
-            # Add title and legend
-            ax.set_title("Cell Feature Space (UMAP)", fontsize=14, fontweight='bold')
-            
-            # Create custom legend
-            from matplotlib.patches import Patch
-            legend_elements = [Patch(facecolor=color, label=state) 
-                             for state, color in self.color_map.items()]
-            ax.legend(handles=legend_elements, title="Cell States", 
-                     loc='upper right', fontsize=10)
-            
-            plt.tight_layout()
-
-            # Save the plot
-            save_path = os.path.join(output_dir, f"umap_cell_features_{uuid4().hex[:8]}.png")
-            plt.savefig(save_path, format='png', dpi=300, bbox_inches='tight')
-            plt.close(fig)
-            
-            logger.info(f"UMAP visualization saved to: {save_path}")
-            return save_path
-
-        except Exception as e:
-            logger.error(f"Error creating UMAP visualization: {e}")
-            import traceback
-            traceback.print_exc()
-            return None
+        return output_paths
     
     def get_metadata(self):
-        """Returns the metadata for the Fibroblast_State_Analyzer_Tool."""
+        """Returns the tool's metadata."""
         metadata = super().get_metadata()
         metadata.update({
             "device": str(self.device),
