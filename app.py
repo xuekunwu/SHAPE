@@ -936,7 +936,7 @@ def main(args):
                         gr.Markdown("#### 🧬 Fibroblast Analysis Examples")
                         gr.Examples(
                             examples=fibroblast_examples,
-                            inputs=[gr.Textbox(label="Category", visible=False), user_image, user_query, gr.Textbox(label="Select Tools"), gr.Textbox(label="Reference Answer", visible=False)],
+                            inputs=[gr.Textbox(label="Category", visible=False), user_image, user_query, gr.Textbox(label="Select Tools", visible=False), gr.Textbox(label="Reference Answer", visible=False)],
                             outputs=[user_image, user_query, enabled_fibroblast_tools, enabled_general_tools],
                             fn=distribute_tools,
                             cache_examples=False
@@ -946,7 +946,7 @@ def main(args):
                         gr.Examples(
                             examples=general_examples,
                             label="General Purpose Examples",
-                            inputs=[gr.Textbox(label="Category", visible=False), user_image, user_query, gr.Textbox(label="Select Tools"), gr.Textbox(label="Reference Answer", visible=False)],
+                            inputs=[gr.Textbox(label="Category", visible=False), user_image, user_query, gr.Textbox(label="Select Tools", visible=False), gr.Textbox(label="Reference Answer", visible=False)],
                             outputs=[user_image, user_query, enabled_fibroblast_tools, enabled_general_tools],
                             fn=distribute_tools,
                             cache_examples=False
