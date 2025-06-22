@@ -393,7 +393,7 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                 },
                 "cell_state_descriptions": self.class_descriptions,
                 "analysis_quality": self._assess_quality(results),
-                "recommendations": self._generate_recommendations(results, len(results), len(results)),
+                "recommendations": self._generate_recommendations(summary, len(cell_crops), len(results)),
                 "metadata_info": {
                     "total_crops_processed": len(cell_crops),
                     "successful_analyses": len(results),
