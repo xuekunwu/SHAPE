@@ -67,7 +67,7 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
     def __init__(self, model_path=None, backbone_size="large", confidence_threshold=0.5):
         super().__init__(
             tool_name="Fibroblast_State_Analyzer_Tool",
-            tool_description="Analyzes fibroblast cell states using deep learning to classify individual cells into different activation states. Supports both PCA and UMAP visualizations.",
+            tool_description="Analyzes fibroblast cell states using deep learning to classify individual cells into different activation states. Generates comprehensive visualizations including UMAP plots for cell distribution analysis, PCA plots, confidence distributions, and cell state bar charts. UMAP visualization is particularly useful for understanding cell clustering and spatial relationships in the feature space.",
             tool_version="1.0.0",
             input_types={
                 "cell_crops": "List[str] - Paths to individual cell crop images",
@@ -75,24 +75,29 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                 "confidence_threshold": "float - Minimum confidence threshold for classification (default: 0.5)",
                 "batch_size": "int - Batch size for processing (default: 16)",
                 "query_cache_dir": "str - Directory for caching results",
-                "visualization_method": "str - Visualization method: 'pca', 'umap', or 'auto' (default: 'auto')"
+                "visualization_type": "str - Visualization method: 'pca', 'umap', 'auto', or 'all' (default: 'auto'). Use 'all' to generate all visualizations including UMAP for cell distribution analysis."
             },
-            output_type="dict - Analysis results with cell state classifications and statistics",
+            output_type="dict - Analysis results with cell state classifications, statistics, and comprehensive visualizations including UMAP plots",
             demo_commands=[
                 {
-                    "command": 'execution = tool.execute(cell_crops=["cell_0001.png", "cell_0002.png"], cell_metadata=[{"cell_id": 1}, {"cell_id": 2}])',
-                    "description": "Analyze cell states for individual fibroblast crops"
+                    "command": 'execution = tool.execute(cell_crops=["cell_0001.png", "cell_0002.png"], cell_metadata=[{"cell_id": 1}, {"cell_id": 2}], visualization_type="all")',
+                    "description": "Analyze cell states with all visualizations including UMAP for cell distribution analysis"
                 },
                 {
-                    "command": 'execution = tool.execute(cell_crops=["cell_0001.png"], visualization_method="umap")',
-                    "description": "Analyze with UMAP visualization (requires anndata/scanpy)"
+                    "command": 'execution = tool.execute(cell_crops=["cell_0001.png"], visualization_type="umap")',
+                    "description": "Analyze with UMAP visualization to show cell clustering and distribution in feature space"
+                },
+                {
+                    "command": 'execution = tool.execute(cell_crops=["cell_0001.png"], visualization_type="all")',
+                    "description": "Generate comprehensive analysis with all visualizations: UMAP, PCA, confidence distributions, and cell state charts"
                 }
             ],
             user_metadata={
                 "limitation": "Requires GPU for optimal performance. Model accuracy depends on image quality and cell visibility. May struggle with very small or overlapping cells.",
-                "best_practice": "Use with high-quality cell crops from Single_Cell_Cropper_Tool. Ensure cells are well-separated and clearly visible in crops.",
+                "best_practice": "Use with high-quality cell crops from Single_Cell_Cropper_Tool. Ensure cells are well-separated and clearly visible in crops. For best results, use visualization_type='all' to get comprehensive visualizations including UMAP.",
                 "cell_states": "Classifies cells into: dead, np-MyoFb (non-proliferative myofibroblast), p-MyoFb (proliferative myofibroblast), proto-MyoFb (proto-myofibroblast), q-Fb (quiescent fibroblast)",
-                "visualization": "Supports PCA (fast, interpretable) and UMAP (advanced, requires anndata/scanpy). Auto-selects based on availability."
+                "visualization": "Supports comprehensive visualizations: UMAP (shows cell clustering and distribution), PCA (fast, interpretable), confidence distributions, and cell state bar charts. UMAP is particularly useful for understanding cell relationships and identifying clusters. Use visualization_type='all' for complete analysis.",
+                "umap_benefits": "UMAP visualization provides superior insights into cell distribution patterns, helping identify clusters, outliers, and spatial relationships between different cell states in the high-dimensional feature space."
             }
         )
         
@@ -307,7 +312,7 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
             confidence_threshold: Minimum confidence for classification
             batch_size: Batch size for processing
             query_cache_dir: Directory for caching results
-            visualization_type: 'pca', 'umap', or 'auto' for automatic selection
+            visualization_type: 'pca', 'umap', 'auto', or 'all' for automatic selection
             **kwargs: Additional arguments
             
         Returns:
