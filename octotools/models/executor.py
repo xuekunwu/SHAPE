@@ -65,17 +65,19 @@ else:
     
     try:
         # Use the tool's improved metadata loading method
-        execution = tool._load_cell_data_from_metadata(latest_metadata_file, 'solver_cache/temp/tool_cache/')
+        cell_crops, cell_metadata = tool._load_cell_data_from_metadata('solver_cache/temp/tool_cache')
         
-        if execution.get('status') == 'success':
+        if cell_crops and len(cell_crops) > 0:
             # Execute the tool with loaded data
             execution = tool.execute(
-                cell_crops=execution['cell_crops'], 
-                cell_metadata=execution['cell_metadata'], 
+                cell_crops=cell_crops, 
+                cell_metadata=cell_metadata, 
                 confidence_threshold=0.5, 
                 batch_size=16, 
-                query_cache_dir='solver_cache/temp/tool_cache/'
+                query_cache_dir='solver_cache/temp/tool_cache'
             )
+        else:
+            execution = {"error": "No valid cell crops found in metadata", "status": "failed"}
         
     except Exception as e:
         print("Error loading metadata: " + str(e))
