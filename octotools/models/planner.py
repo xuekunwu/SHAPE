@@ -228,10 +228,12 @@ Detailed Instructions:
       - Consider if all relevant information has been extracted from the image (if applicable).
       - IMPORTANT: For analysis tasks, ensure that the actual analysis has been performed, not just data preparation.
       - For example: If the query asks to "analyze cell states", ensure that cell state analysis has been performed, not just cell cropping.
+      - CRITICAL: If the query asks for analysis and you see analysis results with visualizations, distributions, and statistics, the task is COMPLETE.
 
    b) Unused Tools: Are there any unused tools that could provide additional relevant information?
       - Specify which unused tools might be helpful and why.
       - Pay special attention to analysis tools that could provide insights from prepared data.
+      - IMPORTANT: If the main analysis has been completed and only unused tools remain for minor enhancements, this does NOT justify continuing.
 
    c) Inconsistencies: Are there any contradictions or conflicts in the information provided?
       - If yes, explain the inconsistencies and suggest how they might be resolved.
@@ -245,10 +247,19 @@ Detailed Instructions:
 5. Final Determination:
    Based on your thorough analysis, decide if the memory is complete and accurate enough to generate the final output, or if additional tool usage is necessary.
    
-   CRITICAL CHECKLIST:
+   CRITICAL CHECKLIST FOR STOPPING:
    - Has the query been fully answered with actual analysis results?
-   - Are there any analysis tools available that could provide insights from the prepared data?
+   - Are there analysis results with visualizations, distributions, or statistics?
    - Does the current state represent the final analysis, or just intermediate data preparation?
+   - If the query asked for analysis and analysis results are present, STOP.
+   - If the query asked for classification and classification results are present, STOP.
+   - If the query asked for detection and detection results are present, STOP.
+   - Only continue if there are UNANSWERED aspects of the query that require additional tools.
+
+   CRITICAL CHECKLIST FOR CONTINUING:
+   - Are there UNANSWERED parts of the query that require additional tools?
+   - Is the current state only data preparation without actual analysis?
+   - Are there analysis tools available that could provide insights from prepared data AND the query specifically asks for such analysis?
 
 Response Format:
 You MUST respond with exactly two fields:
