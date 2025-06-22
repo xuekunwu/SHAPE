@@ -625,14 +625,24 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
     print(f"Debug - enabled_tools: {enabled_tools}")
     print(f"Debug - type of enabled_tools: {type(enabled_tools)}")
     
-    # Ensure enabled_tools is a list
-    if enabled_tools is None:
-        enabled_tools = ["Generalist_Solution_Generator_Tool"]
+    # Ensure enabled_tools is a list and not empty
+    if not enabled_tools:
+        print("⚠️ No tools selected in UI, defaulting to all available tools.")
+        # Get all tools from the directory as a fallback
+        tools_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'octotools', 'tools')
+        enabled_tools = [
+            d for d in os.listdir(tools_dir)
+            if os.path.isdir(os.path.join(tools_dir, d)) and not d.startswith('__')
+        ]
     elif isinstance(enabled_tools, str):
         enabled_tools = [enabled_tools]
     elif not isinstance(enabled_tools, list):
-        enabled_tools = list(enabled_tools) if hasattr(enabled_tools, '__iter__') else ["Generalist_Solution_Generator_Tool"]
-    
+        enabled_tools = list(enabled_tools) if hasattr(enabled_tools, '__iter__') else []
+
+    if not enabled_tools:
+        print("❌ Critical Error: Could not determine a default tool list. Using Generalist_Solution_Generator_Tool as a last resort.")
+        enabled_tools = ["Generalist_Solution_Generator_Tool"]
+
     print(f"Debug - final enabled_tools: {enabled_tools}")
     
     # Save the query data
