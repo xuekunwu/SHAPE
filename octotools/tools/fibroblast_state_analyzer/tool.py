@@ -423,6 +423,10 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
             # Calculate statistics
             summary = self._calculate_statistics(results)
             
+            # Initialize visual_outputs and recommendations
+            visual_outputs = []
+            recommendations = {}
+            
             # Generate final summary and visualizations
             if len(features_list) > 0:
                 logger.info("Generating final summary and visualizations...")
@@ -454,6 +458,8 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
             else:
                 print(f"❌ No features available for advanced visualizations. features_list length: {len(features_list) if features_list else 0}")
                 print(f"🔍 Debug: results length = {len(results) if results else 0}")
+                # Set default recommendations for cases without features
+                recommendations = {"note": "No features available for advanced analysis"}
             
             return {
                 "summary": summary,
