@@ -17,6 +17,8 @@ from gradio import ChatMessage
 from pathlib import Path
 from huggingface_hub import CommitScheduler
 from octotools.models.formatters import ToolCommand
+import random
+import traceback
 
 # Add the project root to the Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -554,13 +556,21 @@ def parse_arguments():
     return parser.parse_args()
 
 
-def solve_problem_gradio(user_query, user_image, max_steps=10, max_time=60, api_key=None, llm_model_engine=None, enabled_tools=None):
+def solve_problem_gradio(user_query, user_image, max_steps=10, max_time=60, api_key=None, llm_model_engine=None, enabled_tools=None, clear_previous_viz=False):
     """
-    Wrapper function to connect the solver to Gradio.
-    Streams responses from `solver.stream_solve_user_problem` for real-time UI updates.
+    Solve a problem using the Gradio interface with optional visualization clearing.
+    
+    Args:
+        user_query: The user's query
+        user_image: The user's image
+        max_steps: Maximum number of reasoning steps
+        max_time: Maximum analysis time in seconds
+        api_key: OpenAI API key
+        llm_model_engine: Language model engine
+        enabled_tools: List of enabled tools
+        clear_previous_viz: Whether to clear previous visualizations
     """
-
-    # Generate Unique Query ID (Date and first 8 characters of UUID)
+    # Generate a unique query ID
     query_id = time.strftime("%Y%m%d_%H%M%S") + "_" + str(uuid.uuid4())[:8] # e.g, 20250217_062225_612f2474
     print(f"Query ID: {query_id}")
 
@@ -568,10 +578,15 @@ def solve_problem_gradio(user_query, user_image, max_steps=10, max_time=60, api_
     global QUERY_ID
     QUERY_ID = query_id
 
-    # Clear output visualizations directory for new query
-    print("🧹 Clearing output_visualizations directory for new query...")
-    VisualizationConfig.clear_output_dir()
-    print("✅ Output directory cleared successfully")
+    # Handle visualization clearing based on user preference
+    if clear_previous_viz:
+        print("🧹 Clearing output_visualizations directory as requested...")
+        VisualizationConfig.clear_output_dir(force_clear=True)
+        print("✅ Output directory cleared successfully")
+    else:
+        print("📁 Preserving output_visualizations directory for continuity...")
+        VisualizationConfig.clear_output_dir(force_clear=False)  # Preserve all existing charts
+        print("✅ Output directory preserved - all charts will be retained")
 
     # Create a directory for the query ID
     query_cache_dir = os.path.join(DATASET_DIR.name, query_id) # NOTE
@@ -698,25 +713,20 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
         try:
             # Add a check to prevent deleting the root solver_cache
             if query_cache_dir != DATASET_DIR.name and DATASET_DIR.name in query_cache_dir:
-                # Preserve output_visualizations directory if it exists
+                # Preserve output_visualizations directory - DO NOT CLEAR IT
+                # This allows users to keep all generated charts until they start a new analysis
                 output_viz_dir = os.path.join(os.getcwd(), 'output_visualizations')
                 if os.path.exists(output_viz_dir):
-                    print(f"🧹 Clearing output_visualizations directory: {output_viz_dir}")
-                    for filename in os.listdir(output_viz_dir):
-                        file_path = os.path.join(output_viz_dir, filename)
-                        try:
-                            if os.path.isfile(file_path):
-                                os.unlink(file_path)
-                        except Exception as e:
-                            print(f"❌ Failed to delete {file_path}: {e}")
+                    print(f"📁 Preserving output_visualizations directory: {output_viz_dir}")
+                    print(f"💡 All generated charts are preserved for review")
                 
                 # Add a small delay to ensure files are written
                 time.sleep(1)
                 
-                # Clean up the cache directory
+                # Clean up the cache directory (but preserve visualizations)
                 shutil.rmtree(query_cache_dir)
                 print(f"✅ Successfully cleaned up cache directory: {query_cache_dir}")
-                print(f"💡 Note: Visualization files are preserved in output_visualizations/ directory")
+                print(f"💡 Note: All visualization files are preserved in output_visualizations/ directory")
             else:
                 print(f"⚠️ Skipping cleanup for safety. Path was: {query_cache_dir}")
         except Exception as e:
@@ -752,6 +762,14 @@ def main(args):
                 )
                 max_steps = gr.Slider(1, 15, value=10, label="Max Reasoning Steps")
                 max_time = gr.Slider(60, 600, value=300, label="Max Analysis Time (seconds)")
+
+                # Visualization options
+                gr.Markdown("#### 📊 Visualization Options")
+                clear_previous_viz = gr.Checkbox(
+                    label="Clear previous visualizations", 
+                    value=False,
+                    info="Check this to clear all previous charts when starting new analysis"
+                )
 
                 # Tool selection
                 gr.Markdown("#### 🛠️ Available Tools")
@@ -901,7 +919,7 @@ def main(args):
         # Button click event
         run_button.click(
             fn=solve_problem_gradio,
-            inputs=[user_query, user_image, max_steps, max_time, api_key, llm_model_engine, enabled_tools],
+            inputs=[user_query, user_image, max_steps, max_time, api_key, llm_model_engine, enabled_tools, clear_previous_viz],
             outputs=[chatbot_output, text_output, gallery_output, progress_md],
             preprocess=False,
             queue=True,
