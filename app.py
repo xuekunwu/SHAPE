@@ -698,7 +698,6 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
                             print(f"❌ Failed to delete {file_path}: {e}")
                 
                 # Add a small delay to ensure files are written
-                import time
                 time.sleep(1)
                 
                 # Clean up the cache directory
