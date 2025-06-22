@@ -556,7 +556,7 @@ def parse_arguments():
     return parser.parse_args()
 
 
-def solve_problem_gradio(user_query, user_image, max_steps=10, max_time=60, api_key=None, llm_model_engine=None, enabled_tools=None, clear_previous_viz=False):
+def solve_problem_gradio(user_query, user_image, max_steps=10, max_time=60, api_key=None, llm_model_engine=None, enabled_fibroblast_tools=None, enabled_general_tools=None, clear_previous_viz=False):
     """
     Solve a problem using the Gradio interface with optional visualization clearing.
     
@@ -567,9 +567,13 @@ def solve_problem_gradio(user_query, user_image, max_steps=10, max_time=60, api_
         max_time: Maximum analysis time in seconds
         api_key: OpenAI API key
         llm_model_engine: Language model engine
-        enabled_tools: List of enabled tools
+        enabled_fibroblast_tools: List of enabled fibroblast tools
+        enabled_general_tools: List of enabled general tools
         clear_previous_viz: Whether to clear previous visualizations
     """
+    # Combine the tool lists
+    enabled_tools = (enabled_fibroblast_tools or []) + (enabled_general_tools or [])
+    
     # Generate a unique query ID
     query_id = time.strftime("%Y%m%d_%H%M%S") + "_" + str(uuid.uuid4())[:8] # e.g, 20250217_062225_612f2474
     print(f"Query ID: {query_id}")
@@ -782,17 +786,17 @@ def main(args):
                 # Tool selection
                 gr.Markdown("#### 🛠️ Available Tools")
                 
-                # Cell analysis tools
-                cell_analysis_tools = [
+                # Fibroblast analysis tools
+                fibroblast_tools = [
+                    "Image_Preprocessor_Tool",
+                    "Nuclei_Segmenter_Tool",
+                    "Single_Cell_Cropper_Tool",
+                    "Fibroblast_State_Analyzer_Tool",
                     "Object_Detector_Tool",
                     "Image_Captioner_Tool", 
                     "Relevant_Patch_Zoomer_Tool",
                     "Text_Detector_Tool",
-                    "Advanced_Object_Detector_Tool",
-                    "Image_Preprocessor_Tool",
-                    "Nuclei_Segmenter_Tool",
-                    "Single_Cell_Cropper_Tool",
-                    "Fibroblast_State_Analyzer_Tool"
+                    "Advanced_Object_Detector_Tool"
                 ]
                 
                 # General tools
@@ -807,23 +811,30 @@ def main(args):
                     "URL_Text_Extractor_Tool"
                 ]
                 
-                all_tools = cell_analysis_tools + general_tools
-                
-                enabled_tools = gr.CheckboxGroup(
-                    choices=all_tools, 
-                    value=cell_analysis_tools, 
-                    label="Select Analysis Tools"
-                )
-                
+                with gr.Accordion("🧬 Fibroblas Tools", open=True):
+                    enabled_fibroblast_tools = gr.CheckboxGroup(
+                        choices=fibroblast_tools, 
+                        value=fibroblast_tools, 
+                        label="Select Fibroblast Analysis Tools"
+                    )
+
+                with gr.Accordion("🧩 General Tools", open=False):
+                    enabled_general_tools = gr.CheckboxGroup(
+                        choices=general_tools, 
+                        label="Select General Purpose Tools"
+                    )
+
                 with gr.Row():
-                    gr.Button("Select Cell Analysis Tools", size="sm").click(
-                        lambda: cell_analysis_tools, outputs=enabled_tools
+                    gr.Button("Select Fibroblast Tools", size="sm").click(
+                        lambda: fibroblast_tools, outputs=enabled_fibroblast_tools
                     )
                     gr.Button("Select All Tools", size="sm").click(
-                        lambda: all_tools, outputs=enabled_tools
+                        lambda: fibroblast_tools + general_tools, 
+                        outputs=[enabled_fibroblast_tools, enabled_general_tools]
                     )
                     gr.Button("Clear Selection", size="sm").click(
-                        lambda: [], outputs=enabled_tools
+                        lambda: [[], []], 
+                        outputs=[enabled_fibroblast_tools, enabled_general_tools]
                     )
 
             # Main interface
@@ -882,56 +893,78 @@ def main(args):
                 # Bottom row for examples
                 with gr.Row():
                     with gr.Column(scale=5):
-                        gr.Markdown("")
-                        gr.Markdown("""
-                                    ## 💡 Try these examples with suggested tools.
-                                    """)
+                        gr.Markdown("## 💡 Try these examples with suggested tools.")
+                        
+                        # Define example lists
+                        fibroblast_examples = [
+                            [ "Image Preprocessing",
+                             "examples/A5_01_1_1_Phase Contrast_001.png",
+                             "Preprocess this phase contrast image to correct illumination and adjust brightness.",
+                             [["Image_Preprocessor_Tool"], []],
+                             "Illumination-corrected and brightness-normalized phase contrast image."],
+
+                            [ "Nuclei Segmentation",
+                             "examples/A5_01_1_1_Phase Contrast_001.png",
+                             "Segment the nuclei from this preprocessed phase contrast image.",
+                             [["Image_Preprocessor_Tool", "Nuclei_Segmenter_Tool"], []],
+                             "Segmented nuclei mask from the phase contrast image."],
+
+                            [ "Single-Cell Cropping",
+                             "examples/A5_01_1_1_Phase Contrast_001.png",
+                             "Crop single cells from the segmented nuclei in this image.",
+                             [["Image_Preprocessor_Tool", "Nuclei_Segmenter_Tool", "Single_Cell_Cropper_Tool"], []],
+                             "Individual cell crops extracted from the image."],
+
+                            [ "Full Fibroblast Analysis",
+                             "examples/fibroblast.png",
+                             "Analyze the fibroblast cell states in this image, including preprocessing, segmentation, and classification.",
+                             [["Image_Preprocessor_Tool", "Nuclei_Segmenter_Tool", "Single_Cell_Cropper_Tool", "Fibroblast_State_Analyzer_Tool"], []],
+                             "Comprehensive analysis of fibroblast cell states with visualizations."],
+                        ]
+                        
+                        general_examples = [
+                            [ "Object Detection (Baseball)",
+                             "examples/baseball.png",
+                             "Detect the baseball in this image and provide its bounding box.",
+                             [["Object_Detector_Tool"], []],
+                             "Detected baseball with bounding box coordinates."],
+
+                            [ "Code Generation (Fibonacci)",
+                             None,
+                             "Write a Python function to calculate the nth Fibonacci number.",
+                             [[], ["Python_Code_Generator_Tool"]],
+                             "A Python function that computes Fibonacci numbers."],
+
+                            [ "Scientific Search (Quantum Computing)",
+                             None,
+                             "Find recent papers on quantum computing from ArXiv.",
+                             [[], ["ArXiv_Paper_Searcher_Tool"]],
+                             "A list of recent ArXiv papers on quantum computing."]
+                        ]
+                        
+                        gr.Markdown("#### 🧬 Fibroblast Analysis Examples")
                         gr.Examples(
-                            examples=[
-                                # [ None, "Who is the president of the United States?", ["Google_Search_Tool"]],
-                                [ "Image Preprocessing",
-                                 "examples/A5_01_1_1_Phase Contrast_001.png",
-                                 "Preprocess this phase contrast image to correct illumination and adjust brightness.",
-                                 ["Image_Preprocessor_Tool"],
-                                 "Illumination-corrected and brightness-normalized phase contrast image."],
-
-                                [ "Nuclei Segmentation",
-                                 "examples/A5_01_1_1_Phase Contrast_001.png",
-                                 "Segment and count the nuclei in this fibroblast image.", 
-                                 ["Image_Preprocessor_Tool", "Nuclei_Segmenter_Tool"],
-                                 "There are 605 cells in this image, and the nuclei are segmented."],
-
-                                [ "Fibroblast State Analysis",
-                                 "examples/A5_01_1_1_Phase Contrast_001.png",
-                                 "Analyze fibroblast cell states from individual cell crops.", 
-                                 ["Image_Preprocessor_Tool", "Nuclei_Segmenter_Tool", "Single_Cell_Cropper_Tool", "Fibroblast_State_Analyzer_Tool"],
-                                 "There are 605 cells in this image. The fibroblast state is analyzed."],
-
-                                [ "Medical Image Analysis",
-                                 "examples/lung.jpg", 
-                                 "What is the organ on the left side of this image?", 
-                                 ["Image_Captioner_Tool", "Relevant_Patch_Zoomer_Tool"],
-                                 "Lung"],
-
-                                [ "Pathology Diagnosis",
-                                 "examples/pathology.jpg", 
-                                 "What are the cell types in this image?", 
-                                 ["Generalist_Solution_Generator_Tool", "Image_Captioner_Tool", "Relevant_Patch_Zoomer_Tool"],
-                                 "Need expert insights."],
-
-                            ],
-                            inputs=[gr.Textbox(label="Category", visible=False), user_image, user_query, enabled_tools, gr.Textbox(label="Reference Answer", visible=False)],
-                            # label="Try these examples with suggested tools."
+                            examples=fibroblast_examples,
+                            inputs=[user_image, user_query, [enabled_fibroblast_tools, enabled_general_tools]],
+                            outputs=[user_image, user_query, [enabled_fibroblast_tools, enabled_general_tools]],
+                            fn=lambda img, q, tools: (img, q, (tools[0], tools[1])),
+                            cache_examples=False
+                        )
+                        
+                        gr.Markdown("#### 🧩 General Purpose Examples")
+                        gr.Examples(
+                            examples=general_examples,
+                            inputs=[user_image, user_query, [enabled_fibroblast_tools, enabled_general_tools]],
+                            outputs=[user_image, user_query, [enabled_fibroblast_tools, enabled_general_tools]],
+                            fn=lambda img, q, tools: (img, q, (tools[0], tools[1])),
+                            cache_examples=False
                         )
 
         # Button click event
         run_button.click(
-            fn=solve_problem_gradio,
-            inputs=[user_query, user_image, max_steps, max_time, api_key, llm_model_engine, enabled_tools, clear_previous_viz],
-            outputs=[chatbot_output, text_output, gallery_output, progress_md],
-            preprocess=False,
-            queue=True,
-            show_progress=True
+            solve_problem_gradio,
+            [user_query, user_image, max_steps, max_time, api_key, llm_model_engine, enabled_fibroblast_tools, enabled_general_tools, clear_previous_viz],
+            [chatbot_output, text_output, gallery_output, progress_md]
         )
 
     #################### Gradio Interface ####################
