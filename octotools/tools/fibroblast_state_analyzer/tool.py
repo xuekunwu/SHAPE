@@ -856,17 +856,68 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
             adata.obs['predicted_class'] = [r['predicted_class'] for r in results]
             adata.obs['image_name'] = [Path(r['image_path']).name for r in results]
 
-            # Run Scanpy workflow with adaptive PCA components
+            # Run Scanpy workflow with adaptive parameters
             n_samples = features.shape[0]
-            n_pcs = min(50, n_samples - 1)  # Ensure n_pcs <= n_samples - 1
             
-            if n_pcs < 2:
+            # Check if we have enough samples
+            if n_samples < 3:
                 logger.warning(f"Not enough samples ({n_samples}) for UMAP visualization. Need at least 3 samples.")
                 return None
             
-            sc.tl.pca(adata, n_comps=n_pcs)
-            sc.pp.neighbors(adata, n_neighbors=min(15, n_samples - 1), n_pcs=n_pcs)
-            sc.tl.umap(adata, min_dist=0.5, spread=2.5)
+            # Adaptive PCA components
+            n_pcs = min(50, n_samples - 1, features.shape[1] - 1)
+            if n_pcs < 2:
+                n_pcs = 2
+            
+            # Adaptive neighbor parameters - more conservative for small samples
+            if n_samples < 10:
+                n_neighbors = max(2, n_samples - 1)
+                min_dist = 0.1
+                spread = 1.0
+            else:
+                n_neighbors = min(15, n_samples - 1)
+                min_dist = 0.5
+                spread = 2.5
+            
+            logger.info(f"UMAP parameters: n_samples={n_samples}, n_pcs={n_pcs}, n_neighbors={n_neighbors}")
+            
+            # Run PCA with error handling
+            try:
+                sc.tl.pca(adata, n_comps=n_pcs, use_highly_variable=False)
+                use_pca = True
+            except Exception as e:
+                logger.warning(f"PCA failed, using raw features: {e}")
+                use_pca = False
+            
+            # Run neighbors with error handling
+            try:
+                if use_pca:
+                    sc.pp.neighbors(adata, n_neighbors=n_neighbors, n_pcs=n_pcs, use_rep='X_pca')
+                else:
+                    sc.pp.neighbors(adata, n_neighbors=n_neighbors, use_rep='X')
+            except Exception as e:
+                logger.warning(f"Neighbors computation failed, trying with reduced parameters: {e}")
+                # Try with even more conservative parameters
+                try:
+                    n_neighbors = max(2, min(n_neighbors - 1, n_samples - 1))
+                    if use_pca:
+                        sc.pp.neighbors(adata, n_neighbors=n_neighbors, n_pcs=min(n_pcs, 2), use_rep='X_pca')
+                    else:
+                        sc.pp.neighbors(adata, n_neighbors=n_neighbors, use_rep='X')
+                except Exception as e2:
+                    logger.error(f"Neighbors computation completely failed: {e2}")
+                    return None
+            
+            # Run UMAP with adaptive parameters
+            try:
+                sc.tl.umap(adata, min_dist=min_dist, spread=spread)
+            except Exception as e:
+                logger.warning(f"UMAP failed with standard parameters, trying with minimal settings: {e}")
+                try:
+                    sc.tl.umap(adata, min_dist=0.1, spread=1.0)
+                except Exception as e2:
+                    logger.error(f"UMAP computation completely failed: {e2}")
+                    return None
             
             # Plot UMAP
             fig, ax = plt.subplots(figsize=(10, 8))
@@ -903,6 +954,8 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
 
         except Exception as e:
             logger.error(f"Error creating UMAP visualization: {e}")
+            import traceback
+            traceback.print_exc()
             return None
     
     def get_metadata(self):
