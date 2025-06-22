@@ -681,16 +681,34 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
         error_messages = [gr.ChatMessage(role="assistant", content=error_message)]
         yield error_messages, "", [], "**Progress**: Error occurred"
     finally:
-        print(f"Task completed for query_id: {query_id}. Cleaning up cache directory: {query_cache_dir}")
+        print(f"Task completed for query_id: {query_id}. Preparing to clean up cache directory: {query_cache_dir}")
         try:
             # Add a check to prevent deleting the root solver_cache
             if query_cache_dir != DATASET_DIR.name and DATASET_DIR.name in query_cache_dir:
+                # Preserve output_visualizations directory if it exists
+                output_viz_dir = os.path.join(os.getcwd(), 'output_visualizations')
+                if os.path.exists(output_viz_dir):
+                    print(f"🧹 Clearing output_visualizations directory: {output_viz_dir}")
+                    for filename in os.listdir(output_viz_dir):
+                        file_path = os.path.join(output_viz_dir, filename)
+                        try:
+                            if os.path.isfile(file_path):
+                                os.unlink(file_path)
+                        except Exception as e:
+                            print(f"❌ Failed to delete {file_path}: {e}")
+                
+                # Add a small delay to ensure files are written
+                import time
+                time.sleep(1)
+                
+                # Clean up the cache directory
                 shutil.rmtree(query_cache_dir)
-                print(f"Successfully cleaned up cache directory: {query_cache_dir}")
+                print(f"✅ Successfully cleaned up cache directory: {query_cache_dir}")
+                print(f"💡 Note: Visualization files are preserved in output_visualizations/ directory")
             else:
-                print(f"Skipping cleanup for safety. Path was: {query_cache_dir}")
+                print(f"⚠️ Skipping cleanup for safety. Path was: {query_cache_dir}")
         except Exception as e:
-            print(f"Error cleaning up cache directory {query_cache_dir}: {e}")
+            print(f"❌ Error cleaning up cache directory {query_cache_dir}: {e}")
 
 
 def main(args):
