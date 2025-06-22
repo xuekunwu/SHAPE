@@ -644,10 +644,10 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
         planner=planner,
         memory=memory,
         executor=executor,
-        task=args.task,
-        task_description=args.task_description,
-        output_types=args.output_types,  # Add new parameter
-        verbose=args.verbose,
+        task="minitoolbench",  # Default task
+        task_description="",   # Default empty description
+        output_types="base,final,direct",  # Default output types
+        verbose=True,          # Default verbose
         max_steps=max_steps,
         max_time=max_time,
         query_cache_dir=query_cache_dir # NOTE
