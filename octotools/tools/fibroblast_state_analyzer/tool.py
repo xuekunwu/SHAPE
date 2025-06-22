@@ -430,11 +430,15 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
             # Generate final summary and visualizations
             if len(features_list) > 0:
                 logger.info("Generating final summary and visualizations...")
-                # Safely extract features from results that definitely have them
-                features_list = np.array([r['features'] for r in results if 'features' in r])
+                print(f"🔍 Debug: Initial features_list length: {len(features_list)}")
                 
-                if len(features_list) == 0:
+                # Safely extract features from results that definitely have them
+                results_with_features = [r for r in results if 'features' in r]
+                print(f"🔍 Debug: Results with features: {len(results_with_features)} out of {len(results)}")
+                
+                if len(results_with_features) == 0:
                     logger.warning("No features were successfully extracted, skipping visualizations.")
+                    print("❌ No results have features, skipping visualizations")
                     # Return partial results without visualizations
                     return {
                         "summary": "Analysis completed, but no features were successfully extracted for visualization.",
@@ -443,6 +447,8 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                         "statistics": self._calculate_statistics(results)
                     }
 
+                # Use the original features_list instead of recreating it
+                print(f"🔍 Debug: Using original features_list with length: {len(features_list)}")
                 summary = self._calculate_statistics(results)
 
                 # Save results and get persistent output dir
@@ -452,6 +458,7 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                 print(f"📁 Saving all visualizations to: {persistent_output_dir}")
                 
                 visual_outputs = self._create_visualizations(results, features_list, summary, persistent_output_dir)
+                print(f"📊 Visualizations created: {len(visual_outputs)}")
                 
                 # Add recommendations and quality assessment
                 recommendations = self._generate_recommendations(summary, len(cell_crops), len(results))
@@ -846,6 +853,40 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
 
         print(f"📊 Total visualizations created: {len(output_paths)}")
         return output_paths
+    
+    def _save_results(self, results: List[Dict], summary: Dict, query_cache_dir: str) -> str:
+        """
+        Save analysis results and create output directory for visualizations.
+        
+        Args:
+            results: List of analysis results
+            summary: Summary statistics
+            query_cache_dir: Cache directory path
+            
+        Returns:
+            Path to the output directory for visualizations
+        """
+        try:
+            # Create output directory using VisualizationConfig
+            from octotools.models.utils import VisualizationConfig
+            output_dir = VisualizationConfig.get_output_dir(query_cache_dir)
+            
+            # Save results to JSON file
+            results_file = os.path.join(output_dir, "analysis_results.json")
+            with open(results_file, 'w') as f:
+                json.dump({
+                    "results": results,
+                    "summary": summary,
+                    "timestamp": time.strftime("%Y%m%d_%H%M%S")
+                }, f, indent=2, default=str)
+            
+            print(f"💾 Analysis results saved to: {results_file}")
+            return output_dir
+            
+        except Exception as e:
+            print(f"❌ Error saving results: {str(e)}")
+            # Fallback to default output directory
+            return "output_visualizations"
     
     def get_metadata(self):
         """Returns the tool's metadata."""
