@@ -54,16 +54,22 @@ class DinoV2Classifier(nn.Module):
         self.backbone = backbone
         self.num_classes = num_classes
         
-    def forward(self, x):
+    def forward(self, x, return_features=False):
         """
-        Correctly processes the input tensor to get logits.
-        This ensures the model behaves as a standard classifier.
+        Correctly processes the input tensor, extracts the classification token,
+        and returns logits. Optionally returns the feature tensor as well.
         """
-        # DINOv2 backbone returns a dict. We need to extract the features.
-        # The forward_features method gives us the feature tensor directly.
-        features = self.backbone.forward_features(x)
-        # Then, we pass these features to our custom classifier head.
+        # DINOv2 backbone returns a dict. We need to extract the feature tensor.
+        features_dict = self.backbone.forward_features(x)
+        
+        # The classification token is what is used for linear probing.
+        features = features_dict['x_norm_clstoken']
+        
+        # Pass the feature tensor to our custom classifier head.
         logits = self.backbone.head(features)
+        
+        if return_features:
+            return logits, features
         return logits
 
 class Fibroblast_State_Analyzer_Tool(BaseTool):
@@ -371,13 +377,16 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
             # Batch processing loop
             for i in range(0, len(cell_crops), batch_size):
                 batch_paths = cell_crops[i:i+batch_size]
+                valid_paths_in_batch = []
                 img_tensors = []
+
                 for path in batch_paths:
                     try:
                         img_tensors.append(self._preprocess_image(path).squeeze(0))
+                        valid_paths_in_batch.append(path)
                     except Exception as e:
                         logger.warning(f"Skipping problematic crop {path}: {e}")
-                        continue # Skip this crop
+                        continue
                 
                 if not img_tensors:
                     logger.warning(f"Skipping empty batch from index {i}")
@@ -386,14 +395,13 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                 batch_tensor = torch.stack(img_tensors)
                 
                 # Get model output in no_grad context
-                features = self.model.backbone.forward_features(batch_tensor)
-                logits = self.model.backbone.head(features)
-                probs = F.softmax(logits, dim=1)
-                confidences, predictions = torch.max(probs, dim=1)
+                with torch.no_grad():
+                    logits, features = self.model(batch_tensor, return_features=True)
+                    probs = F.softmax(logits, dim=1)
+                    confidences, predictions = torch.max(probs, dim=1)
                 
-                # Process batch results
-                for j, path in enumerate(batch_paths):
-                    # Ensure we have a valid prediction for this item
+                # Process batch results, ensuring we only use valid paths
+                for j, path in enumerate(valid_paths_in_batch):
                     if j < len(predictions):
                         pred_index = predictions[j].item()
                         confidence = confidences[j].item()
@@ -402,8 +410,8 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                             "image_path": path,
                             "predicted_class": self.class_names[pred_index],
                             "confidence": confidence,
-                            "is_above_threshold": confidence >= confidence_threshold,
-                            "features": features[j].cpu().numpy() # Add features directly to result
+                            "is_above_threshold": confidence >= self.confidence_threshold,
+                            "features": features[j].cpu().numpy()
                         }
                         results.append(result)
 
