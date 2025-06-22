@@ -8,6 +8,7 @@ from uuid import uuid4
 import matplotlib.pyplot as plt
 import torch
 from huggingface_hub import hf_hub_download
+from octotools.models.utils import VisualizationConfig
 
 class Nuclei_Segmenter_Tool(BaseTool):
     def __init__(self, model_path=None):
@@ -35,7 +36,8 @@ class Nuclei_Segmenter_Tool(BaseTool):
             user_metadata={
                 "limitation": "Requires GPU for optimal performance. May struggle with very dense cell populations or poor quality images. Model download required on first use.",
                 "best_practice": "Use with Image_Preprocessor_Tool for better results on low-quality images. Adjust diameter parameter based on your cell type and image resolution."
-            }
+            },
+            output_dir="output_visualizations"  # Set default output directory to output_visualizations
         )
         
         # Enable GPU if available
@@ -105,39 +107,40 @@ class Nuclei_Segmenter_Tool(BaseTool):
             mask = masks[0]
             overlay = plot.mask_overlay(img, mask)
             
-            # Setup output directory
-            if query_cache_dir is None:
-                query_cache_dir = "solver_cache/temp"
-            tool_cache_dir = os.path.join(query_cache_dir, "tool_cache")
-            os.makedirs(tool_cache_dir, exist_ok=True)
+            # Setup output directory using centralized configuration
+            output_dir = VisualizationConfig.get_output_dir(query_cache_dir)
             
-            # Save overlay visualization
-            output_path = os.path.join(tool_cache_dir, f"nuclei_overlay_{uuid4().hex[:8]}.png")
-            plt.figure(figsize=(8, 8))
-            plt.imshow(overlay)
-            plt.axis('off')
-            plt.title(f"Nuclei Segmentation - {len(np.unique(mask))-1} cells detected")
-            plt.savefig(output_path, bbox_inches='tight', pad_inches=0, dpi=150)
-            plt.close()
+            # Save overlay visualization with professional styling
+            output_path = os.path.join(output_dir, f"nuclei_overlay_{uuid4().hex[:8]}.png")
+            fig, ax = VisualizationConfig.create_professional_figure(figsize=(12, 8))
+            ax.imshow(overlay)
+            ax.axis('off')
+            VisualizationConfig.apply_professional_styling(
+                ax, title=f"Nuclei Segmentation - {len(np.unique(mask))-1} cells detected"
+            )
+            VisualizationConfig.save_professional_figure(fig, output_path)
+            plt.close(fig)
             
             # Count nuclei (unique mask values, excluding background 0)
             n_nuclei = len(np.unique(mask)) - 1 if mask is not None else 0
             
-            # Save mask as separate visualization
-            mask_path = os.path.join(tool_cache_dir, f"nuclei_mask_{uuid4().hex[:8]}.png")
+            # Save mask as separate visualization with professional styling
+            mask_path = os.path.join(output_dir, f"nuclei_mask_{uuid4().hex[:8]}.png")
             
             # Save the original mask array (not matplotlib visualization)
             # This ensures Single_Cell_Cropper_Tool can properly process it
             cv2.imwrite(mask_path, mask.astype(np.uint8))
             
-            # Also save a visualization version for display
-            viz_mask_path = os.path.join(tool_cache_dir, f"nuclei_mask_viz_{uuid4().hex[:8]}.png")
-            plt.figure(figsize=(8, 8))
-            plt.imshow(mask, cmap='tab20')
-            plt.axis('off')
-            plt.title(f"Cell Masks - {n_nuclei} cells")
-            plt.savefig(viz_mask_path, bbox_inches='tight', pad_inches=0, dpi=150)
-            plt.close()
+            # Also save a visualization version for display with professional styling
+            viz_mask_path = os.path.join(output_dir, f"nuclei_mask_viz_{uuid4().hex[:8]}.png")
+            fig, ax = VisualizationConfig.create_professional_figure(figsize=(12, 8))
+            ax.imshow(mask, cmap='tab20')
+            ax.axis('off')
+            VisualizationConfig.apply_professional_styling(
+                ax, title=f"Cell Masks - {n_nuclei} cells"
+            )
+            VisualizationConfig.save_professional_figure(fig, viz_mask_path)
+            plt.close(fig)
             
             # Clear CUDA cache if using GPU
             if torch.cuda.is_available():
