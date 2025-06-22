@@ -717,9 +717,9 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
         # 1. Cell State Distribution (Pie Chart)
         try:
             fig, ax = vis_config.create_professional_figure(figsize=(12, 8))
-            state_counts = stats.get('state_distribution', {})
-            labels = list(state_counts.keys())
-            sizes = list(state_counts.values())
+            class_distribution = stats.get('class_distribution', {})
+            labels = list(class_distribution.keys())
+            sizes = [class_distribution[label]['count'] for label in labels]
             colors = [vis_config.get_professional_colors().get(state, '#CCCCCC') for state in labels]
             
             wedges, texts, autotexts = ax.pie(
@@ -740,8 +740,10 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
             vis_config.save_professional_figure(fig, pie_path)
             plt.close(fig)
             output_paths.append(pie_path)
+            print(f"✅ Created pie chart: {pie_path}")
         except Exception as e:
             logger.error(f"Error creating pie chart: {str(e)}")
+            print(f"❌ Error creating pie chart: {str(e)}")
 
         # 2. Confidence Distribution (Histogram)
         try:
@@ -766,15 +768,17 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
             vis_config.save_professional_figure(fig, conf_path)
             plt.close(fig)
             output_paths.append(conf_path)
+            print(f"✅ Created confidence histogram: {conf_path}")
         except Exception as e:
             logger.error(f"Error creating confidence histogram: {str(e)}")
+            print(f"❌ Error creating confidence histogram: {str(e)}")
 
         # 3. Bar Chart of Cell States
         try:
             fig, ax = vis_config.create_professional_figure(figsize=(12, 8))
-            state_counts = stats.get('state_distribution', {})
-            labels = list(state_counts.keys())
-            sizes = list(state_counts.values())
+            class_distribution = stats.get('class_distribution', {})
+            labels = list(class_distribution.keys())
+            sizes = [class_distribution[label]['count'] for label in labels]
             colors = [vis_config.get_professional_colors().get(state, '#CCCCCC') for state in labels]
             
             ax.bar(labels, sizes, color=colors, edgecolor='black', linewidth=2)
@@ -789,13 +793,16 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
             vis_config.save_professional_figure(fig, bar_path)
             plt.close(fig)
             output_paths.append(bar_path)
+            print(f"✅ Created bar chart: {bar_path}")
         except Exception as e:
             logger.error(f"Error creating bar chart: {str(e)}")
+            print(f"❌ Error creating bar chart: {str(e)}")
 
         # 4. UMAP Visualization
         if ANNDATA_AVAILABLE:
             try:
                 logger.info("Creating UMAP visualization...")
+                print("🔍 Creating UMAP visualization...")
                 adata = anndata.AnnData(X=features)
                 adata.obs['predicted_class'] = [r['predicted_class'] for r in results]
 
@@ -829,10 +836,15 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                 plt.close(fig)
                 
                 logger.info(f"UMAP visualization saved to {output_path}")
+                print(f"✅ Created UMAP visualization: {output_path}")
                 output_paths.append(output_path)
             except Exception as e:
                 logger.error(f"Error creating UMAP visualization: {str(e)}")
+                print(f"❌ Error creating UMAP visualization: {str(e)}")
+                import traceback
+                traceback.print_exc()
 
+        print(f"📊 Total visualizations created: {len(output_paths)}")
         return output_paths
     
     def get_metadata(self):
