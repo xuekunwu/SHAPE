@@ -10,6 +10,7 @@ import io
 import base64
 
 from octotools.tools.base import BaseTool
+from octotools.models.utils import VisualizationConfig
 
 
 class Image_Preprocessor_Tool(BaseTool):
@@ -39,7 +40,8 @@ class Image_Preprocessor_Tool(BaseTool):
             user_metadata={
                 "limitation": "This tool works best with grayscale microscopy images. Color images will be converted to grayscale. The tool may not work well with images that have very low contrast or extremely uneven illumination.",
                 "recommended_usage": "Use for phase contrast, brightfield, or fluorescence microscopy images that need illumination correction and brightness normalization."
-            }
+            },
+            output_dir="output_visualizations"  # Set default output directory to output_visualizations
         )
 
     def global_illumination_correction(self, image, kernel_size=151):
@@ -89,7 +91,7 @@ class Image_Preprocessor_Tool(BaseTool):
 
     def create_comparison_plot(self, original, corrected, normalized, filename):
         """
-        Create a comparison plot of original, corrected, and normalized images.
+        Create a comparison plot of original, corrected, and normalized images with professional styling.
         
         Args:
             original: Original image
@@ -100,34 +102,37 @@ class Image_Preprocessor_Tool(BaseTool):
         Returns:
             Path to saved comparison plot
         """
-        # Ensure output directory exists
-        os.makedirs(self.output_dir, exist_ok=True)
+        # Use centralized output directory
+        output_dir = VisualizationConfig.get_output_dir()
         
-        fig, axs = plt.subplots(1, 3, figsize=(15, 5))
+        # Create figure with professional styling
+        fig, axs = VisualizationConfig.create_professional_figure(figsize=(18, 6), ncols=3)
         
         # Plot original image
         axs[0].imshow(original, cmap='gray')
-        axs[0].set_title("Original Image", fontsize=12)
+        VisualizationConfig.apply_professional_styling(axs[0], title="Original Image")
         axs[0].axis('off')
         
         # Plot corrected image
         axs[1].imshow(corrected, cmap='gray')
-        axs[1].set_title("Illumination Corrected", fontsize=12)
+        VisualizationConfig.apply_professional_styling(axs[1], title="Illumination Corrected")
         axs[1].axis('off')
         
         # Plot normalized image
         axs[2].imshow(normalized, cmap='gray')
-        axs[2].set_title("Brightness Normalized", fontsize=12)
+        VisualizationConfig.apply_professional_styling(axs[2], title="Brightness Normalized")
         axs[2].axis('off')
         
-        # Add overall title
-        fig.suptitle(f"Image Preprocessing: {os.path.basename(filename)}", fontsize=14)
+        # Add overall title with professional styling
+        fig.suptitle(f"Image Preprocessing: {os.path.basename(filename)}", 
+                     fontsize=VisualizationConfig.PROFESSIONAL_STYLE['figure.titlesize'], 
+                     fontweight='bold', y=1.02)
         plt.tight_layout()
         
-        # Save the plot
-        plot_path = os.path.join(self.output_dir, f"comparison_{os.path.splitext(os.path.basename(filename))[0]}.png")
-        plt.savefig(plot_path, dpi=300, bbox_inches='tight', format='png', facecolor='white', edgecolor='none')
-        plt.close()
+        # Save with professional settings
+        plot_path = os.path.join(output_dir, f"comparison_{os.path.splitext(os.path.basename(filename))[0]}.png")
+        VisualizationConfig.save_professional_figure(fig, plot_path)
+        plt.close(fig)
         
         return plot_path
 
@@ -228,10 +233,13 @@ class Image_Preprocessor_Tool(BaseTool):
             if save_intermediate:
                 results["intermediate_paths"] = intermediate_paths
             
-            # Add visual outputs for Gradio (only processed image, no comparison plot)
-            visual_outputs = [final_output_path]
+            # Create the comparison plot for visualization
+            comparison_plot_path = self.create_comparison_plot(original_image, corrected_image, normalized_image, filename)
+            
+            # Add visual outputs for Gradio
+            visual_outputs = [comparison_plot_path, final_output_path]
             if save_intermediate:
-                visual_outputs.append(corrected_path)
+                visual_outputs.append(intermediate_paths["corrected"])
             results["visual_outputs"] = visual_outputs
             
             return results
