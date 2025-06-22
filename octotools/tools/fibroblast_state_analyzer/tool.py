@@ -55,8 +55,16 @@ class DinoV2Classifier(nn.Module):
         self.num_classes = num_classes
         
     def forward(self, x):
-        # The forward pass now directly returns the output of the backbone's head
-        return self.backbone(x)
+        """
+        Correctly processes the input tensor to get logits.
+        This ensures the model behaves as a standard classifier.
+        """
+        # DINOv2 backbone returns a dict. We need to extract the features.
+        # The forward_features method gives us the feature tensor directly.
+        features = self.backbone.forward_features(x)
+        # Then, we pass these features to our custom classifier head.
+        logits = self.backbone.head(features)
+        return logits
 
 class Fibroblast_State_Analyzer_Tool(BaseTool):
     """
