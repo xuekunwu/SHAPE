@@ -378,8 +378,27 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
             # Calculate statistics
             summary = self._calculate_statistics(results)
             
-            # Generate visualizations
+            # Generate basic visualizations
             visual_outputs = self._create_visualizations(results, summary, query_cache_dir)
+            
+            # Generate advanced visualizations (PCA/UMAP) if features are available
+            if features_list and len(features_list) > 0:
+                try:
+                    # Stack features into a tensor
+                    features_tensor = torch.stack(features_list)
+                    
+                    # Create PCA visualization
+                    pca_viz_path = self._create_pca_visualization(results, features_tensor, query_cache_dir)
+                    if pca_viz_path:
+                        visual_outputs.append(pca_viz_path)
+                    
+                    # Create UMAP visualization if anndata is available
+                    umap_viz_path = self._create_umap_visualization(results, features_tensor, query_cache_dir)
+                    if umap_viz_path:
+                        visual_outputs.append(umap_viz_path)
+                        
+                except Exception as e:
+                    print(f"Warning: Failed to create advanced visualizations: {str(e)}")
             
             return {
                 "summary": summary,
@@ -441,33 +460,66 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
             if isinstance(metadata, list):
                 cell_metadata_list = metadata
             elif isinstance(metadata, dict):
+                # Try common keys first
                 if 'cell_metadata' in metadata:
                     cell_metadata_list = metadata['cell_metadata']
                 elif 'crops' in metadata:
                     cell_metadata_list = metadata['crops']
+                elif 'cell_crops' in metadata:
+                    cell_metadata_list = metadata['cell_crops']
                 else:
-                    # Try to find any list in the dictionary
+                    # Try to find any list in the dictionary that contains crop data
                     cell_metadata_list = None
                     for key, value in metadata.items():
                         if isinstance(value, list) and len(value) > 0:
-                            if isinstance(value[0], dict) and 'crop_path' in value[0]:
-                                cell_metadata_list = value
-                                break
+                            # Check if this list contains crop data
+                            if isinstance(value[0], dict):
+                                # Look for common crop-related keys
+                                if any(k in value[0] for k in ['crop_path', 'cell_id', 'path', 'image_path']):
+                                    cell_metadata_list = value
+                                    break
+                    
                     if cell_metadata_list is None:
-                        raise ValueError("Could not find cell metadata list in dictionary format")
+                        # If still not found, try to use the entire metadata as a single item
+                        if 'crop_path' in metadata or 'cell_id' in metadata:
+                            cell_metadata_list = [metadata]
+                        else:
+                            raise ValueError(f"Could not find cell metadata list in dictionary format. Available keys: {list(metadata.keys())}")
             else:
-                raise ValueError(f"Unexpected metadata format: {type(metadata)}")
+                raise ValueError(f"Unexpected metadata format: {type(metadata)}. Expected list or dict, got {type(metadata)}")
             
             # Extract required data safely
             cell_crops = []
             cell_metadata = []
             
             for item in cell_metadata_list:
-                if isinstance(item, dict) and 'crop_path' in item and 'cell_id' in item:
-                    # Normalize the crop path
-                    crop_path = os.path.normpath(item['crop_path'])
-                    cell_crops.append(crop_path)
-                    cell_metadata.append({'cell_id': item['cell_id']})
+                if isinstance(item, dict):
+                    # Handle different possible key names for crop path
+                    crop_path = None
+                    cell_id = None
+                    
+                    # Try different possible keys for crop path
+                    for path_key in ['crop_path', 'path', 'image_path', 'file_path']:
+                        if path_key in item:
+                            crop_path = item[path_key]
+                            break
+                    
+                    # Try different possible keys for cell ID
+                    for id_key in ['cell_id', 'id', 'cell_id']:
+                        if id_key in item:
+                            cell_id = item[id_key]
+                            break
+                    
+                    if crop_path:
+                        # Normalize the crop path
+                        crop_path = os.path.normpath(crop_path)
+                        cell_crops.append(crop_path)
+                        
+                        # Create metadata entry
+                        metadata_entry = {}
+                        if cell_id is not None:
+                            metadata_entry['cell_id'] = cell_id
+                        cell_metadata.append(metadata_entry)
             
             print(f"Found {len(cell_crops)} valid cell crops from metadata")
             
