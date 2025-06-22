@@ -26,7 +26,7 @@ from octotools.models.initializer import Initializer
 from octotools.models.planner import Planner
 from octotools.models.memory import Memory
 from octotools.models.executor import Executor
-from octotools.models.utils import make_json_serializable
+from octotools.models.utils import make_json_serializable, VisualizationConfig
 
 # Get Huggingface token from environment variable
 HF_TOKEN = os.getenv("HUGGINGFACE_TOKEN")
@@ -559,6 +559,11 @@ def solve_problem_gradio(user_query, user_image, max_steps=10, max_time=60, api_
     # NOTE: update the global variable to save the query ID
     global QUERY_ID
     QUERY_ID = query_id
+
+    # Clear output visualizations directory for new query
+    print("🧹 Clearing output_visualizations directory for new query...")
+    VisualizationConfig.clear_output_dir()
+    print("✅ Output directory cleared successfully")
 
     # Create a directory for the query ID
     query_cache_dir = os.path.join(DATASET_DIR.name, query_id) # NOTE
