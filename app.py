@@ -581,11 +581,19 @@ def solve_problem_gradio(user_query, user_image, max_steps=10, max_time=60, api_
     # Handle visualization clearing based on user preference
     if clear_previous_viz:
         print("🧹 Clearing output_visualizations directory as requested...")
-        VisualizationConfig.clear_output_dir(force_clear=True)
+        # Manually clear the directory
+        output_viz_dir = os.path.join(os.getcwd(), 'output_visualizations')
+        if os.path.exists(output_viz_dir):
+            import shutil
+            shutil.rmtree(output_viz_dir)
+            print(f"✅ Cleared output directory: {output_viz_dir}")
+        os.makedirs(output_viz_dir, exist_ok=True)
         print("✅ Output directory cleared successfully")
     else:
         print("📁 Preserving output_visualizations directory for continuity...")
-        VisualizationConfig.clear_output_dir(force_clear=False)  # Preserve all existing charts
+        # Just ensure directory exists without clearing
+        output_viz_dir = os.path.join(os.getcwd(), 'output_visualizations')
+        os.makedirs(output_viz_dir, exist_ok=True)
         print("✅ Output directory preserved - all charts will be retained")
 
     # Create a directory for the query ID
