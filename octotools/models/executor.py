@@ -74,7 +74,8 @@ else:
                 cell_metadata=cell_metadata, 
                 confidence_threshold=0.5, 
                 batch_size=16, 
-                query_cache_dir='solver_cache/temp/tool_cache'
+                query_cache_dir='solver_cache/temp/tool_cache',
+                visualization_type='all'
             )
         else:
             execution = {"error": "No valid cell crops found in metadata", "status": "failed"}
