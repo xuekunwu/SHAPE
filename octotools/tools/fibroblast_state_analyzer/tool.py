@@ -300,45 +300,37 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                 "error": str(e)
             }, None
     
-    def execute(self, cell_crops=None, cell_metadata=None, confidence_threshold=0.5, 
-                batch_size=16, query_cache_dir='solver_cache/temp/tool_cache/', 
-                visualization_type='auto', **kwargs):
+    def execute(self, cell_crops=None, cell_metadata=None, confidence_threshold=0.5, batch_size=16, query_cache_dir="solver_cache", visualization_type='auto'):
         """
         Execute fibroblast state analysis on cell crops.
         
         Args:
-            cell_crops: List of paths to cell crop images
+            cell_crops: List of cell crop image paths or PIL Images
             cell_metadata: List of metadata dictionaries for each cell
             confidence_threshold: Minimum confidence for classification
             batch_size: Batch size for processing
             query_cache_dir: Directory for caching results
-            visualization_type: 'pca', 'umap', 'auto', or 'all' for automatic selection
-            **kwargs: Additional arguments
+            visualization_type: Type of visualization ('pca', 'umap', 'auto', 'all')
             
         Returns:
-            Dictionary containing analysis results
+            dict: Analysis results with classifications and statistics
         """
+        print(f"🚀 Fibroblast_State_Analyzer_Tool starting execution...")
+        print(f"📊 Parameters: confidence_threshold={confidence_threshold}, batch_size={batch_size}, visualization_type={visualization_type}")
+        
+        # Load cell data if not provided
+        if cell_crops is None or cell_metadata is None:
+            print(f"📁 Loading cell data from metadata in: {query_cache_dir}")
+            cell_crops, cell_metadata = self._load_cell_data_from_metadata(query_cache_dir)
+        
+        if not cell_crops or len(cell_crops) == 0:
+            return {"error": "No cell crops found for analysis", "status": "failed"}
+        
+        print(f"🔬 Processing {len(cell_crops)} cell crops...")
+        
         try:
             # Ensure cache directory exists
             os.makedirs(query_cache_dir, exist_ok=True)
-            
-            # If cell_crops not provided, try to load from metadata
-            if cell_crops is None or cell_metadata is None:
-                print("Loading cell data from metadata files...")
-                cell_crops, cell_metadata = self._load_cell_data_from_metadata(query_cache_dir)
-                
-                if not cell_crops:
-                    # Get detailed metadata file information for debugging
-                    metadata_files = self._list_metadata_files(query_cache_dir)
-                    return {
-                        "error": "No cell crops found. Please ensure metadata files exist and contain valid crop paths.",
-                        "status": "failed",
-                        "debug_info": {
-                            "cache_dir": query_cache_dir,
-                            "metadata_files_found": metadata_files,
-                            "suggestion": "Check if metadata files were accidentally deleted or moved during task execution."
-                        }
-                    }
             
             # Normalize file paths to handle Windows/Unix path differences
             cell_crops = [os.path.normpath(crop_path) for crop_path in cell_crops]
@@ -410,6 +402,10 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                     features_tensor = torch.stack(features_list)
                     print(f"📊 Features tensor shape: {features_tensor.shape}")
                     
+                    # Move to CPU for visualization
+                    features_cpu = features_tensor.cpu().numpy()
+                    print(f"📊 Features moved to CPU, shape: {features_cpu.shape}")
+                    
                     # Create a more persistent output directory
                     persistent_output_dir = os.path.join(os.getcwd(), 'output_visualizations')
                     os.makedirs(persistent_output_dir, exist_ok=True)
@@ -417,7 +413,7 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                     
                     # Create PCA visualization
                     print("🔍 Creating PCA visualization...")
-                    pca_viz_path = self._create_pca_visualization(results, features_tensor, persistent_output_dir)
+                    pca_viz_path = self._create_pca_visualization(results, features_cpu, persistent_output_dir)
                     if pca_viz_path:
                         visual_outputs.append(pca_viz_path)
                         print(f"✅ PCA visualization created: {pca_viz_path}")
@@ -426,7 +422,7 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                     
                     # Create UMAP visualization if anndata is available
                     print("🌐 Creating UMAP visualization...")
-                    umap_viz_path = self._create_umap_visualization(results, features_tensor, persistent_output_dir)
+                    umap_viz_path = self._create_umap_visualization(results, features_cpu, persistent_output_dir)
                     if umap_viz_path:
                         visual_outputs.append(umap_viz_path)
                         print(f"✅ UMAP visualization created: {umap_viz_path}")
@@ -799,17 +795,14 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
         
         return viz_paths
     
-    def _create_pca_visualization(self, results: List[Dict], features: torch.Tensor, output_dir: str) -> Optional[str]:
+    def _create_pca_visualization(self, results: List[Dict], features: np.ndarray, output_dir: str) -> Optional[str]:
         """Generate a PCA visualization from extracted features."""
         try:
             logger.info("Generating PCA visualization...")
             
-            # Convert features to numpy array
-            features_np = features.numpy()
-            
             # Apply PCA
             pca = PCA(n_components=2)
-            features_2d = pca.fit_transform(features_np)
+            features_2d = pca.fit_transform(features)
             
             # Create visualization
             fig, ax = plt.subplots(figsize=(10, 8))
@@ -849,7 +842,7 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
             logger.error(f"Error creating PCA visualization: {e}")
             return None
     
-    def _create_umap_visualization(self, results: List[Dict], features: torch.Tensor, output_dir: str) -> Optional[str]:
+    def _create_umap_visualization(self, results: List[Dict], features: np.ndarray, output_dir: str) -> Optional[str]:
         """Generate a UMAP visualization from extracted features using anndata and scanpy."""
         if not ANNDATA_AVAILABLE:
             logger.warning("UMAP visualization requested but anndata/scanpy not available")
@@ -859,7 +852,7 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
             logger.info("Generating UMAP visualization...")
             
             # Create AnnData object
-            adata = anndata.AnnData(X=features.numpy())
+            adata = anndata.AnnData(X=features)
             adata.obs['predicted_class'] = [r['predicted_class'] for r in results]
             adata.obs['image_name'] = [Path(r['image_path']).name for r in results]
 
