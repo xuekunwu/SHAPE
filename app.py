@@ -31,6 +31,15 @@ from octotools.models.memory import Memory
 from octotools.models.executor import Executor
 from octotools.models.utils import make_json_serializable, VisualizationConfig
 
+# Import HF evaluation framework
+try:
+    from llm_evaluation_scripts.hf_evaluation_framework import HuggingFaceEvaluator
+    from llm_evaluation_scripts.hf_model_configs import HF_MODEL_CONFIGS, get_hf_models_by_category
+    HF_EVALUATION_AVAILABLE = True
+except ImportError:
+    HF_EVALUATION_AVAILABLE = False
+    print("Warning: HF evaluation framework not available")
+
 # Custom JSON encoder to handle ToolCommand objects
 class CustomEncoder(json.JSONEncoder):
     def default(self, obj):
@@ -910,11 +919,11 @@ def main(args):
                             ["Image Preprocessing", "examples/A5_01_1_1_Phase Contrast_001.png", "Normalize this phase contrast image.", 
                              "Image_Preprocessor_Tool", "Illumination-corrected and brightness-normalized phase contrast image."],
                             ["Cell Identification", "examples/A5_01_1_1_Phase Contrast_001.png", "How many cells are there in this image.", 
-                             "Image_Preprocessor_Tool, Nuclei_Segmenter_Tool", "286 cells are identified and their nuclei are labeled."],
+                             "Image_Preprocessor_Tool, Nuclei_Segmenter_Tool", "258 cells are identified and their nuclei are labeled."],
                             ["Single-Cell Cropping", "examples/A5_01_1_1_Phase Contrast_001.png", "Crop single cells from the segmented nuclei in this image.", 
                              "Image_Preprocessor_Tool, Nuclei_Segmenter_Tool, Single_Cell_Cropper_Tool", "Individual cell crops extracted from the image."],
                             ["Fibroblast State Analysis", "examples/fibroblast.png", "Analyze the fibroblast cell states in this image.", 
-                             "Image_Preprocessor_Tool, Nuclei_Segmenter_Tool, Single_Cell_Cropper_Tool, Fibroblast_State_Analyzer_Tool", "Comprehensive analysis of fibroblast cell states with visualizations."]
+                             "Image_Preprocessor_Tool, Nuclei_Segmenter_Tool, Single_Cell_Cropper_Tool, Fibroblast_State_Analyzer_Tool", "540 cells identified and segmented successfully. Comprehensive analysis of fibroblast cell states have been performed with visualizations."]
                         ]
                         
                         general_examples = [
@@ -945,7 +954,6 @@ def main(args):
                         gr.Markdown("#### 🧩 General Purpose Examples")
                         gr.Examples(
                             examples=general_examples,
-                            label="General Purpose Examples",
                             inputs=[gr.Textbox(label="Category", visible=False), user_image, user_query, gr.Textbox(label="Select Tools", visible=False), gr.Textbox(label="Reference Answer", visible=False)],
                             outputs=[user_image, user_query, enabled_fibroblast_tools, enabled_general_tools],
                             fn=distribute_tools,
