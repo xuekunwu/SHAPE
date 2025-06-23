@@ -191,6 +191,11 @@ class Solver:
         self.output_types = output_types.lower().split(',')
         assert all(output_type in ["base", "final", "direct"] for output_type in self.output_types), "Invalid output type. Supported types are 'base', 'final', 'direct'."
 
+        self.step_times = []
+        self.step_tokens = []
+        self.total_tokens = 0
+        self.start_time = None
+        self.end_time = None
 
     def stream_solve_user_problem(self, user_query: str, user_image, api_key: str, messages: List[ChatMessage]) -> Iterator:
         visual_outputs_for_gradio = []
@@ -249,7 +254,7 @@ class Solver:
         yield messages, "", [], visual_description, "**Progress**: Input received"
 
         # [Step 3] Initialize problem-solving state
-        start_time = time.time()
+        self.start_time = time.time()
         step_count = 0
         json_data = {"query": user_query, "image": "Image received as bytes"}
 
@@ -274,7 +279,7 @@ class Solver:
             yield messages, query_analysis, [], visual_description, "**Progress**: Query analysis completed"
 
             # Save the query analysis data
-            query_analysis_data = {"query_analysis": query_analysis, "time": round(time.time() - start_time, 5)}
+            query_analysis_data = {"query_analysis": query_analysis, "time": round(time.time() - self.start_time, 5)}
             save_module_data(QUERY_ID, "step_0_query_analysis", query_analysis_data)
         except Exception as e:
             print(f"Error in query analysis: {e}")
@@ -286,8 +291,9 @@ class Solver:
             return
 
         # Execution loop (similar to your step-by-step solver)
-        while step_count < self.max_steps and (time.time() - start_time) < self.max_time:
+        while step_count < self.max_steps and (time.time() - self.start_time) < self.max_time:
             step_count += 1
+            step_start = time.time()
             messages.append(ChatMessage(role="OctoTools", 
                                         content=f"Generating the {step_count}-th step...",
                                         metadata={"title": f"🔄 Step {step_count}"}))
@@ -296,7 +302,7 @@ class Solver:
             # [Step 5] Generate the next step
             next_step = self.planner.generate_next_step(user_query, img_path, query_analysis, self.memory, step_count, self.max_steps)
             context, sub_goal, tool_name = self.planner.extract_context_subgoal_and_tool(next_step)
-            step_data = {"step_count": step_count, "context": context, "sub_goal": sub_goal, "tool_name": tool_name, "time": round(time.time() - start_time, 5)}
+            step_data = {"step_count": step_count, "context": context, "sub_goal": sub_goal, "tool_name": tool_name, "time": round(time.time() - self.start_time, 5)}
             save_module_data(QUERY_ID, f"step_{step_count}_action_prediction", step_data)
 
             # Display the step information
@@ -413,7 +419,7 @@ class Solver:
                 "analysis": analysis,
                 "explanation": explanation,
                 "command": command,
-                "time": round(time.time() - start_time, 5)
+                "time": round(time.time() - self.start_time, 5)
             }
             save_module_data(QUERY_ID, f"step_{step_count}_command_generation", command_generation_data)
             
@@ -427,7 +433,7 @@ class Solver:
             # Save the command execution data
             command_execution_data = {
                 "result": result,
-                "time": round(time.time() - start_time, 5)
+                "time": round(time.time() - self.start_time, 5)
             }
             save_module_data(QUERY_ID, f"step_{step_count}_command_execution", command_execution_data)
 
@@ -440,7 +446,7 @@ class Solver:
             context_verification_data = {
                 "stop_verification": context_verification,
                 "conclusion": conclusion,
-                "time": round(time.time() - start_time, 5)
+                "time": round(time.time() - self.start_time, 5)
             }
             save_module_data(QUERY_ID, f"step_{step_count}_context_verification", context_verification_data)    
 
@@ -454,6 +460,12 @@ class Solver:
 
             if conclusion == 'STOP':
                 break
+
+            step_end = time.time()
+            self.step_times.append(step_end - step_start)
+            self.total_tokens += ... # 你需要从LLM接口获取或估算
+
+        self.end_time = time.time()
 
         # Step 7: Generate Final Output (if needed)
         final_answer = ""
@@ -482,7 +494,7 @@ class Solver:
             # Save the direct output data
             direct_output_data = {
                 "direct_output": direct_output,
-                "time": round(time.time() - start_time, 5)
+                "time": round(time.time() - self.start_time, 5)
             }
             save_module_data(QUERY_ID, "direct_output", direct_output_data)
 
@@ -494,7 +506,7 @@ class Solver:
             # Save the final output data
             final_output_data = {
                 "final_output": final_output,
-                "time": round(time.time() - start_time, 5)
+                "time": round(time.time() - self.start_time, 5)
             }
             save_module_data(QUERY_ID, "final_output", final_output_data)
 
@@ -1034,4 +1046,3 @@ if __name__ == "__main__":
     print("==============================\n")
     
     main(args)
-
