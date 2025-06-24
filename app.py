@@ -19,6 +19,7 @@ from huggingface_hub import CommitScheduler
 from octotools.models.formatters import ToolCommand
 import random
 import traceback
+import psutil  # For memory usage
 
 # Add the project root to the Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -191,13 +192,22 @@ class Solver:
         self.output_types = output_types.lower().split(',')
         assert all(output_type in ["base", "final", "direct"] for output_type in self.output_types), "Invalid output type. Supported types are 'base', 'final', 'direct'."
 
+        # Add statistics for evaluation
         self.step_times = []
         self.step_tokens = []
         self.total_tokens = 0
+        self.step_memory = []
+        self.max_memory = 0
+        self.step_costs = []
+        self.total_cost = 0.0
         self.start_time = None
         self.end_time = None
 
     def stream_solve_user_problem(self, user_query: str, user_image, api_key: str, messages: List[ChatMessage]) -> Iterator:
+        import time
+        import os
+        self.start_time = time.time()
+        process = psutil.Process(os.getpid())
         visual_outputs_for_gradio = []
         visual_description = "*Ready to display analysis results and processed images.*"
         
@@ -254,7 +264,6 @@ class Solver:
         yield messages, "", [], visual_description, "**Progress**: Input received"
 
         # [Step 3] Initialize problem-solving state
-        self.start_time = time.time()
         step_count = 0
         json_data = {"query": user_query, "image": "Image received as bytes"}
 
@@ -294,6 +303,7 @@ class Solver:
         while step_count < self.max_steps and (time.time() - self.start_time) < self.max_time:
             step_count += 1
             step_start = time.time()
+            mem_before = process.memory_info().rss / 1024 / 1024  # MB
             messages.append(ChatMessage(role="OctoTools", 
                                         content=f"Generating the {step_count}-th step...",
                                         metadata={"title": f"🔄 Step {step_count}"}))
@@ -458,12 +468,33 @@ class Solver:
                 metadata={"title": f"### 🤖 Step {step_count}: Context Verification"}))
             yield messages, query_analysis, visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Context verified"
 
-            if conclusion == 'STOP':
-                break
-
+            # After tool execution, estimate tokens and cost
+            # Try to get token usage from result if available, else estimate
+            tokens_used = 0
+            cost = 0.0
+            if isinstance(result, dict):
+                if 'usage' in result and 'total_tokens' in result['usage']:
+                    tokens_used = result['usage']['total_tokens']
+                elif 'token_usage' in result:
+                    tokens_used = result['token_usage']
+                # Cost estimation (example: OpenAI $0.00001/token)
+                if 'usage' in result and 'total_tokens' in result['usage']:
+                    cost = result['usage']['total_tokens'] * 0.00001
+                elif 'token_usage' in result:
+                    cost = result['token_usage'] * 0.00001
+            self.step_tokens.append(tokens_used)
+            self.total_tokens += tokens_used
+            self.step_costs.append(cost)
+            self.total_cost += cost
+            mem_after = process.memory_info().rss / 1024 / 1024  # MB
+            self.step_memory.append(mem_after)
+            if mem_after > self.max_memory:
+                self.max_memory = mem_after
             step_end = time.time()
             self.step_times.append(step_end - step_start)
-            self.total_tokens += ... # 你需要从LLM接口获取或估算
+
+            if conclusion == 'STOP':
+                break
 
         self.end_time = time.time()
 
@@ -485,6 +516,16 @@ class Solver:
                 # If no clear conclusion section, use the entire output
                 # This ensures we always have content to display
                 conclusion = direct_output.strip()
+            
+            conclusion += f"\n\n---\n"
+            conclusion += f"**Step-wise elapsed time (s):** {self.step_times}\n"
+            conclusion += f"**Total elapsed time (s):** {self.end_time - self.start_time:.2f}\n"
+            conclusion += f"**Step-wise tokens used:** {self.step_tokens}\n"
+            conclusion += f"**Total tokens used:** {self.total_tokens}\n"
+            conclusion += f"**Step-wise memory usage (MB):** {self.step_memory}\n"
+            conclusion += f"**Max memory usage (MB):** {self.max_memory:.2f}\n"
+            conclusion += f"**Step-wise estimated cost ($):** {[round(c,6) for c in self.step_costs]}\n"
+            conclusion += f"**Total estimated cost ($):** {round(self.total_cost,6)}\n"
             
             final_answer = f"🐙 **Conclusion:**\n{conclusion}"
             # Remove the ChatMessage that displays final answer in reasoning steps
@@ -1046,3 +1087,15 @@ if __name__ == "__main__":
     print("==============================\n")
     
     main(args)
+
+    if __name__ == '__main__':
+        from generate_llm_eval_visualization import (
+            plot_time_distribution, plot_token_distribution, plot_success_rate
+        )
+        import pandas as pd
+        # 假设你的example数据变量名为example_data
+        df = pd.DataFrame(example_data)
+        plot_time_distribution(df)
+        plot_token_distribution(df)
+        plot_success_rate(df)
+
