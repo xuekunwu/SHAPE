@@ -169,33 +169,49 @@ Please present your analysis in a clear, structured format.
                     for line in lines:
                         line = line.strip()
                         if line.lower().startswith('<context>') or line.lower().startswith('context:'):
-                            # Extract content after the tag/colon
                             if '<context>' in line.lower():
                                 context = line.split('<context>')[1].split('</context>')[0].strip()
                             else:
-                                context = line.split('context:', 1)[1].strip(': ').strip()
+                                parts = line.split('context:', 1)
+                                if len(parts) > 1:
+                                    context = parts[1].lstrip(' :')
+                                else:
+                                    context = ""
                         elif line.lower().startswith('<sub_goal>') or line.lower().startswith('sub_goal:'):
                             if '<sub_goal>' in line.lower():
                                 sub_goal = line.split('<sub_goal>')[1].split('</sub_goal>')[0].strip()
                             else:
-                                sub_goal = line.split('sub_goal:', 1)[1].strip(': ').strip()
+                                parts = line.split('sub_goal:', 1)
+                                if len(parts) > 1:
+                                    sub_goal = parts[1].lstrip(' :')
+                                else:
+                                    sub_goal = ""
                         elif line.lower().startswith('<tool_name>') or line.lower().startswith('tool_name:'):
                             if '<tool_name>' in line.lower():
                                 tool_name = line.split('<tool_name>')[1].split('</tool_name>')[0].strip()
                             else:
-                                tool_name = line.split('tool_name:', 1)[1].strip(': ').strip()
+                                parts = line.split('tool_name:', 1)
+                                if len(parts) > 1:
+                                    tool_name = parts[1].lstrip(' :')
+                                else:
+                                    tool_name = ""
                     
                     # If we couldn't parse properly, try alternative patterns
                     if not context or not sub_goal or not tool_name:
-                        # Look for patterns like "Context: ..." or "Tool: ..."
                         for line in lines:
                             line = line.strip()
                             if line.lower().startswith('context:') and not context:
-                                context = line.split('context:', 1)[1].strip(': ').strip()
+                                parts = line.split('context:', 1)
+                                if len(parts) > 1:
+                                    context = parts[1].lstrip(' :')
                             elif line.lower().startswith('sub-goal:') and not sub_goal:
-                                sub_goal = line.split('sub-goal:', 1)[1].strip(': ').strip()
+                                parts = line.split('sub-goal:', 1)
+                                if len(parts) > 1:
+                                    sub_goal = parts[1].lstrip(' :')
                             elif line.lower().startswith('tool:') and not tool_name:
-                                tool_name = line.split('tool:', 1)[1].strip(': ').strip()
+                                parts = line.split('tool:', 1)
+                                if len(parts) > 1:
+                                    tool_name = parts[1].lstrip(' :')
                     
                     # Normalize tool name
                     if tool_name:
@@ -318,35 +334,59 @@ Example (do not copy, use only as reference):
                         if '<justification>' in line.lower():
                             justification = line.split('<justification>')[1].split('</justification>')[0].strip()
                         else:
-                            justification = line.split('justification:', 1)[1].strip(': ').strip()
+                            parts = line.split('justification:', 1)
+                            if len(parts) > 1:
+                                justification = parts[1].lstrip(' :')
+                            else:
+                                justification = ""
                     elif line.lower().startswith('<context>') or line.lower().startswith('context:'):
                         if '<context>' in line.lower():
                             context = line.split('<context>')[1].split('</context>')[0].strip()
                         else:
-                            context = line.split('context:', 1)[1].strip(': ').strip()
+                            parts = line.split('context:', 1)
+                            if len(parts) > 1:
+                                context = parts[1].lstrip(' :')
+                            else:
+                                context = ""
                     elif line.lower().startswith('<sub_goal>') or line.lower().startswith('sub_goal:'):
                         if '<sub_goal>' in line.lower():
                             sub_goal = line.split('<sub_goal>')[1].split('</sub_goal>')[0].strip()
                         else:
-                            sub_goal = line.split('sub_goal:', 1)[1].strip(': ').strip()
+                            parts = line.split('sub_goal:', 1)
+                            if len(parts) > 1:
+                                sub_goal = parts[1].lstrip(' :')
+                            else:
+                                sub_goal = ""
                     elif line.lower().startswith('<tool_name>') or line.lower().startswith('tool_name:'):
                         if '<tool_name>' in line.lower():
                             tool_name = line.split('<tool_name>')[1].split('</tool_name>')[0].strip()
                         else:
-                            tool_name = line.split('tool_name:', 1)[1].strip(': ').strip()
+                            parts = line.split('tool_name:', 1)
+                            if len(parts) > 1:
+                                tool_name = parts[1].lstrip(' :')
+                            else:
+                                tool_name = ""
                 
                 # If we couldn't parse properly, try alternative patterns
                 if not justification or not context or not sub_goal or not tool_name:
                     for line in lines:
                         line = line.strip()
                         if line.lower().startswith('justification:') and not justification:
-                            justification = line.split('justification:', 1)[1].strip(': ').strip()
+                            parts = line.split('justification:', 1)
+                            if len(parts) > 1:
+                                justification = parts[1].lstrip(' :')
                         elif line.lower().startswith('context:') and not context:
-                            context = line.split('context:', 1)[1].strip(': ').strip()
+                            parts = line.split('context:', 1)
+                            if len(parts) > 1:
+                                context = parts[1].lstrip(' :')
                         elif line.lower().startswith('sub-goal:') and not sub_goal:
-                            sub_goal = line.split('sub-goal:', 1)[1].strip(': ').strip()
+                            parts = line.split('sub-goal:', 1)
+                            if len(parts) > 1:
+                                sub_goal = parts[1].lstrip(' :')
                         elif line.lower().startswith('tool:') and not tool_name:
-                            tool_name = line.split('tool:', 1)[1].strip(': ').strip()
+                            parts = line.split('tool:', 1)
+                            if len(parts) > 1:
+                                tool_name = parts[1].lstrip(' :')
                 
                 # If still missing, use defaults
                 if not justification:
