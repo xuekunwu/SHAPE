@@ -833,7 +833,7 @@ def main(args):
                 language_model = gr.Dropdown(
                     choices=multimodal_model_choices,
                     value=multimodal_model_choices[0] if multimodal_model_choices else None,
-                    label="Language Model"
+                    label="Multimodal Language Model"
                 )
                 max_steps = gr.Slider(1, 15, value=10, label="Max Reasoning Steps")
                 max_time = gr.Slider(60, 600, value=300, label="Max Analysis Time (seconds)")
