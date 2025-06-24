@@ -282,9 +282,63 @@ class Solver:
         # [Step 4] Query Analysis - This is the key step that should happen first
         print(f"Debug - Starting query analysis for: {user_query}")
         print(f"Debug - img_path for query analysis: {img_path}")
+        query_analysis_start = time.time()
         try:
             query_analysis = self.planner.analyze_query(user_query, img_path)
+            query_analysis_end = time.time()
+            query_analysis_time = query_analysis_end - query_analysis_start
             print(f"Debug - Query analysis completed: {len(query_analysis)} characters")
+            
+            # Track tokens for query analysis step
+            query_analysis_tokens = 0
+            if hasattr(self.planner, 'last_usage') and self.planner.last_usage:
+                query_analysis_tokens = self.planner.last_usage.get('total_tokens', 0)
+                print(f"Query analysis tokens used: {query_analysis_tokens}")
+                print(f"Query analysis full usage: {self.planner.last_usage}")
+                self.step_tokens.append(query_analysis_tokens)
+                self.total_tokens += query_analysis_tokens
+                
+                # Calculate cost for query analysis
+                model_config = None
+                for config in OPENAI_MODEL_CONFIGS.values():
+                    if config.get("model_id") == self.planner.llm_engine_name:
+                        model_config = config
+                        break
+                
+                # Calculate cost based on input and output tokens separately
+                query_analysis_cost = 0.0
+                if model_config and 'input_cost_per_1k_tokens' in model_config and 'output_cost_per_1k_tokens' in model_config:
+                    input_tokens = self.planner.last_usage.get('prompt_tokens', 0)
+                    output_tokens = self.planner.last_usage.get('completion_tokens', 0)
+                    
+                    input_cost = (input_tokens / 1000) * model_config['input_cost_per_1k_tokens']
+                    output_cost = (output_tokens / 1000) * model_config['output_cost_per_1k_tokens']
+                    query_analysis_cost = input_cost + output_cost
+                    
+                    print(f"Query analysis - Input tokens: {input_tokens}, Output tokens: {output_tokens}")
+                    print(f"Query analysis - Input cost: ${input_cost:.6f}, Output cost: ${output_cost:.6f}")
+                else:
+                    # Fallback to old calculation method
+                    cost_per_token = 0.00001  # Default cost
+                    if model_config and 'expected_cost_per_1k_tokens' in model_config:
+                        cost_per_token = model_config['expected_cost_per_1k_tokens'] / 1000
+                    query_analysis_cost = query_analysis_tokens * cost_per_token
+                
+                self.step_costs.append(query_analysis_cost)
+                self.total_cost += query_analysis_cost
+                print(f"Query analysis cost: ${query_analysis_cost:.6f}")
+            
+            # Track time for query analysis step
+            self.step_times.append(query_analysis_time)
+            print(f"Query analysis time: {query_analysis_time:.2f}s")
+            
+            # Track memory for query analysis step
+            mem_after_query_analysis = process.memory_info().rss / 1024 / 1024  # MB
+            self.step_memory.append(mem_after_query_analysis)
+            if mem_after_query_analysis > self.max_memory:
+                self.max_memory = mem_after_query_analysis
+            print(f"Query analysis memory usage: {mem_after_query_analysis:.2f} MB")
+            
             json_data["query_analysis"] = query_analysis
             query_analysis = query_analysis.replace("Concise Summary:", "**Concise Summary:**\n")
             query_analysis = query_analysis.replace("Required Skills:", "**Required Skills:**")
@@ -480,16 +534,73 @@ class Solver:
             # Try to get token usage from result if available, else estimate
             tokens_used = 0
             cost = 0.0
+            
+            # Get token usage from planner's last operation
+            if hasattr(self.planner, 'last_usage') and self.planner.last_usage:
+                planner_tokens = self.planner.last_usage.get('total_tokens', 0)
+                tokens_used += planner_tokens
+                print(f"Planner tokens used: {planner_tokens}")
+                print(f"Planner full usage: {self.planner.last_usage}")
+            else:
+                print(f"Planner last_usage not available or empty: {getattr(self.planner, 'last_usage', 'Not set')}")
+            
+            # Get token usage from executor's last operation (if available)
             if isinstance(result, dict):
                 if 'usage' in result and 'total_tokens' in result['usage']:
-                    tokens_used = result['usage']['total_tokens']
+                    executor_tokens = result['usage']['total_tokens']
+                    tokens_used += executor_tokens
+                    print(f"Executor tokens used: {executor_tokens}")
                 elif 'token_usage' in result:
-                    tokens_used = result['token_usage']
-                # Cost estimation (example: OpenAI $0.00001/token)
-                if 'usage' in result and 'total_tokens' in result['usage']:
-                    cost = result['usage']['total_tokens'] * 0.00001
-                elif 'token_usage' in result:
-                    cost = result['token_usage'] * 0.00001
+                    executor_tokens = result['token_usage']
+                    tokens_used += executor_tokens
+                    print(f"Executor tokens used: {executor_tokens}")
+            
+            # Cost estimation based on model type
+            # Get the current model config to determine cost per token
+            model_config = None
+            for config in OPENAI_MODEL_CONFIGS.values():
+                if config.get("model_id") == self.planner.llm_engine_name:
+                    model_config = config
+                    break
+            
+            # Calculate cost based on input and output tokens separately
+            if model_config and 'input_cost_per_1k_tokens' in model_config and 'output_cost_per_1k_tokens' in model_config:
+                # Get input and output tokens from usage info
+                input_tokens = 0
+                output_tokens = 0
+                
+                # Get tokens from planner's last operation
+                if hasattr(self.planner, 'last_usage') and self.planner.last_usage:
+                    input_tokens += self.planner.last_usage.get('prompt_tokens', 0)
+                    output_tokens += self.planner.last_usage.get('completion_tokens', 0)
+                
+                # Get tokens from executor's last operation (if available)
+                if isinstance(result, dict):
+                    if 'usage' in result:
+                        input_tokens += result['usage'].get('prompt_tokens', 0)
+                        output_tokens += result['usage'].get('completion_tokens', 0)
+                    elif 'token_usage' in result:
+                        # If only total tokens available, estimate split (roughly 70% input, 30% output)
+                        total_tokens = result['token_usage']
+                        input_tokens += int(total_tokens * 0.7)
+                        output_tokens += int(total_tokens * 0.3)
+                
+                # Calculate cost using separate input/output rates
+                input_cost = (input_tokens / 1000) * model_config['input_cost_per_1k_tokens']
+                output_cost = (output_tokens / 1000) * model_config['output_cost_per_1k_tokens']
+                cost = input_cost + output_cost
+                
+                print(f"Step {step_count} - Input tokens: {input_tokens}, Output tokens: {output_tokens}")
+                print(f"Step {step_count} - Input cost: ${input_cost:.6f}, Output cost: ${output_cost:.6f}")
+            else:
+                # Fallback to old calculation method
+                cost_per_token = 0.00001  # Default cost
+                if model_config and 'expected_cost_per_1k_tokens' in model_config:
+                    cost_per_token = model_config['expected_cost_per_1k_tokens'] / 1000
+                cost = tokens_used * cost_per_token
+            
+            print(f"Step {step_count} - Total tokens: {tokens_used}, Cost: ${cost:.6f}")
+            
             self.step_tokens.append(tokens_used)
             self.total_tokens += tokens_used
             self.step_costs.append(cost)
@@ -510,7 +621,59 @@ class Solver:
         final_answer = ""
         if 'direct' in self.output_types:
             messages.append(ChatMessage(role="assistant", content="<br>"))
+            final_output_start = time.time()
             direct_output = self.planner.generate_direct_output(user_query, img_path, self.memory)
+            final_output_end = time.time()
+            final_output_time = final_output_end - final_output_start
+            
+            # Track tokens for final output generation
+            final_output_tokens = 0
+            if hasattr(self.planner, 'last_usage') and self.planner.last_usage:
+                final_output_tokens = self.planner.last_usage.get('total_tokens', 0)
+                print(f"Final output tokens used: {final_output_tokens}")
+                self.step_tokens.append(final_output_tokens)
+                self.total_tokens += final_output_tokens
+                
+                # Calculate cost for final output
+                model_config = None
+                for config in OPENAI_MODEL_CONFIGS.values():
+                    if config.get("model_id") == self.planner.llm_engine_name:
+                        model_config = config
+                        break
+                
+                # Calculate cost based on input and output tokens separately
+                final_output_cost = 0.0
+                if model_config and 'input_cost_per_1k_tokens' in model_config and 'output_cost_per_1k_tokens' in model_config:
+                    input_tokens = self.planner.last_usage.get('prompt_tokens', 0)
+                    output_tokens = self.planner.last_usage.get('completion_tokens', 0)
+                    
+                    input_cost = (input_tokens / 1000) * model_config['input_cost_per_1k_tokens']
+                    output_cost = (output_tokens / 1000) * model_config['output_cost_per_1k_tokens']
+                    final_output_cost = input_cost + output_cost
+                    
+                    print(f"Final output - Input tokens: {input_tokens}, Output tokens: {output_tokens}")
+                    print(f"Final output - Input cost: ${input_cost:.6f}, Output cost: ${output_cost:.6f}")
+                else:
+                    # Fallback to old calculation method
+                    cost_per_token = 0.00001  # Default cost
+                    if model_config and 'expected_cost_per_1k_tokens' in model_config:
+                        cost_per_token = model_config['expected_cost_per_1k_tokens'] / 1000
+                    final_output_cost = final_output_tokens * cost_per_token
+                
+                self.step_costs.append(final_output_cost)
+                self.total_cost += final_output_cost
+                print(f"Final output cost: ${final_output_cost:.6f}")
+            
+            # Track time for final output generation
+            self.step_times.append(final_output_time)
+            print(f"Final output time: {final_output_time:.2f}s")
+            
+            # Track memory for final output generation
+            mem_after_final_output = process.memory_info().rss / 1024 / 1024  # MB
+            self.step_memory.append(mem_after_final_output)
+            if mem_after_final_output > self.max_memory:
+                self.max_memory = mem_after_final_output
+            print(f"Final output memory usage: {mem_after_final_output:.2f} MB")
             
             # Extract conclusion from the final answer
             if isinstance(direct_output, str):
@@ -531,6 +694,19 @@ class Solver:
             conclusion += f"**Step-wise estimated cost ($):** {[round(c,6) for c in self.step_costs]}\n"
             conclusion += f"**Total estimated cost ($):** {round(self.total_cost,6)}\n"
             
+            # Add model-specific pricing information
+            model_config = None
+            for config in OPENAI_MODEL_CONFIGS.values():
+                if config.get("model_id") == self.planner.llm_engine_name:
+                    model_config = config
+                    break
+            
+            if model_config and 'input_cost_per_1k_tokens' in model_config:
+                conclusion += f"\n**Model:** {self.planner.llm_engine_name}\n"
+                conclusion += f"**Input cost:** ${model_config['input_cost_per_1k_tokens']:.6f} per 1K tokens\n"
+                conclusion += f"**Output cost:** ${model_config['output_cost_per_1k_tokens']:.6f} per 1K tokens\n"
+                conclusion += f"**Pricing based on:** OpenAI Official Pricing (as of 2024)\n"
+            
             final_answer = f"🐙 **Conclusion:**\n{conclusion}"
             # Remove the ChatMessage that displays final answer in reasoning steps
             # messages.append(ChatMessage(role="assistant", content=f"### 🐙 Final Answer:\n{direct_output}"))
@@ -544,9 +720,55 @@ class Solver:
             save_module_data(QUERY_ID, "direct_output", direct_output_data)
 
         if 'final' in self.output_types:
+            final_output_start = time.time()
             final_output = self.planner.generate_final_output(user_query, img_path, self.memory) # Disabled visibility for now
+            final_output_end = time.time()
+            final_output_time = final_output_end - final_output_start
             # messages.append(ChatMessage(role="assistant", content=f"🎯 Final Output:\n{final_output}"))
             # yield messages
+
+            # Track tokens for final output generation (if not already tracked above)
+            if 'direct' not in self.output_types:
+                final_output_tokens = 0
+                if hasattr(self.planner, 'last_usage') and self.planner.last_usage:
+                    final_output_tokens = self.planner.last_usage.get('total_tokens', 0)
+                    print(f"Final output tokens used: {final_output_tokens}")
+                    self.step_tokens.append(final_output_tokens)
+                    self.total_tokens += final_output_tokens
+                    
+                    # Calculate cost for final output
+                    model_config = None
+                    for config in OPENAI_MODEL_CONFIGS.values():
+                        if config.get("model_id") == self.planner.llm_engine_name:
+                            model_config = config
+                            break
+                    
+                    # Calculate cost based on input and output tokens separately
+                    final_output_cost = 0.0
+                    if model_config and 'input_cost_per_1k_tokens' in model_config and 'output_cost_per_1k_tokens' in model_config:
+                        input_tokens = self.planner.last_usage.get('prompt_tokens', 0)
+                        output_tokens = self.planner.last_usage.get('completion_tokens', 0)
+                        
+                        input_cost = (input_tokens / 1000) * model_config['input_cost_per_1k_tokens']
+                        output_cost = (output_tokens / 1000) * model_config['output_cost_per_1k_tokens']
+                        final_output_cost = input_cost + output_cost
+                        
+                        print(f"Final output - Input tokens: {input_tokens}, Output tokens: {output_tokens}")
+                        print(f"Final output - Input cost: ${input_cost:.6f}, Output cost: ${output_cost:.6f}")
+                    else:
+                        # Fallback to old calculation method
+                        cost_per_token = 0.00001  # Default cost
+                        if model_config and 'expected_cost_per_1k_tokens' in model_config:
+                            cost_per_token = model_config['expected_cost_per_1k_tokens'] / 1000
+                        final_output_cost = final_output_tokens * cost_per_token
+                    
+                    self.step_costs.append(final_output_cost)
+                    self.total_cost += final_output_cost
+                    print(f"Final output cost: ${final_output_cost:.6f}")
+                
+                # Track time for final output generation
+                self.step_times.append(final_output_time)
+                print(f"Final output time: {final_output_time:.2f}s")
 
             # Save the final output data
             final_output_data = {
