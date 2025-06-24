@@ -4,7 +4,13 @@ Supports various open-source LLMs available on Hugging Face
 """
 
 import os
-from typing import Dict, Any, List
+import base64
+from typing import Dict, Any, List, Optional
+import torch
+from transformers import AutoProcessor, AutoModelForCausalLM
+from PIL import Image
+import openai
+import logging
 
 # Base system prompt for fibroblast analysis
 FIBROBLAST_SYSTEM_PROMPT = """You are an expert AI assistant specialized in fibroblast biology and single-cell image analysis. Your expertise includes:
@@ -473,4 +479,180 @@ def get_optimal_models_for_hardware(vram_gb: int, include_multimodal: bool = Tru
     for category in recommendations:
         recommendations[category] = [m for m in recommendations[category] if m in compatible_models]
     
-    return recommendations 
+    return recommendations
+
+def run_llava_inference(image_path, question, model_id):
+    """
+    Run inference with LLaVA or similar multimodal models
+    
+    Args:
+        image_path: Path to the input image
+        question: Text question about the image
+        model_id: Model identifier from HF_MODEL_CONFIGS
+        
+    Returns:
+        Dict containing the response and metadata
+    """
+    try:
+        model_config = HF_MODEL_CONFIGS[model_id]
+        
+        if model_config["model_type"] == "openai":
+            # Use OpenAI API for inference
+            return _run_openai_inference(image_path, question, model_config)
+        elif model_config["model_type"] == "hf":
+            # Use local transformers for inference
+            return _run_local_inference(image_path, question, model_config)
+        else:
+            raise ValueError(f"Unknown model type: {model_config['model_type']}")
+            
+    except Exception as e:
+        logging.error(f"Error in run_llava_inference: {str(e)}")
+        return {
+            "response": f"Error during inference: {str(e)}",
+            "success": False,
+            "error": str(e)
+        }
+
+def _run_openai_inference(image_path: str, question: str, model_config: Dict[str, Any]) -> Dict[str, Any]:
+    """Run inference using OpenAI API"""
+    try:
+        # Initialize OpenAI client
+        client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        
+        # Read and encode image
+        with open(image_path, "rb") as image_file:
+            image_data = base64.b64encode(image_file.read()).decode('utf-8')
+        
+        # Prepare the message
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": question
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{image_data}"
+                        }
+                    }
+                ]
+            }
+        ]
+        
+        # Make API call
+        response = client.chat.completions.create(
+            model=model_config["name"],
+            messages=messages,
+            max_tokens=model_config.get("max_tokens", 1000),
+            temperature=model_config.get("temperature", 0.7)
+        )
+        
+        return {
+            "response": response.choices[0].message.content,
+            "success": True,
+            "model": model_config["name"],
+            "usage": {
+                "prompt_tokens": response.usage.prompt_tokens,
+                "completion_tokens": response.usage.completion_tokens,
+                "total_tokens": response.usage.total_tokens
+            }
+        }
+        
+    except Exception as e:
+        logging.error(f"OpenAI API error: {str(e)}")
+        return {
+            "response": f"OpenAI API error: {str(e)}",
+            "success": False,
+            "error": str(e)
+        }
+
+def _run_local_inference(image_path: str, question: str, model_config: Dict[str, Any]) -> Dict[str, Any]:
+    """Run inference using local transformers"""
+    try:
+        # Load model and processor (with caching)
+        model_name = model_config["name"]
+        
+        # Check if model is already loaded
+        if not hasattr(_run_local_inference, '_loaded_models'):
+            _run_local_inference._loaded_models = {}
+        
+        if model_name not in _run_local_inference._loaded_models:
+            logging.info(f"Loading model: {model_name}")
+            
+            # Load processor and model
+            processor = AutoProcessor.from_pretrained(model_name)
+            model = AutoModelForCausalLM.from_pretrained(
+                model_name,
+                torch_dtype=torch.float16,
+                device_map="auto",
+                trust_remote_code=True
+            )
+            
+            _run_local_inference._loaded_models[model_name] = {
+                'processor': processor,
+                'model': model
+            }
+        
+        processor = _run_local_inference._loaded_models[model_name]['processor']
+        model = _run_local_inference._loaded_models[model_name]['model']
+        
+        # Load and preprocess image
+        image = Image.open(image_path).convert('RGB')
+        
+        # Prepare inputs
+        inputs = processor(
+            text=question,
+            images=image,
+            return_tensors="pt"
+        )
+        
+        # Move inputs to device
+        inputs = {k: v.to(model.device) for k, v in inputs.items()}
+        
+        # Generate response
+        with torch.no_grad():
+            outputs = model.generate(
+                **inputs,
+                max_new_tokens=model_config.get("max_tokens", 1000),
+                temperature=model_config.get("temperature", 0.7),
+                do_sample=True,
+                pad_token_id=processor.tokenizer.eos_token_id
+            )
+        
+        # Decode response
+        response_text = processor.tokenizer.decode(outputs[0], skip_special_tokens=True)
+        
+        # Extract only the generated part (remove input)
+        input_length = inputs['input_ids'].shape[1]
+        generated_text = response_text[input_length:].strip()
+        
+        return {
+            "response": generated_text,
+            "success": True,
+            "model": model_config["name"],
+            "usage": {
+                "input_tokens": input_length,
+                "generated_tokens": len(outputs[0]) - input_length,
+                "total_tokens": len(outputs[0])
+            }
+        }
+        
+    except Exception as e:
+        logging.error(f"Local inference error: {str(e)}")
+        return {
+            "response": f"Local inference error: {str(e)}",
+            "success": False,
+            "error": str(e)
+        }
+
+def cleanup_loaded_models():
+    """Clean up loaded models to free memory"""
+    if hasattr(_run_local_inference, '_loaded_models'):
+        for model_name, model_data in _run_local_inference._loaded_models.items():
+            del model_data['model']
+            del model_data['processor']
+        _run_local_inference._loaded_models.clear()
+        torch.cuda.empty_cache() 
