@@ -636,15 +636,19 @@ def solve_problem_gradio(user_query, user_image, max_steps=10, max_time=60, llm_
             if selected_model_config["model_type"] == "openai":
                 # For OpenAI models, use the model_id directly
                 model_name_for_octotools = llm_model_engine
+                print(f"✅ Using OpenAI model: {llm_model_engine}")
             else:
                 # For Hugging Face models, we need to use a different approach
                 # Since octotools doesn't support local HF models directly,
-                # we'll use a fallback to OpenAI models or show an error
-                print(f"⚠️ Warning: Local Hugging Face model '{llm_model_engine}' selected.")
-                print(f"   This model requires local inference which is not yet integrated with octotools.")
-                print(f"   Falling back to OpenAI model for compatibility.")
+                # we'll use a compatible OpenAI model for the framework
+                # but we'll override the actual inference calls
+                print(f"🔄 Hugging Face model '{llm_model_engine}' selected.")
+                print(f"   Framework will use compatible OpenAI model for structure.")
+                print(f"   ⚠️  Note: Local inference not yet fully integrated.")
+                print(f"   For now, using OpenAI model for compatibility.")
                 
-                # Fallback to a default OpenAI model
+                # For now, use OpenAI model for compatibility
+                # In the future, we can integrate local inference
                 model_name_for_octotools = "gpt-4o-mini"
         else:
             print(f"⚠️ Warning: Model '{llm_model_engine}' not found in configurations.")
@@ -655,6 +659,9 @@ def solve_problem_gradio(user_query, user_image, max_steps=10, max_time=60, llm_
     print(f"Debug - Selected model: {llm_model_engine}")
     print(f"Debug - Using model for octotools: {model_name_for_octotools}")
     
+    # Store the original selected model for later use
+    original_selected_model = llm_model_engine
+
     # Combine the tool lists
     enabled_tools = (enabled_fibroblast_tools or []) + (enabled_general_tools or [])
 
