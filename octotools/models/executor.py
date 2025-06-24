@@ -179,7 +179,25 @@ Remember: Your <command> field MUST be valid Python code including any necessary
 
         try:
             llm_generate_tool_command = ChatOpenAI(model_string=self.llm_engine_name, is_multimodal=False, api_key=self.api_key)
-            tool_command = llm_generate_tool_command(prompt_generate_tool_command, response_format=ToolCommand)
+            llm_response = llm_generate_tool_command.generate(prompt_generate_tool_command, response_format=ToolCommand)
+            
+            # Extract content and usage from response
+            if isinstance(llm_response, dict) and 'content' in llm_response:
+                tool_command = llm_response['content']
+                usage_info = llm_response.get('usage', {})
+                print(f"Tool command generation usage: {usage_info}")
+            else:
+                tool_command = llm_response
+                usage_info = {}
+            
+            # Add usage information to the tool command for tracking
+            if hasattr(tool_command, 'metadata'):
+                tool_command.metadata = getattr(tool_command, 'metadata', {})
+                tool_command.metadata['usage'] = usage_info
+            else:
+                # If ToolCommand doesn't have metadata, we'll handle this in the calling code
+                pass
+                
             return tool_command
         except Exception as e:
             print(f"Error in tool command generation: {e}")
