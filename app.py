@@ -822,8 +822,8 @@ def main(args):
                 gr.Markdown("### ⚙️ Model Configuration")
                 
                 # Model and limits
-                multimodal_models = [m for m in HF_MODEL_CONFIGS if m.get("is_multimodal")]
-                model_names = [m["name"] for m in multimodal_models]
+                multimodal_models = [m for m in HF_MODEL_CONFIGS.values() if m.get("is_multimodal")]
+                model_names = [m["model_id"] for m in multimodal_models]
                 language_model = gr.Dropdown(
                     choices=model_names,
                     value=model_names[0] if model_names else None,
