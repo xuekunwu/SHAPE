@@ -829,10 +829,10 @@ def main(args):
                 )
 
                 # Model and limits
-                model_choices = list(HF_MODEL_CONFIGS.keys())
+                multimodal_model_choices = [k for k, v in HF_MODEL_CONFIGS.items() if v.get("is_multimodal")]
                 language_model = gr.Dropdown(
-                    choices=model_choices,
-                    value="gpt-4o",
+                    choices=multimodal_model_choices,
+                    value=multimodal_model_choices[0] if multimodal_model_choices else None,
                     label="Language Model"
                 )
                 max_steps = gr.Slider(1, 15, value=10, label="Max Reasoning Steps")
