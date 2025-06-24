@@ -124,10 +124,24 @@ Please present your analysis in a clear, structured format.
             self.query_analysis = llm_response
             self.last_usage = {}
 
-        return str(self.query_analysis).strip()
+        # Check if we got a string response (non-structured model like gpt-4-turbo) instead of QueryAnalysis object
+        if isinstance(self.query_analysis, str):
+            print("WARNING: Received string response instead of QueryAnalysis object")
+            # Try to parse the string response to extract the analysis components
+            try:
+                # For string responses, we'll use the entire response as the analysis
+                # This is simpler since QueryAnalysis is mainly used for display
+                analysis_text = self.query_analysis.strip()
+                print(f"Using string response as query analysis: {len(analysis_text)} characters")
+            except Exception as parse_error:
+                print(f"Error parsing string response: {parse_error}")
+                analysis_text = "Error parsing query analysis"
+        else:
+            analysis_text = str(self.query_analysis).strip()
 
-    def extract_context_subgoal_and_tool(self, response: NextStep) -> Tuple[str, str, str]:
+        return analysis_text
 
+    def extract_context_subgoal_and_tool(self, response) -> Tuple[str, str, str]:
         def normalize_tool_name(tool_name: str) -> str:
             # Normalize the tool name to match the available tools
             for tool in self.available_tools:
@@ -136,14 +150,79 @@ Please present your analysis in a clear, structured format.
             return "No matched tool given: " + tool_name
         
         try:
-            context = response.context.strip()
-            sub_goal = response.sub_goal.strip()
-            tool_name = normalize_tool_name(response.tool_name.strip())
-            return context, sub_goal, tool_name
+            # Check if response is a NextStep object
+            if hasattr(response, 'context') and hasattr(response, 'sub_goal') and hasattr(response, 'tool_name'):
+                context = response.context.strip()
+                sub_goal = response.sub_goal.strip()
+                tool_name = normalize_tool_name(response.tool_name.strip())
+                return context, sub_goal, tool_name
+            # Check if response is a string (fallback for non-structured models)
+            elif isinstance(response, str):
+                print("WARNING: Received string response instead of NextStep object")
+                # Try to parse the string response to extract context, sub_goal, and tool_name
+                try:
+                    lines = response.split('\n')
+                    context = ""
+                    sub_goal = ""
+                    tool_name = ""
+                    
+                    for line in lines:
+                        line = line.strip()
+                        if line.lower().startswith('<context>') or line.lower().startswith('context:'):
+                            # Extract content after the tag/colon
+                            if '<context>' in line.lower():
+                                context = line.split('<context>')[1].split('</context>')[0].strip()
+                            else:
+                                context = line.split('context:', 1)[1].strip()
+                        elif line.lower().startswith('<sub_goal>') or line.lower().startswith('sub_goal:'):
+                            if '<sub_goal>' in line.lower():
+                                sub_goal = line.split('<sub_goal>')[1].split('</sub_goal>')[0].strip()
+                            else:
+                                sub_goal = line.split('sub_goal:', 1)[1].strip()
+                        elif line.lower().startswith('<tool_name>') or line.lower().startswith('tool_name:'):
+                            if '<tool_name>' in line.lower():
+                                tool_name = line.split('<tool_name>')[1].split('</tool_name>')[0].strip()
+                            else:
+                                tool_name = line.split('tool_name:', 1)[1].strip()
+                    
+                    # If we couldn't parse properly, try alternative patterns
+                    if not context or not sub_goal or not tool_name:
+                        # Look for patterns like "Context: ..." or "Tool: ..."
+                        for line in lines:
+                            line = line.strip()
+                            if line.lower().startswith('context:') and not context:
+                                context = line.split('context:', 1)[1].strip()
+                            elif line.lower().startswith('sub-goal:') and not sub_goal:
+                                sub_goal = line.split('sub-goal:', 1)[1].strip()
+                            elif line.lower().startswith('tool:') and not tool_name:
+                                tool_name = line.split('tool:', 1)[1].strip()
+                    
+                    # Normalize tool name
+                    if tool_name:
+                        tool_name = normalize_tool_name(tool_name)
+                    
+                    # If still missing, use defaults
+                    if not context:
+                        context = "No context provided"
+                    if not sub_goal:
+                        sub_goal = "No sub-goal provided"
+                    if not tool_name:
+                        tool_name = "No tool specified"
+                    
+                    print(f"Parsed from string: context='{context}', sub_goal='{sub_goal}', tool_name='{tool_name}'")
+                    return context, sub_goal, tool_name
+                    
+                except Exception as parse_error:
+                    print(f"Error parsing string response: {parse_error}")
+                    return "Error parsing context", "Error parsing sub-goal", "Error parsing tool name"
+            else:
+                print(f"Unexpected response type: {type(response)}")
+                return "Unknown context", "Unknown sub-goal", "Unknown tool"
+                
         except Exception as e:
             print(f"Error extracting context, sub-goal, and tool name: {str(e)}")
-            return None, None, None
-        
+            return "Error extracting context", "Error extracting sub-goal", "Error extracting tool name"
+
     def generate_next_step(self, question: str, image: str, query_analysis: str, memory: Memory, step_count: int, max_step_count: int, bytes_mode: bool = False) -> NextStep:
         prompt_generate_next_step = f"""
 Task: Determine the optimal next step to address the given query based on the provided analysis, available tools, and previous steps taken.
@@ -221,6 +300,82 @@ Example (do not copy, use only as reference):
         else:
             next_step = next_step_response
             self.last_usage = {}
+        
+        # Check if we got a string response (non-structured model like gpt-4-turbo) instead of NextStep object
+        if isinstance(next_step, str):
+            print("WARNING: Received string response instead of NextStep object")
+            # Try to parse the string response to extract justification, context, sub_goal, and tool_name
+            try:
+                lines = next_step.split('\n')
+                justification = ""
+                context = ""
+                sub_goal = ""
+                tool_name = ""
+                
+                for line in lines:
+                    line = line.strip()
+                    if line.lower().startswith('<justification>') or line.lower().startswith('justification:'):
+                        if '<justification>' in line.lower():
+                            justification = line.split('<justification>')[1].split('</justification>')[0].strip()
+                        else:
+                            justification = line.split('justification:', 1)[1].strip()
+                    elif line.lower().startswith('<context>') or line.lower().startswith('context:'):
+                        if '<context>' in line.lower():
+                            context = line.split('<context>')[1].split('</context>')[0].strip()
+                        else:
+                            context = line.split('context:', 1)[1].strip()
+                    elif line.lower().startswith('<sub_goal>') or line.lower().startswith('sub_goal:'):
+                        if '<sub_goal>' in line.lower():
+                            sub_goal = line.split('<sub_goal>')[1].split('</sub_goal>')[0].strip()
+                        else:
+                            sub_goal = line.split('sub_goal:', 1)[1].strip()
+                    elif line.lower().startswith('<tool_name>') or line.lower().startswith('tool_name:'):
+                        if '<tool_name>' in line.lower():
+                            tool_name = line.split('<tool_name>')[1].split('</tool_name>')[0].strip()
+                        else:
+                            tool_name = line.split('tool_name:', 1)[1].strip()
+                
+                # If we couldn't parse properly, try alternative patterns
+                if not justification or not context or not sub_goal or not tool_name:
+                    for line in lines:
+                        line = line.strip()
+                        if line.lower().startswith('justification:') and not justification:
+                            justification = line.split('justification:', 1)[1].strip()
+                        elif line.lower().startswith('context:') and not context:
+                            context = line.split('context:', 1)[1].strip()
+                        elif line.lower().startswith('sub-goal:') and not sub_goal:
+                            sub_goal = line.split('sub-goal:', 1)[1].strip()
+                        elif line.lower().startswith('tool:') and not tool_name:
+                            tool_name = line.split('tool:', 1)[1].strip()
+                
+                # If still missing, use defaults
+                if not justification:
+                    justification = "No justification provided"
+                if not context:
+                    context = "No context provided"
+                if not sub_goal:
+                    sub_goal = "No sub-goal provided"
+                if not tool_name:
+                    tool_name = "No tool specified"
+                
+                # Create NextStep object manually
+                next_step = NextStep(
+                    justification=justification,
+                    context=context,
+                    sub_goal=sub_goal,
+                    tool_name=tool_name
+                )
+                print(f"Created NextStep object from string: justification='{justification}', context='{context}', sub_goal='{sub_goal}', tool_name='{tool_name}'")
+                
+            except Exception as parse_error:
+                print(f"Error parsing string response: {parse_error}")
+                # Create a default NextStep object
+                next_step = NextStep(
+                    justification="Error parsing justification",
+                    context="Error parsing context",
+                    sub_goal="Error parsing sub-goal",
+                    tool_name="Error parsing tool name"
+                )
             
         return next_step
 
