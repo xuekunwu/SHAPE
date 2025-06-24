@@ -133,6 +133,11 @@ class ChatOpenAI(EngineLM, CachedEngine):
             cache_key = sys_prompt_arg + prompt
             cache_or_none = self._check_cache(cache_key)
             if cache_or_none is not None:
+                # If cached result doesn't have usage info, add default usage
+                if isinstance(cache_or_none, dict) and 'content' in cache_or_none:
+                    if 'usage' not in cache_or_none:
+                        cache_or_none['usage'] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+                    cache_or_none['usage']['from_cache'] = True
                 return cache_or_none
 
         if self.model_string in ['o1', 'o1-mini']: # only supports base response currently
@@ -145,26 +150,99 @@ class ChatOpenAI(EngineLM, CachedEngine):
                 max_completion_tokens=max_tokens
             )
             if response.choices[0].finishreason == "length":
-                response = "Token limit exceeded"
+                response_content = "Token limit exceeded"
             else:
-                response = response.choices[0].message.parsed
+                response_content = response.choices[0].message.parsed
+            
+            # Return both content and usage info
+            return {
+                "content": response_content,
+                "usage": {
+                    "prompt_tokens": getattr(response.usage, 'prompt_tokens', 0),
+                    "completion_tokens": getattr(response.usage, 'completion_tokens', 0),
+                    "total_tokens": getattr(response.usage, 'total_tokens', 0)
+                } if hasattr(response, 'usage') else {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+            }
         elif self.model_string in OPENAI_STRUCTURED_MODELS and response_format is not None:
             # print(f"Using structured model: {self.model_string}")
-            response = self.client.beta.chat.completions.parse(
-                model=self.model_string,
-                messages=[
-                    {"role": "system", "content": sys_prompt_arg},
-                    {"role": "user", "content": prompt},
-                ],
-                frequency_penalty=0,
-                presence_penalty=0,
-                stop=None,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                top_p=top_p,
-                response_format=response_format
-            )
-            response = response.choices[0].message.parsed
+            # For structured models with response_format, we need to use parse method
+            # but we also need to get usage information
+            try:
+                response = self.client.beta.chat.completions.parse(
+                    model=self.model_string,
+                    messages=[
+                        {"role": "system", "content": sys_prompt_arg},
+                        {"role": "user", "content": prompt},
+                    ],
+                    frequency_penalty=0,
+                    presence_penalty=0,
+                    stop=None,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    top_p=top_p,
+                    response_format=response_format
+                )
+                response_content = response.choices[0].message.parsed
+                
+                # Try to get usage information from the response
+                usage_info = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+                if hasattr(response, 'usage'):
+                    usage_info = {
+                        "prompt_tokens": getattr(response.usage, 'prompt_tokens', 0),
+                        "completion_tokens": getattr(response.usage, 'completion_tokens', 0),
+                        "total_tokens": getattr(response.usage, 'total_tokens', 0)
+                    }
+                elif hasattr(response, '_response') and hasattr(response._response, 'usage'):
+                    # Try to access usage through _response attribute
+                    usage_info = {
+                        "prompt_tokens": getattr(response._response.usage, 'prompt_tokens', 0),
+                        "completion_tokens": getattr(response._response.usage, 'completion_tokens', 0),
+                        "total_tokens": getattr(response._response.usage, 'total_tokens', 0)
+                    }
+                
+                print(f"Structured model usage info: {usage_info}")
+                
+                # Return both content and usage info
+                return {
+                    "content": response_content,
+                    "usage": usage_info
+                }
+            except Exception as e:
+                print(f"Error in structured model parse: {e}")
+                # Fallback to regular chat completion for usage tracking
+                try:
+                    response = self.client.chat.completions.create(
+                        model=self.model_string,
+                        messages=[
+                            {"role": "system", "content": sys_prompt_arg},
+                            {"role": "user", "content": prompt},
+                        ],
+                        frequency_penalty=0,
+                        presence_penalty=0,
+                        stop=None,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        top_p=top_p,
+                    )
+                    response_content = response.choices[0].message.content
+                    
+                    # Return both content and usage info
+                    result = {
+                        "content": response_content,
+                        "usage": {
+                            "prompt_tokens": response.usage.prompt_tokens,
+                            "completion_tokens": response.usage.completion_tokens,
+                            "total_tokens": response.usage.total_tokens
+                        }
+                    }
+                    print(f"Fallback usage info: {result['usage']}")
+                    return result
+                except Exception as fallback_error:
+                    print(f"Fallback error: {fallback_error}")
+                    return {
+                        "content": "Error in structured generation",
+                        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+                    }
         else:
             # print(f"Using non-structured model: {self.model_string}")
             response = self.client.chat.completions.create(
@@ -180,14 +258,26 @@ class ChatOpenAI(EngineLM, CachedEngine):
                 max_tokens=max_tokens,
                 top_p=top_p,
             )
-            response = response.choices[0].message.content
+            response_content = response.choices[0].message.content
+            
+            # Return both content and usage info
+            result = {
+                "content": response_content,
+                "usage": {
+                    "prompt_tokens": response.usage.prompt_tokens,
+                    "completion_tokens": response.usage.completion_tokens,
+                    "total_tokens": response.usage.total_tokens
+                }
+            }
 
         if self.enable_cache:
-            self._save_cache(cache_key, response)
-        return response
+            self._save_cache(cache_key, result)
+        return result
 
     def __call__(self, prompt, **kwargs):
-        return self.generate(prompt, **kwargs)
+        result = self.generate(prompt, **kwargs)
+        # Return the complete result with usage information
+        return result
 
     def _format_content(self, content: List[Union[str, bytes]]) -> List[dict]:
         formatted_content = []
@@ -219,7 +309,11 @@ class ChatOpenAI(EngineLM, CachedEngine):
             cache_key = sys_prompt_arg + json.dumps(formatted_content)
             cache_or_none = self._check_cache(cache_key)
             if cache_or_none is not None:
-                # print(f"Cache hit for prompt: {cache_key[:200]}")
+                # If cached result doesn't have usage info, add default usage
+                if isinstance(cache_or_none, dict) and 'content' in cache_or_none:
+                    if 'usage' not in cache_or_none:
+                        cache_or_none['usage'] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+                    cache_or_none['usage']['from_cache'] = True
                 return cache_or_none
 
         if self.model_string in ['o1', 'o1-mini']: # only supports base response currently
@@ -236,20 +330,90 @@ class ChatOpenAI(EngineLM, CachedEngine):
                 response_text = "Token limit exceeded"
             else:
                 response_text = response.choices[0].message.content
+            
+            # Return both content and usage info
+            return {
+                "content": response_text,
+                "usage": {
+                    "prompt_tokens": getattr(response.usage, 'prompt_tokens', 0),
+                    "completion_tokens": getattr(response.usage, 'completion_tokens', 0),
+                    "total_tokens": getattr(response.usage, 'total_tokens', 0)
+                } if hasattr(response, 'usage') else {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+            }
         elif self.model_string in OPENAI_STRUCTURED_MODELS and response_format is not None:
             # print(f"Using structured model: {self.model_string}")
-            response = self.client.beta.chat.completions.parse(
-                model=self.model_string,
-                messages=[
-                    {"role": "system", "content": sys_prompt_arg},
-                    {"role": "user", "content": formatted_content},
-                ],
-                temperature=temperature,
-                max_tokens=max_tokens,
-                top_p=top_p,
-                response_format=response_format
-            )
-            response_text = response.choices[0].message.parsed
+            # For structured models with response_format, we need to use parse method
+            # but we also need to get usage information
+            try:
+                response = self.client.beta.chat.completions.parse(
+                    model=self.model_string,
+                    messages=[
+                        {"role": "system", "content": sys_prompt_arg},
+                        {"role": "user", "content": formatted_content},
+                    ],
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    top_p=top_p,
+                    response_format=response_format
+                )
+                response_text = response.choices[0].message.parsed
+                
+                # Try to get usage information from the response
+                usage_info = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+                if hasattr(response, 'usage'):
+                    usage_info = {
+                        "prompt_tokens": getattr(response.usage, 'prompt_tokens', 0),
+                        "completion_tokens": getattr(response.usage, 'completion_tokens', 0),
+                        "total_tokens": getattr(response.usage, 'total_tokens', 0)
+                    }
+                elif hasattr(response, '_response') and hasattr(response._response, 'usage'):
+                    # Try to access usage through _response attribute
+                    usage_info = {
+                        "prompt_tokens": getattr(response._response.usage, 'prompt_tokens', 0),
+                        "completion_tokens": getattr(response._response.usage, 'completion_tokens', 0),
+                        "total_tokens": getattr(response._response.usage, 'total_tokens', 0)
+                    }
+                
+                print(f"Multimodal structured model usage info: {usage_info}")
+                
+                # Return both content and usage info
+                return {
+                    "content": response_text,
+                    "usage": usage_info
+                }
+            except Exception as e:
+                print(f"Error in multimodal structured model parse: {e}")
+                # Fallback to regular chat completion for usage tracking
+                try:
+                    response = self.client.chat.completions.create(
+                        model=self.model_string,
+                        messages=[
+                            {"role": "system", "content": sys_prompt_arg},
+                            {"role": "user", "content": formatted_content},
+                        ],
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        top_p=top_p,
+                    )
+                    response_text = response.choices[0].message.content
+                    
+                    # Return both content and usage info
+                    result = {
+                        "content": response_text,
+                        "usage": {
+                            "prompt_tokens": response.usage.prompt_tokens,
+                            "completion_tokens": response.usage.completion_tokens,
+                            "total_tokens": response.usage.total_tokens
+                        }
+                    }
+                    print(f"Multimodal fallback usage info: {result['usage']}")
+                    return result
+                except Exception as fallback_error:
+                    print(f"Multimodal fallback error: {fallback_error}")
+                    return {
+                        "content": "Error in multimodal structured generation",
+                        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+                    }
         else:
             # print(f"Using non-structured model: {self.model_string}")
             response = self.client.chat.completions.create(
@@ -263,7 +427,17 @@ class ChatOpenAI(EngineLM, CachedEngine):
                 top_p=top_p,
             )
             response_text = response.choices[0].message.content
+            
+            # Return both content and usage info
+            result = {
+                "content": response_text,
+                "usage": {
+                    "prompt_tokens": response.usage.prompt_tokens,
+                    "completion_tokens": response.usage.completion_tokens,
+                    "total_tokens": response.usage.total_tokens
+                }
+            }
 
         if self.enable_cache:
-            self._save_cache(cache_key, response_text)
-        return response_text
+            self._save_cache(cache_key, result)
+        return result
