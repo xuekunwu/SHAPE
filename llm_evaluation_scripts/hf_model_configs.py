@@ -25,7 +25,6 @@ Always maintain scientific accuracy and provide clear, evidence-based interpreta
 
 # Hugging Face Model Configurations
 HF_MODEL_CONFIGS = {
-    # 最新OpenAI模型
     "gpt-4o": {
         "model_id": "gpt-4o",
         "model_type": "openai",
@@ -84,7 +83,31 @@ HF_MODEL_CONFIGS = {
     "llava-1.5-7b": {
         "model_id": "llava-hf/llava-1.5-7b-hf",
         "model_type": "hf",
-        "hardware_requirements": "16GB VRAM (4bit)",
+        "hardware_requirements": "24GB VRAM (4bit/8bit)",
+        "is_multimodal": True
+    },
+    "llava-1.5-13b": {
+        "model_id": "llava-hf/llava-1.5-13b-hf",
+        "model_type": "hf",
+        "hardware_requirements": "24GB VRAM (4bit, 单进程)",
+        "is_multimodal": True
+    },
+    "qwen-vl": {
+        "model_id": "Qwen/Qwen-VL",
+        "model_type": "hf",
+        "hardware_requirements": "24GB VRAM (4bit/8bit)",
+        "is_multimodal": True
+    },
+    "qwen-vl-plus": {
+        "model_id": "Qwen/Qwen-VL-Plus",
+        "model_type": "hf",
+        "hardware_requirements": "24GB VRAM (4bit, 单进程)",
+        "is_multimodal": True
+    },
+    "phi-3-vision": {
+        "model_id": "microsoft/phi-3-vision-128k-instruct",
+        "model_type": "hf",
+        "hardware_requirements": "16GB VRAM (4bit/8bit)",
         "is_multimodal": True
     },
     # Llama 3 Models
@@ -211,19 +234,6 @@ HF_MODEL_CONFIGS = {
         "is_multimodal": True
     },
     
-    "qwen-vl-plus": {
-        "model_id": "Qwen/Qwen-VL-Plus",
-        "model_type": "qwen_vl",
-        "max_length": 32768,
-        "temperature": 0.3,
-        "system_prompt": FIBROBLAST_SYSTEM_PROMPT,
-        "capabilities": ["text_generation", "multimodal", "image_analysis"],
-        "expected_cost_per_1k_tokens": 0.0,
-        "hardware_requirements": "24GB+ VRAM",
-        "quantization": ["4bit", "8bit"],
-        "is_multimodal": True
-    },
-    
     # Specialized Models
     "codellama-7b-instruct": {
         "model_id": "codellama/CodeLlama-7b-Instruct-hf",
@@ -249,6 +259,12 @@ HF_MODEL_CONFIGS = {
         "hardware_requirements": "16GB+ VRAM",
         "quantization": ["4bit", "8bit"],
         "is_multimodal": False
+    },
+    "qwen-vl-plus": {
+        "model_id": "Qwen/Qwen-VL-Plus",
+        "model_type": "hf",
+        "hardware_requirements": "32GB+ VRAM (4bit)",
+        "is_multimodal": True
     }
 }
 
