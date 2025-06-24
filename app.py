@@ -48,6 +48,9 @@ DATASET_DIR.mkdir(parents=True, exist_ok=True)
 global QUERY_ID
 QUERY_ID = None
 
+# Global variable for local model configuration
+LOCAL_MODEL_CONFIG = None
+
 # Comment out problematic CommitScheduler to avoid permission issues
 # scheduler = CommitScheduler(
 #     repo_id="lupantech/OctoTools-Gradio-Demo-User-Data",
@@ -638,18 +641,18 @@ def solve_problem_gradio(user_query, user_image, max_steps=10, max_time=60, llm_
                 model_name_for_octotools = llm_model_engine
                 print(f"✅ Using OpenAI model: {llm_model_engine}")
             else:
-                # For Hugging Face models, we need to use a different approach
-                # Since octotools doesn't support local HF models directly,
-                # we'll use a compatible OpenAI model for the framework
-                # but we'll override the actual inference calls
+                # For Hugging Face models, we'll use local inference
                 print(f"🔄 Hugging Face model '{llm_model_engine}' selected.")
-                print(f"   Framework will use compatible OpenAI model for structure.")
-                print(f"   ⚠️  Note: Local inference not yet fully integrated.")
-                print(f"   For now, using OpenAI model for compatibility.")
+                print(f"   Using local inference with transformers.")
                 
-                # For now, use OpenAI model for compatibility
-                # In the future, we can integrate local inference
+                # We'll use a compatible OpenAI model for the framework structure
+                # but override the actual inference calls to use local models
                 model_name_for_octotools = "gpt-4o-mini"
+                
+                # Store the local model info for later use
+                global LOCAL_MODEL_CONFIG
+                LOCAL_MODEL_CONFIG = selected_model_config
+                print(f"   Local model config stored for inference.")
         else:
             print(f"⚠️ Warning: Model '{llm_model_engine}' not found in configurations.")
             model_name_for_octotools = "gpt-4o-mini"  # Default fallback
@@ -661,6 +664,51 @@ def solve_problem_gradio(user_query, user_image, max_steps=10, max_time=60, llm_
     
     # Store the original selected model for later use
     original_selected_model = llm_model_engine
+    
+    # If we have a local model, create the local engine and patch the octotools
+    local_engine = None
+    if selected_model_config and selected_model_config["model_type"] != "openai":
+        print(f"🔧 Setting up local model engine for: {llm_model_engine}")
+        local_engine = LocalModelEngine(selected_model_config)
+        
+        # Monkey patch the octotools to use our local engine
+        def patch_octotools_for_local_inference():
+            """Patch octotools to use local model inference"""
+            try:
+                # Import the modules we need to patch
+                from octotools.engine.openai import ChatOpenAI
+                
+                # Store original methods
+                original_generate = ChatOpenAI._generate_multimodal
+                original_generate_text = ChatOpenAI.generate
+                
+                def patched_generate_multimodal(self, content, system_prompt=None, **kwargs):
+                    """Patched method to use local model for multimodal generation"""
+                    if local_engine and self.model_string == "gpt-4o-mini":
+                        print(f"🔄 Using local model for multimodal generation: {local_engine.model_id}")
+                        return local_engine.generate_multimodal(content, system_prompt, **kwargs)
+                    else:
+                        return original_generate(self, content, system_prompt, **kwargs)
+                
+                def patched_generate(self, prompt, system_prompt=None, **kwargs):
+                    """Patched method to use local model for text generation"""
+                    if local_engine and self.model_string == "gpt-4o-mini":
+                        print(f"🔄 Using local model for text generation: {local_engine.model_id}")
+                        return local_engine.generate(prompt, system_prompt, **kwargs)
+                    else:
+                        return original_generate_text(self, prompt, system_prompt, **kwargs)
+                
+                # Apply patches
+                ChatOpenAI._generate_multimodal = patched_generate_multimodal
+                ChatOpenAI.generate = patched_generate
+                
+                print(f"✅ Successfully patched octotools for local inference")
+                
+            except Exception as e:
+                print(f"❌ Error patching octotools: {e}")
+        
+        # Apply the patch
+        patch_octotools_for_local_inference()
 
     # Combine the tool lists
     enabled_tools = (enabled_fibroblast_tools or []) + (enabled_general_tools or [])
@@ -1132,4 +1180,162 @@ if __name__ == "__main__":
         plot_time_distribution(df)
         plot_token_distribution(df)
         plot_success_rate(df)
+
+# Custom model engine for local Hugging Face models
+class LocalModelEngine:
+    def __init__(self, model_config):
+        self.model_config = model_config
+        self.model_id = model_config["model_id"]
+        self.model_type = model_config["model_type"]
+        self._model = None
+        self._processor = None
+        self._tokenizer = None
+        
+    def load_model(self):
+        """Load the local model"""
+        if self._model is None:
+            try:
+                from transformers import AutoProcessor, AutoModelForCausalLM, AutoTokenizer
+                import torch
+                
+                print(f"🔄 Loading local model: {self.model_id}")
+                
+                # Load processor for multimodal models
+                if self.model_config.get("is_multimodal", False):
+                    self._processor = AutoProcessor.from_pretrained(
+                        self.model_id,
+                        trust_remote_code=True
+                    )
+                
+                # Load tokenizer
+                self._tokenizer = AutoTokenizer.from_pretrained(
+                    self.model_id,
+                    trust_remote_code=True,
+                    use_fast=False
+                )
+                
+                # Add padding token if not present
+                if self._tokenizer.pad_token is None:
+                    self._tokenizer.pad_token = self._tokenizer.eos_token
+                
+                # Load model
+                model_kwargs = {
+                    "trust_remote_code": True,
+                    "device_map": "auto",
+                    "torch_dtype": torch.float16
+                }
+                
+                self._model = AutoModelForCausalLM.from_pretrained(
+                    self.model_id,
+                    **model_kwargs
+                )
+                
+                print(f"✅ Local model loaded successfully: {self.model_id}")
+                
+            except Exception as e:
+                print(f"❌ Error loading local model: {e}")
+                raise
+    
+    def generate(self, prompt, system_prompt=None, **kwargs):
+        """Generate text response"""
+        try:
+            if self._model is None:
+                self.load_model()
+            
+            # Prepare input
+            if system_prompt:
+                full_prompt = f"{system_prompt}\n\n{prompt}"
+            else:
+                full_prompt = prompt
+            
+            # Tokenize
+            inputs = self._tokenizer(
+                full_prompt,
+                return_tensors="pt",
+                truncation=True,
+                max_length=kwargs.get("max_length", 2048)
+            )
+            
+            # Move to device
+            inputs = {k: v.to(self._model.device) for k, v in inputs.items()}
+            
+            # Generate
+            with torch.no_grad():
+                outputs = self._model.generate(
+                    **inputs,
+                    max_new_tokens=kwargs.get("max_tokens", 1000),
+                    temperature=kwargs.get("temperature", 0.7),
+                    do_sample=True,
+                    pad_token_id=self._tokenizer.eos_token_id
+                )
+            
+            # Decode
+            response = self._tokenizer.decode(outputs[0], skip_special_tokens=True)
+            
+            # Extract only the generated part
+            input_length = inputs['input_ids'].shape[1]
+            generated_text = response[input_length:].strip()
+            
+            return generated_text
+            
+        except Exception as e:
+            print(f"❌ Error in local text generation: {e}")
+            return f"Error: {str(e)}"
+    
+    def generate_multimodal(self, content, system_prompt=None, **kwargs):
+        """Generate multimodal response"""
+        try:
+            if self._model is None:
+                self.load_model()
+            
+            if not self.model_config.get("is_multimodal", False):
+                return self.generate(content[0] if isinstance(content, list) else content, system_prompt, **kwargs)
+            
+            # Handle multimodal content
+            if isinstance(content, list) and len(content) > 1:
+                text_content = content[0]
+                image_content = content[1]
+                
+                # Convert image content to PIL Image
+                if isinstance(image_content, bytes):
+                    from PIL import Image
+                    import io
+                    image = Image.open(io.BytesIO(image_content)).convert('RGB')
+                else:
+                    image = image_content
+                
+                # Prepare inputs
+                inputs = self._processor(
+                    text=text_content,
+                    images=image,
+                    return_tensors="pt"
+                )
+                
+                # Move to device
+                inputs = {k: v.to(self._model.device) for k, v in inputs.items()}
+                
+                # Generate
+                with torch.no_grad():
+                    outputs = self._model.generate(
+                        **inputs,
+                        max_new_tokens=kwargs.get("max_tokens", 1000),
+                        temperature=kwargs.get("temperature", 0.7),
+                        do_sample=True,
+                        pad_token_id=self._processor.tokenizer.eos_token_id
+                    )
+                
+                # Decode
+                response_text = self._processor.tokenizer.decode(outputs[0], skip_special_tokens=True)
+                
+                # Extract only the generated part
+                input_length = inputs['input_ids'].shape[1]
+                generated_text = response_text[input_length:].strip()
+                
+                return generated_text
+            else:
+                return self.generate(content[0] if isinstance(content, list) else content, system_prompt, **kwargs)
+                
+        except Exception as e:
+            print(f"❌ Error in local multimodal generation: {e}")
+            return f"Error: {str(e)}"
 
