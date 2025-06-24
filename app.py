@@ -20,6 +20,7 @@ from octotools.models.formatters import ToolCommand
 import random
 import traceback
 import psutil  # For memory usage
+from llm_evaluation_scripts.hf_model_configs import HF_MODEL_CONFIGS
 
 # Add the project root to the Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -31,15 +32,6 @@ from octotools.models.planner import Planner
 from octotools.models.memory import Memory
 from octotools.models.executor import Executor
 from octotools.models.utils import make_json_serializable, VisualizationConfig
-
-# Import HF evaluation framework
-try:
-    from llm_evaluation_scripts.hf_evaluation_framework import HuggingFaceEvaluator
-    from llm_evaluation_scripts.hf_model_configs import HF_MODEL_CONFIGS, get_hf_models_by_category
-    HF_EVALUATION_AVAILABLE = True
-except ImportError:
-    HF_EVALUATION_AVAILABLE = False
-    print("Warning: HF evaluation framework not available")
 
 # Custom JSON encoder to handle ToolCommand objects
 class CustomEncoder(json.JSONEncoder):
