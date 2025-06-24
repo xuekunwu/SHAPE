@@ -615,7 +615,7 @@ def solve_problem_gradio(user_query, user_image, max_steps=10, max_time=60, llm_
         user_image: The user's image
         max_steps: Maximum number of reasoning steps
         max_time: Maximum analysis time in seconds
-        llm_model_engine: Language model engine
+        llm_model_engine: Language model engine (model_id from dropdown)
         enabled_fibroblast_tools: List of enabled fibroblast tools
         enabled_general_tools: List of enabled general tools
         clear_previous_viz: Whether to clear previous visualizations
@@ -623,9 +623,41 @@ def solve_problem_gradio(user_query, user_image, max_steps=10, max_time=60, llm_
     # Get API key from environment variable
     api_key = os.getenv("OPENAI_API_KEY")
     
+    # Map the selected model_id to the correct model name for octotools
+    if llm_model_engine:
+        # Find the model config by model_id
+        selected_model_config = None
+        for model_key, config in HF_MODEL_CONFIGS.items():
+            if config.get("model_id") == llm_model_engine:
+                selected_model_config = config
+                break
+        
+        if selected_model_config:
+            if selected_model_config["model_type"] == "openai":
+                # For OpenAI models, use the model_id directly
+                model_name_for_octotools = llm_model_engine
+            else:
+                # For Hugging Face models, we need to use a different approach
+                # Since octotools doesn't support local HF models directly,
+                # we'll use a fallback to OpenAI models or show an error
+                print(f"⚠️ Warning: Local Hugging Face model '{llm_model_engine}' selected.")
+                print(f"   This model requires local inference which is not yet integrated with octotools.")
+                print(f"   Falling back to OpenAI model for compatibility.")
+                
+                # Fallback to a default OpenAI model
+                model_name_for_octotools = "gpt-4o-mini"
+        else:
+            print(f"⚠️ Warning: Model '{llm_model_engine}' not found in configurations.")
+            model_name_for_octotools = "gpt-4o-mini"  # Default fallback
+    else:
+        model_name_for_octotools = "gpt-4o-mini"  # Default model
+    
+    print(f"Debug - Selected model: {llm_model_engine}")
+    print(f"Debug - Using model for octotools: {model_name_for_octotools}")
+    
     # Combine the tool lists
     enabled_tools = (enabled_fibroblast_tools or []) + (enabled_general_tools or [])
-    
+
     # Generate a unique query ID
     query_id = time.strftime("%Y%m%d_%H%M%S") + "_" + str(uuid.uuid4())[:8] # e.g, 20250217_062225_612f2474
     print(f"Query ID: {query_id}")
@@ -707,7 +739,7 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
     try:
         initializer = Initializer(
             enabled_tools=enabled_tools,
-            model_string=llm_model_engine,
+            model_string=model_name_for_octotools,
             api_key=api_key
         )
         print(f"Debug - Initializer created successfully with {len(initializer.available_tools)} tools")
@@ -718,7 +750,7 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
     # Instantiate Planner
     try:
         planner = Planner(
-            llm_engine_name=llm_model_engine,
+            llm_engine_name=model_name_for_octotools,
             toolbox_metadata=initializer.toolbox_metadata,
             available_tools=initializer.available_tools,
             api_key=api_key
@@ -733,7 +765,7 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
 
     # Instantiate Executor
     executor = Executor(
-        llm_engine_name=llm_model_engine,
+        llm_engine_name=model_name_for_octotools,
         query_cache_dir=query_cache_dir, # NOTE
         enable_signal=False,
         api_key=api_key,
@@ -824,9 +856,19 @@ def main(args):
                 # Model and limits
                 multimodal_models = [m for m in HF_MODEL_CONFIGS.values() if m.get("is_multimodal")]
                 model_names = [m["model_id"] for m in multimodal_models]
+                
+                # Set default to first OpenAI model if available, otherwise first model
+                default_model = None
+                for model in multimodal_models:
+                    if model.get("model_type") == "openai":
+                        default_model = model["model_id"]
+                        break
+                if not default_model and model_names:
+                    default_model = model_names[0]
+                
                 language_model = gr.Dropdown(
                     choices=model_names,
-                    value=model_names[0] if model_names else None,
+                    value=default_model,
                     label="Multimodal Large Language Model"
                 )
                 max_steps = gr.Slider(1, 15, value=10, label="Max Reasoning Steps")
