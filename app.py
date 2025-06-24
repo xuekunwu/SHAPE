@@ -841,8 +841,11 @@ def main(args):
                 )
 
                 # Model and limits
-                llm_model_engine = gr.Dropdown(
-                    choices=["gpt-4o"], value="gpt-4o", label="Language Model"
+                model_choices = list(HF_MODEL_CONFIGS.keys())
+                language_model = gr.Dropdown(
+                    choices=model_choices,
+                    value="gpt-4o",
+                    label="Language Model"
                 )
                 max_steps = gr.Slider(1, 15, value=10, label="Max Reasoning Steps")
                 max_time = gr.Slider(60, 600, value=300, label="Max Analysis Time (seconds)")
@@ -1016,7 +1019,7 @@ def main(args):
         # Button click event
         run_button.click(
             solve_problem_gradio,
-            [user_query, user_image, max_steps, max_time, api_key, llm_model_engine, enabled_fibroblast_tools, enabled_general_tools, clear_previous_viz],
+            [user_query, user_image, max_steps, max_time, api_key, language_model, enabled_fibroblast_tools, enabled_general_tools, clear_previous_viz],
             [chatbot_output, text_output, gallery_output, progress_md]
         )
 
