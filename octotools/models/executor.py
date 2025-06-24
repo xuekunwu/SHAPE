@@ -190,6 +190,88 @@ Remember: Your <command> field MUST be valid Python code including any necessary
                 tool_command = llm_response
                 usage_info = {}
             
+            # Check if we got a string response (non-structured model like gpt-4-turbo) instead of ToolCommand object
+            if isinstance(tool_command, str):
+                print("WARNING: Received string response instead of ToolCommand object")
+                # Try to parse the string response to extract analysis, explanation, and command
+                try:
+                    lines = tool_command.split('\n')
+                    analysis = ""
+                    explanation = ""
+                    command = ""
+                    
+                    for line in lines:
+                        line = line.strip()
+                        if line.lower().startswith('<analysis>') or line.lower().startswith('analysis:'):
+                            if '<analysis>' in line.lower():
+                                analysis = line.split('<analysis>')[1].split('</analysis>')[0].strip()
+                            else:
+                                parts = line.split('analysis:', 1)
+                                if len(parts) > 1:
+                                    analysis = parts[1].lstrip(' :')
+                                else:
+                                    analysis = ""
+                        elif line.lower().startswith('<explanation>') or line.lower().startswith('explanation:'):
+                            if '<explanation>' in line.lower():
+                                explanation = line.split('<explanation>')[1].split('</explanation>')[0].strip()
+                            else:
+                                parts = line.split('explanation:', 1)
+                                if len(parts) > 1:
+                                    explanation = parts[1].lstrip(' :')
+                                else:
+                                    explanation = ""
+                        elif line.lower().startswith('<command>') or line.lower().startswith('command:'):
+                            if '<command>' in line.lower():
+                                command = line.split('<command>')[1].split('</command>')[0].strip()
+                            else:
+                                parts = line.split('command:', 1)
+                                if len(parts) > 1:
+                                    command = parts[1].lstrip(' :')
+                                else:
+                                    command = ""
+                    
+                    # If we couldn't parse properly, try alternative patterns
+                    if not analysis or not explanation or not command:
+                        for line in lines:
+                            line = line.strip()
+                            if line.lower().startswith('analysis:') and not analysis:
+                                parts = line.split('analysis:', 1)
+                                if len(parts) > 1:
+                                    analysis = parts[1].lstrip(' :')
+                            elif line.lower().startswith('explanation:') and not explanation:
+                                parts = line.split('explanation:', 1)
+                                if len(parts) > 1:
+                                    explanation = parts[1].lstrip(' :')
+                            elif line.lower().startswith('command:') and not command:
+                                parts = line.split('command:', 1)
+                                if len(parts) > 1:
+                                    command = parts[1].lstrip(' :')
+                    
+                    # If still missing, use defaults
+                    if not analysis:
+                        analysis = "No analysis provided"
+                    if not explanation:
+                        explanation = "No explanation provided"
+                    if not command:
+                        command = "execution = tool.execute(error='No command provided')"
+                    
+                    # Create ToolCommand object manually
+                    tool_command = ToolCommand(
+                        analysis=analysis,
+                        explanation=explanation,
+                        command=command
+                    )
+                    print(f"Created ToolCommand object from string: analysis='{analysis[:50]}...', explanation='{explanation[:50]}...', command='{command[:50]}...'")
+                    
+                except Exception as parse_error:
+                    print(f"Error parsing string response: {parse_error}")
+                    # Create a default ToolCommand object
+                    tool_command = ToolCommand(
+                        analysis="Error parsing analysis",
+                        explanation="Error parsing explanation",
+                        command="execution = tool.execute(error='Error parsing command')"
+                    )
+            
             # Add usage information to the tool command for tracking
             if hasattr(tool_command, 'metadata'):
                 tool_command.metadata = getattr(tool_command, 'metadata', {})
@@ -209,7 +291,7 @@ Remember: Your <command> field MUST be valid Python code including any necessary
                 command=f"execution = tool.execute(error='Command generation failed: {error_msg}')"
             )
 
-    def extract_explanation_and_command(self, response: ToolCommand) -> tuple:
+    def extract_explanation_and_command(self, response) -> tuple:
         def normalize_code(code: str) -> str:
             # Remove ```python at the beginning
             code = re.sub(r'^```python\s*', '', code)
@@ -217,10 +299,94 @@ Remember: Your <command> field MUST be valid Python code including any necessary
             code = re.sub(r'\s*```\s*$', '', code)
             return code.strip()
         
-        analysis = response.analysis.strip()
-        explanation = response.explanation.strip()
-        command = normalize_code(response.command.strip())
-        return analysis, explanation, command
+        try:
+            # Check if response is a ToolCommand object
+            if hasattr(response, 'analysis') and hasattr(response, 'explanation') and hasattr(response, 'command'):
+                analysis = response.analysis.strip()
+                explanation = response.explanation.strip()
+                command = normalize_code(response.command.strip())
+                return analysis, explanation, command
+            # Check if response is a string (fallback for non-structured models like gpt-4-turbo)
+            elif isinstance(response, str):
+                print("WARNING: Received string response instead of ToolCommand object")
+                # Try to parse the string response to extract analysis, explanation, and command
+                try:
+                    lines = response.split('\n')
+                    analysis = ""
+                    explanation = ""
+                    command = ""
+                    
+                    for line in lines:
+                        line = line.strip()
+                        if line.lower().startswith('<analysis>') or line.lower().startswith('analysis:'):
+                            if '<analysis>' in line.lower():
+                                analysis = line.split('<analysis>')[1].split('</analysis>')[0].strip()
+                            else:
+                                parts = line.split('analysis:', 1)
+                                if len(parts) > 1:
+                                    analysis = parts[1].lstrip(' :')
+                                else:
+                                    analysis = ""
+                        elif line.lower().startswith('<explanation>') or line.lower().startswith('explanation:'):
+                            if '<explanation>' in line.lower():
+                                explanation = line.split('<explanation>')[1].split('</explanation>')[0].strip()
+                            else:
+                                parts = line.split('explanation:', 1)
+                                if len(parts) > 1:
+                                    explanation = parts[1].lstrip(' :')
+                                else:
+                                    explanation = ""
+                        elif line.lower().startswith('<command>') or line.lower().startswith('command:'):
+                            if '<command>' in line.lower():
+                                command = line.split('<command>')[1].split('</command>')[0].strip()
+                            else:
+                                parts = line.split('command:', 1)
+                                if len(parts) > 1:
+                                    command = parts[1].lstrip(' :')
+                                else:
+                                    command = ""
+                    
+                    # If we couldn't parse properly, try alternative patterns
+                    if not analysis or not explanation or not command:
+                        for line in lines:
+                            line = line.strip()
+                            if line.lower().startswith('analysis:') and not analysis:
+                                parts = line.split('analysis:', 1)
+                                if len(parts) > 1:
+                                    analysis = parts[1].lstrip(' :')
+                            elif line.lower().startswith('explanation:') and not explanation:
+                                parts = line.split('explanation:', 1)
+                                if len(parts) > 1:
+                                    explanation = parts[1].lstrip(' :')
+                            elif line.lower().startswith('command:') and not command:
+                                parts = line.split('command:', 1)
+                                if len(parts) > 1:
+                                    command = parts[1].lstrip(' :')
+                    
+                    # If still missing, use defaults
+                    if not analysis:
+                        analysis = "No analysis provided"
+                    if not explanation:
+                        explanation = "No explanation provided"
+                    if not command:
+                        command = "execution = tool.execute(error='No command provided')"
+                    
+                    # Normalize the command
+                    command = normalize_code(command)
+                    
+                    print(f"Parsed from string: analysis='{analysis[:50]}...', explanation='{explanation[:50]}...', command='{command[:50]}...'")
+                    return analysis, explanation, command
+                    
+                except Exception as parse_error:
+                    print(f"Error parsing string response: {parse_error}")
+                    return "Error parsing analysis", "Error parsing explanation", "execution = tool.execute(error='Error parsing command')"
+            else:
+                print(f"Unexpected response type: {type(response)}")
+                return "Unknown analysis", "Unknown explanation", "execution = tool.execute(error='Unknown response type')"
+                
+        except Exception as e:
+            print(f"Error extracting explanation and command: {str(e)}")
+            return "Error extracting analysis", "Error extracting explanation", "execution = tool.execute(error='Error extracting command')"
 
     def execute_tool_command(self, tool_name: str, command: str) -> Any:
         def execute_with_timeout(block: str, local_context: dict) -> Optional[str]:
