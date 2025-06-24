@@ -25,20 +25,69 @@ Always maintain scientific accuracy and provide clear, evidence-based interpreta
 
 # Hugging Face Model Configurations
 HF_MODEL_CONFIGS = {
-    # Llama 3 Models
-    "llama-3-8b": {
-        "model_id": "meta-llama/Meta-Llama-3-8B-Instruct",
-        "model_type": "llama",
-        "max_length": 4096,
-        "temperature": 0.3,
-        "system_prompt": FIBROBLAST_SYSTEM_PROMPT,
-        "capabilities": ["text_generation", "instruction_following"],
-        "expected_cost_per_1k_tokens": 0.0,  # Free when running locally
-        "hardware_requirements": "8GB+ VRAM",
-        "quantization": ["4bit", "8bit"],
+    # 最新OpenAI模型
+    "gpt-4o": {
+        "model_id": "gpt-4o",
+        "model_type": "openai",
+        "hardware_requirements": "OpenAI API",
+        "is_multimodal": True
+    },
+    "gpt-4o-mini": {
+        "model_id": "gpt-4o-mini",
+        "model_type": "openai",
+        "hardware_requirements": "OpenAI API",
+        "is_multimodal": True
+    },
+    "gpt-4-turbo": {
+        "model_id": "gpt-4-turbo",
+        "model_type": "openai",
+        "hardware_requirements": "OpenAI API",
+        "is_multimodal": True
+    },
+    "gpt-3.5-turbo": {
+        "model_id": "gpt-3.5-turbo",
+        "model_type": "openai",
+        "hardware_requirements": "OpenAI API",
         "is_multimodal": False
     },
-    
+    # 流行开源Hugging Face模型
+    "phi-3-mini": {
+        "model_id": "microsoft/phi-3-mini-4k-instruct",
+        "model_type": "hf",
+        "hardware_requirements": "8GB VRAM (4bit)",
+        "is_multimodal": False
+    },
+    "llama-3-8b": {
+        "model_id": "meta-llama/Meta-Llama-3-8B-Instruct",
+        "model_type": "hf",
+        "hardware_requirements": "12GB VRAM (4bit)",
+        "is_multimodal": False
+    },
+    "gemma-2-9b": {
+        "model_id": "google/gemma-2b-it",
+        "model_type": "hf",
+        "hardware_requirements": "8GB VRAM (4bit)",
+        "is_multimodal": False
+    },
+    "mixtral-8x7b": {
+        "model_id": "mistralai/Mixtral-8x7B-Instruct-v0.1",
+        "model_type": "hf",
+        "hardware_requirements": "24GB VRAM (4bit)",
+        "is_multimodal": False
+    },
+    "qwen2-72b": {
+        "model_id": "Qwen/Qwen2-72B-Instruct",
+        "model_type": "hf",
+        "hardware_requirements": "48GB VRAM (4bit)",
+        "is_multimodal": False
+    },
+    "llava-1.5-7b": {
+        "model_id": "llava-hf/llava-1.5-7b-hf",
+        "model_type": "hf",
+        "hardware_requirements": "16GB VRAM (4bit)",
+        "is_multimodal": True
+    },
+    # Llama 3 Models
     "llama-3-70b": {
         "model_id": "meta-llama/Meta-Llama-3-70B-Instruct",
         "model_type": "llama",
@@ -66,19 +115,6 @@ HF_MODEL_CONFIGS = {
         "is_multimodal": False
     },
     
-    "mixtral-8x7b-instruct": {
-        "model_id": "mistralai/Mixtral-8x7B-Instruct-v0.1",
-        "model_type": "mixtral",
-        "max_length": 32768,
-        "temperature": 0.3,
-        "system_prompt": FIBROBLAST_SYSTEM_PROMPT,
-        "capabilities": ["text_generation", "instruction_following"],
-        "expected_cost_per_1k_tokens": 0.0,
-        "hardware_requirements": "24GB+ VRAM",
-        "quantization": ["4bit", "8bit"],
-        "is_multimodal": False
-    },
-    
     # Qwen Models
     "qwen2-7b-instruct": {
         "model_id": "Qwen/Qwen2-7B-Instruct",
@@ -93,33 +129,7 @@ HF_MODEL_CONFIGS = {
         "is_multimodal": False
     },
     
-    "qwen2-72b-instruct": {
-        "model_id": "Qwen/Qwen2-72B-Instruct",
-        "model_type": "qwen2",
-        "max_length": 32768,
-        "temperature": 0.3,
-        "system_prompt": FIBROBLAST_SYSTEM_PROMPT,
-        "capabilities": ["text_generation", "instruction_following"],
-        "expected_cost_per_1k_tokens": 0.0,
-        "hardware_requirements": "48GB+ VRAM",
-        "quantization": ["4bit", "8bit"],
-        "is_multimodal": False
-    },
-    
     # Phi Models
-    "phi-3-mini": {
-        "model_id": "microsoft/Phi-3-mini-4k-instruct",
-        "model_type": "phi",
-        "max_length": 4096,
-        "temperature": 0.3,
-        "system_prompt": FIBROBLAST_SYSTEM_PROMPT,
-        "capabilities": ["text_generation", "instruction_following"],
-        "expected_cost_per_1k_tokens": 0.0,
-        "hardware_requirements": "8GB+ VRAM",
-        "quantization": ["4bit", "8bit"],
-        "is_multimodal": False
-    },
-    
     "phi-3-medium": {
         "model_id": "microsoft/Phi-3-medium-4k-instruct",
         "model_type": "phi",
@@ -134,19 +144,6 @@ HF_MODEL_CONFIGS = {
     },
     
     # Gemma Models
-    "gemma-2-9b-it": {
-        "model_id": "google/gemma-2-9b-it",
-        "model_type": "gemma",
-        "max_length": 8192,
-        "temperature": 0.3,
-        "system_prompt": FIBROBLAST_SYSTEM_PROMPT,
-        "capabilities": ["text_generation", "instruction_following"],
-        "expected_cost_per_1k_tokens": 0.0,
-        "hardware_requirements": "20GB+ VRAM",
-        "quantization": ["4bit", "8bit"],
-        "is_multimodal": False
-    },
-    
     "gemma-2-27b-it": {
         "model_id": "google/gemma-2-27b-it",
         "model_type": "gemma",
