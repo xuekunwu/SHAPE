@@ -606,7 +606,7 @@ def parse_arguments():
     return parser.parse_args()
 
 
-def solve_problem_gradio(user_query, user_image, max_steps=10, max_time=60, api_key=None, llm_model_engine=None, enabled_fibroblast_tools=None, enabled_general_tools=None, clear_previous_viz=False):
+def solve_problem_gradio(user_query, user_image, max_steps=10, max_time=60, llm_model_engine=None, enabled_fibroblast_tools=None, enabled_general_tools=None, clear_previous_viz=False):
     """
     Solve a problem using the Gradio interface with optional visualization clearing.
     
@@ -615,12 +615,14 @@ def solve_problem_gradio(user_query, user_image, max_steps=10, max_time=60, api_
         user_image: The user's image
         max_steps: Maximum number of reasoning steps
         max_time: Maximum analysis time in seconds
-        api_key: OpenAI API key
         llm_model_engine: Language model engine
         enabled_fibroblast_tools: List of enabled fibroblast tools
         enabled_general_tools: List of enabled general tools
         clear_previous_viz: Whether to clear previous visualizations
     """
+    # Get API key from environment variable
+    api_key = os.getenv("OPENAI_API_KEY")
+    
     # Combine the tool lists
     enabled_tools = (enabled_fibroblast_tools or []) + (enabled_general_tools or [])
     
@@ -657,16 +659,15 @@ def solve_problem_gradio(user_query, user_image, max_steps=10, max_time=60, api_
     if api_key is None or api_key.strip() == "":
         return [[gr.ChatMessage(role="assistant", content="""⚠️ **API Key Configuration Required**
 
-To use this application, you need to set up your OpenAI API key. You can do this in one of two ways:
+To use this application, you need to set up your OpenAI API key as an environment variable:
 
-**Option 1: Environment Variable (Recommended)**
+**Environment Variable Setup:**
 Set the `OPENAI_API_KEY` environment variable:
 ```bash
 export OPENAI_API_KEY="your-api-key-here"
 ```
 
-**Option 2: Manual Input**
-If you prefer to enter the API key manually, please contact the administrator to enable manual input mode.
+For Hugging Face Spaces, add this as a secret in your Space settings.
 
 For more information about obtaining an OpenAI API key, visit: https://platform.openai.com/api-keys
 """)]], "", [], "**Progress**: Ready"
@@ -820,20 +821,13 @@ def main(args):
             with gr.Column(scale=1, min_width=250):
                 gr.Markdown("### ⚙️ Model Configuration")
                 
-                # API Key - Manual input option
-                api_key = gr.Textbox(
-                    placeholder="Enter your OpenAI API key",
-                    type="password",
-                    label="🔑 OpenAI API Key",
-                    value=os.getenv("OPENAI_API_KEY", "")
-                )
-
                 # Model and limits
-                multimodal_model_choices = [k for k, v in HF_MODEL_CONFIGS.items() if v.get("is_multimodal")]
+                multimodal_models = [m for m in HF_MODEL_CONFIGS if m.get("is_multimodal")]
+                model_names = [m["name"] for m in multimodal_models]
                 language_model = gr.Dropdown(
-                    choices=multimodal_model_choices,
-                    value=multimodal_model_choices[0] if multimodal_model_choices else None,
-                    label="Multimodal Language Model"
+                    choices=model_names,
+                    value=model_names[0] if model_names else None,
+                    label="Multimodal Large Language Model"
                 )
                 max_steps = gr.Slider(1, 15, value=10, label="Max Reasoning Steps")
                 max_time = gr.Slider(60, 600, value=300, label="Max Analysis Time (seconds)")
@@ -1007,7 +1001,7 @@ def main(args):
         # Button click event
         run_button.click(
             solve_problem_gradio,
-            [user_query, user_image, max_steps, max_time, api_key, language_model, enabled_fibroblast_tools, enabled_general_tools, clear_previous_viz],
+            [user_query, user_image, max_steps, max_time, language_model, enabled_fibroblast_tools, enabled_general_tools, clear_previous_viz],
             [chatbot_output, text_output, gallery_output, progress_md]
         )
 
