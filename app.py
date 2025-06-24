@@ -1102,3 +1102,9 @@ if __name__ == "__main__":
     
     main(args)
 
+# Custom JSON encoder to handle ToolCommand objects
+class CustomEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, ToolCommand):
+            return str(obj)  # Convert ToolCommand to its string representation
+        return super().default(obj)
