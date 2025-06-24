@@ -33,6 +33,164 @@ from octotools.models.memory import Memory
 from octotools.models.executor import Executor
 from octotools.models.utils import make_json_serializable, VisualizationConfig
 
+# Custom model engine for local Hugging Face models
+class LocalModelEngine:
+    def __init__(self, model_config):
+        self.model_config = model_config
+        self.model_id = model_config["model_id"]
+        self.model_type = model_config["model_type"]
+        self._model = None
+        self._processor = None
+        self._tokenizer = None
+        
+    def load_model(self):
+        """Load the local model"""
+        if self._model is None:
+            try:
+                from transformers import AutoProcessor, AutoModelForCausalLM, AutoTokenizer
+                import torch
+                
+                print(f"🔄 Loading local model: {self.model_id}")
+                
+                # Load processor for multimodal models
+                if self.model_config.get("is_multimodal", False):
+                    self._processor = AutoProcessor.from_pretrained(
+                        self.model_id,
+                        trust_remote_code=True
+                    )
+                
+                # Load tokenizer
+                self._tokenizer = AutoTokenizer.from_pretrained(
+                    self.model_id,
+                    trust_remote_code=True,
+                    use_fast=False
+                )
+                
+                # Add padding token if not present
+                if self._tokenizer.pad_token is None:
+                    self._tokenizer.pad_token = self._tokenizer.eos_token
+                
+                # Load model
+                model_kwargs = {
+                    "trust_remote_code": True,
+                    "device_map": "auto",
+                    "torch_dtype": torch.float16
+                }
+                
+                self._model = AutoModelForCausalLM.from_pretrained(
+                    self.model_id,
+                    **model_kwargs
+                )
+                
+                print(f"✅ Local model loaded successfully: {self.model_id}")
+                
+            except Exception as e:
+                print(f"❌ Error loading local model: {e}")
+                raise
+    
+    def generate(self, prompt, system_prompt=None, **kwargs):
+        """Generate text response"""
+        try:
+            if self._model is None:
+                self.load_model()
+            
+            # Prepare input
+            if system_prompt:
+                full_prompt = f"{system_prompt}\n\n{prompt}"
+            else:
+                full_prompt = prompt
+            
+            # Tokenize
+            inputs = self._tokenizer(
+                full_prompt,
+                return_tensors="pt",
+                truncation=True,
+                max_length=kwargs.get("max_length", 2048)
+            )
+            
+            # Move to device
+            inputs = {k: v.to(self._model.device) for k, v in inputs.items()}
+            
+            # Generate
+            with torch.no_grad():
+                outputs = self._model.generate(
+                    **inputs,
+                    max_new_tokens=kwargs.get("max_tokens", 1000),
+                    temperature=kwargs.get("temperature", 0.7),
+                    do_sample=True,
+                    pad_token_id=self._tokenizer.eos_token_id
+                )
+            
+            # Decode
+            response = self._tokenizer.decode(outputs[0], skip_special_tokens=True)
+            
+            # Extract only the generated part
+            input_length = inputs['input_ids'].shape[1]
+            generated_text = response[input_length:].strip()
+            
+            return generated_text
+            
+        except Exception as e:
+            print(f"❌ Error in local text generation: {e}")
+            return f"Error: {str(e)}"
+    
+    def generate_multimodal(self, content, system_prompt=None, **kwargs):
+        """Generate multimodal response"""
+        try:
+            if self._model is None:
+                self.load_model()
+            
+            if not self.model_config.get("is_multimodal", False):
+                return self.generate(content[0] if isinstance(content, list) else content, system_prompt, **kwargs)
+            
+            # Handle multimodal content
+            if isinstance(content, list) and len(content) > 1:
+                text_content = content[0]
+                image_content = content[1]
+                
+                # Convert image content to PIL Image
+                if isinstance(image_content, bytes):
+                    from PIL import Image
+                    import io
+                    image = Image.open(io.BytesIO(image_content)).convert('RGB')
+                else:
+                    image = image_content
+                
+                # Prepare inputs
+                inputs = self._processor(
+                    text=text_content,
+                    images=image,
+                    return_tensors="pt"
+                )
+                
+                # Move to device
+                inputs = {k: v.to(self._model.device) for k, v in inputs.items()}
+                
+                # Generate
+                with torch.no_grad():
+                    outputs = self._model.generate(
+                        **inputs,
+                        max_new_tokens=kwargs.get("max_tokens", 1000),
+                        temperature=kwargs.get("temperature", 0.7),
+                        do_sample=True,
+                        pad_token_id=self._processor.tokenizer.eos_token_id
+                    )
+                
+                # Decode
+                response_text = self._processor.tokenizer.decode(outputs[0], skip_special_tokens=True)
+                
+                # Extract only the generated part
+                input_length = inputs['input_ids'].shape[1]
+                generated_text = response_text[input_length:].strip()
+                
+                return generated_text
+            else:
+                return self.generate(content[0] if isinstance(content, list) else content, system_prompt, **kwargs)
+                
+        except Exception as e:
+            print(f"❌ Error in local multimodal generation: {e}")
+            return f"Error: {str(e)}"
+
 # Custom JSON encoder to handle ToolCommand objects
 class CustomEncoder(json.JSONEncoder):
     def default(self, obj):
@@ -1180,162 +1338,4 @@ if __name__ == "__main__":
         plot_time_distribution(df)
         plot_token_distribution(df)
         plot_success_rate(df)
-
-# Custom model engine for local Hugging Face models
-class LocalModelEngine:
-    def __init__(self, model_config):
-        self.model_config = model_config
-        self.model_id = model_config["model_id"]
-        self.model_type = model_config["model_type"]
-        self._model = None
-        self._processor = None
-        self._tokenizer = None
-        
-    def load_model(self):
-        """Load the local model"""
-        if self._model is None:
-            try:
-                from transformers import AutoProcessor, AutoModelForCausalLM, AutoTokenizer
-                import torch
-                
-                print(f"🔄 Loading local model: {self.model_id}")
-                
-                # Load processor for multimodal models
-                if self.model_config.get("is_multimodal", False):
-                    self._processor = AutoProcessor.from_pretrained(
-                        self.model_id,
-                        trust_remote_code=True
-                    )
-                
-                # Load tokenizer
-                self._tokenizer = AutoTokenizer.from_pretrained(
-                    self.model_id,
-                    trust_remote_code=True,
-                    use_fast=False
-                )
-                
-                # Add padding token if not present
-                if self._tokenizer.pad_token is None:
-                    self._tokenizer.pad_token = self._tokenizer.eos_token
-                
-                # Load model
-                model_kwargs = {
-                    "trust_remote_code": True,
-                    "device_map": "auto",
-                    "torch_dtype": torch.float16
-                }
-                
-                self._model = AutoModelForCausalLM.from_pretrained(
-                    self.model_id,
-                    **model_kwargs
-                )
-                
-                print(f"✅ Local model loaded successfully: {self.model_id}")
-                
-            except Exception as e:
-                print(f"❌ Error loading local model: {e}")
-                raise
-    
-    def generate(self, prompt, system_prompt=None, **kwargs):
-        """Generate text response"""
-        try:
-            if self._model is None:
-                self.load_model()
-            
-            # Prepare input
-            if system_prompt:
-                full_prompt = f"{system_prompt}\n\n{prompt}"
-            else:
-                full_prompt = prompt
-            
-            # Tokenize
-            inputs = self._tokenizer(
-                full_prompt,
-                return_tensors="pt",
-                truncation=True,
-                max_length=kwargs.get("max_length", 2048)
-            )
-            
-            # Move to device
-            inputs = {k: v.to(self._model.device) for k, v in inputs.items()}
-            
-            # Generate
-            with torch.no_grad():
-                outputs = self._model.generate(
-                    **inputs,
-                    max_new_tokens=kwargs.get("max_tokens", 1000),
-                    temperature=kwargs.get("temperature", 0.7),
-                    do_sample=True,
-                    pad_token_id=self._tokenizer.eos_token_id
-                )
-            
-            # Decode
-            response = self._tokenizer.decode(outputs[0], skip_special_tokens=True)
-            
-            # Extract only the generated part
-            input_length = inputs['input_ids'].shape[1]
-            generated_text = response[input_length:].strip()
-            
-            return generated_text
-            
-        except Exception as e:
-            print(f"❌ Error in local text generation: {e}")
-            return f"Error: {str(e)}"
-    
-    def generate_multimodal(self, content, system_prompt=None, **kwargs):
-        """Generate multimodal response"""
-        try:
-            if self._model is None:
-                self.load_model()
-            
-            if not self.model_config.get("is_multimodal", False):
-                return self.generate(content[0] if isinstance(content, list) else content, system_prompt, **kwargs)
-            
-            # Handle multimodal content
-            if isinstance(content, list) and len(content) > 1:
-                text_content = content[0]
-                image_content = content[1]
-                
-                # Convert image content to PIL Image
-                if isinstance(image_content, bytes):
-                    from PIL import Image
-                    import io
-                    image = Image.open(io.BytesIO(image_content)).convert('RGB')
-                else:
-                    image = image_content
-                
-                # Prepare inputs
-                inputs = self._processor(
-                    text=text_content,
-                    images=image,
-                    return_tensors="pt"
-                )
-                
-                # Move to device
-                inputs = {k: v.to(self._model.device) for k, v in inputs.items()}
-                
-                # Generate
-                with torch.no_grad():
-                    outputs = self._model.generate(
-                        **inputs,
-                        max_new_tokens=kwargs.get("max_tokens", 1000),
-                        temperature=kwargs.get("temperature", 0.7),
-                        do_sample=True,
-                        pad_token_id=self._processor.tokenizer.eos_token_id
-                    )
-                
-                # Decode
-                response_text = self._processor.tokenizer.decode(outputs[0], skip_special_tokens=True)
-                
-                # Extract only the generated part
-                input_length = inputs['input_ids'].shape[1]
-                generated_text = response_text[input_length:].strip()
-                
-                return generated_text
-            else:
-                return self.generate(content[0] if isinstance(content, list) else content, system_prompt, **kwargs)
-                
-        except Exception as e:
-            print(f"❌ Error in local multimodal generation: {e}")
-            return f"Error: {str(e)}"
 
