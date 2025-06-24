@@ -11,10 +11,20 @@ from octotools.models.formatters import QueryAnalysis, NextStep, MemoryVerificat
 class Planner:
     def __init__(self, llm_engine_name: str, toolbox_metadata: dict = None, available_tools: List = None, api_key: str = None):
         self.llm_engine_name = llm_engine_name
-        self.llm_engine_mm = ChatOpenAI(model_string=llm_engine_name, is_multimodal=True, api_key=api_key)
+        self.toolbox_metadata = toolbox_metadata or {}
+        self.available_tools = available_tools or []
+        self.api_key = api_key
+        
+        # Initialize LLM engines
         self.llm_engine = ChatOpenAI(model_string=llm_engine_name, is_multimodal=False, api_key=api_key)
-        self.toolbox_metadata = toolbox_metadata if toolbox_metadata is not None else {}
-        self.available_tools = available_tools if available_tools is not None else []
+        self.llm_engine_mm = ChatOpenAI(model_string=llm_engine_name, is_multimodal=True, api_key=api_key)
+        
+        # Initialize response storage
+        self.base_response = None
+        self.query_analysis = None
+        
+        # Initialize token usage tracking
+        self.last_usage = {}
 
     def get_image_info(self, image_path: str) -> Dict[str, Any]:
         image_info = {}
@@ -102,7 +112,17 @@ Please present your analysis in a clear, structured format.
             except Exception as e:
                 print(f"Error reading image file: {str(e)}")
 
-        self.query_analysis = self.llm_engine_mm(input_data, response_format=QueryAnalysis)
+        llm_response = self.llm_engine_mm.generate(input_data, response_format=QueryAnalysis)
+        
+        # Extract content and usage from response
+        if isinstance(llm_response, dict) and 'content' in llm_response:
+            self.query_analysis = llm_response['content']
+            # Store usage info for later access
+            self.last_usage = llm_response.get('usage', {})
+            print(f"Query analysis usage: {self.last_usage}")
+        else:
+            self.query_analysis = llm_response
+            self.last_usage = {}
 
         return str(self.query_analysis).strip()
 
@@ -190,7 +210,18 @@ Example (do not copy, use only as reference):
 <sub_goal>: Detect and count the number of specific objects in the image "example/image.jpg"
 <tool_name>: Object_Detector_Tool
 """
-        next_step = self.llm_engine(prompt_generate_next_step, response_format=NextStep)
+        next_step_response = self.llm_engine.generate(prompt_generate_next_step, response_format=NextStep)
+        
+        # Extract content and usage from response
+        if isinstance(next_step_response, dict) and 'content' in next_step_response:
+            next_step = next_step_response['content']
+            # Store usage info for later access
+            self.last_usage = next_step_response.get('usage', {})
+            print(f"Next step usage: {self.last_usage}")
+        else:
+            next_step = next_step_response
+            self.last_usage = {}
+            
         return next_step
 
     def verificate_memory(self, question: str, image: str, query_analysis: str, memory: Memory, bytes_mode: bool = False) -> MemoryVerification:
@@ -287,7 +318,17 @@ stop_signal: [True or False]
                 print(f"Error reading image file: {str(e)}")
 
         try:
-            stop_verification = self.llm_engine_mm(input_data, response_format=MemoryVerification)
+            llm_response = self.llm_engine_mm.generate(input_data, response_format=MemoryVerification)
+            
+            # Extract content and usage from response
+            if isinstance(llm_response, dict) and 'content' in llm_response:
+                stop_verification = llm_response['content']
+                # Store usage info for later access
+                self.last_usage = llm_response.get('usage', {})
+                print(f"Memory verification usage: {self.last_usage}")
+            else:
+                stop_verification = llm_response
+                self.last_usage = {}
             
             # Debug: Check if the response is properly formatted
             print(f"Stop verification response type: {type(stop_verification)}")
@@ -341,11 +382,20 @@ stop_signal: [True or False]
             print(f"Error in response format parsing: {e}")
             # Fallback: try without response format
             try:
-                raw_response = self.llm_engine_mm(input_data)
-                print(f"Raw response: {raw_response}")
+                raw_response = self.llm_engine_mm.generate(input_data)
+                
+                # Extract content and usage from fallback response
+                if isinstance(raw_response, dict) and 'content' in raw_response:
+                    raw_content = raw_response['content']
+                    self.last_usage = raw_response.get('usage', {})
+                else:
+                    raw_content = raw_response
+                    self.last_usage = {}
+                    
+                print(f"Raw response: {raw_content}")
                 # Create a basic MemoryVerification object with default values
                 stop_verification = MemoryVerification(
-                    analysis=raw_response,
+                    analysis=raw_content,
                     stop_signal=False  # Default to continue
                 )
             except Exception as fallback_error:
@@ -447,7 +497,17 @@ Your response should be well-organized and include the following sections:
             except Exception as e:
                 print(f"Error reading image file: {str(e)}")
 
-        final_output = self.llm_engine_mm(input_data)
+        llm_response = self.llm_engine_mm.generate(input_data)
+        
+        # Extract content and usage from response
+        if isinstance(llm_response, dict) and 'content' in llm_response:
+            final_output = llm_response['content']
+            # Store usage info for later access
+            self.last_usage = llm_response.get('usage', {})
+            print(f"Final output usage: {self.last_usage}")
+        else:
+            final_output = llm_response
+            self.last_usage = {}
 
         return final_output
 
@@ -481,7 +541,17 @@ Answer:
             except Exception as e:
                 print(f"Error reading image file: {str(e)}")
 
-        final_output = self.llm_engine_mm(input_data)
+        llm_response = self.llm_engine_mm.generate(input_data)
+        
+        # Extract content and usage from response
+        if isinstance(llm_response, dict) and 'content' in llm_response:
+            final_output = llm_response['content']
+            # Store usage info for later access
+            self.last_usage = llm_response.get('usage', {})
+            print(f"Direct output usage: {self.last_usage}")
+        else:
+            final_output = llm_response
+            self.last_usage = {}
 
         return final_output
     
