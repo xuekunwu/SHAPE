@@ -499,7 +499,7 @@ def run_llava_inference(image_path, question, model_id):
         if model_config["model_type"] == "openai":
             # Use OpenAI API for inference
             return _run_openai_inference(image_path, question, model_config)
-        elif model_config["model_type"] == "hf":
+        elif model_config["model_type"] in ["hf", "llava", "qwen", "phi", "llama", "mistral", "gemma", "chatglm", "deepseek"]:
             # Use local transformers for inference
             return _run_local_inference(image_path, question, model_config)
         else:
@@ -544,7 +544,7 @@ def _run_openai_inference(image_path: str, question: str, model_config: Dict[str
         
         # Make API call
         response = client.chat.completions.create(
-            model=model_config["name"],
+            model=model_config["model_id"],
             messages=messages,
             max_tokens=model_config.get("max_tokens", 1000),
             temperature=model_config.get("temperature", 0.7)
@@ -553,7 +553,7 @@ def _run_openai_inference(image_path: str, question: str, model_config: Dict[str
         return {
             "response": response.choices[0].message.content,
             "success": True,
-            "model": model_config["name"],
+            "model": model_config["model_id"],
             "usage": {
                 "prompt_tokens": response.usage.prompt_tokens,
                 "completion_tokens": response.usage.completion_tokens,
@@ -573,7 +573,7 @@ def _run_local_inference(image_path: str, question: str, model_config: Dict[str,
     """Run inference using local transformers"""
     try:
         # Load model and processor (with caching)
-        model_name = model_config["name"]
+        model_name = model_config["model_id"]
         
         # Check if model is already loaded
         if not hasattr(_run_local_inference, '_loaded_models'):
@@ -632,7 +632,7 @@ def _run_local_inference(image_path: str, question: str, model_config: Dict[str,
         return {
             "response": generated_text,
             "success": True,
-            "model": model_config["name"],
+            "model": model_config["model_id"],
             "usage": {
                 "input_tokens": input_length,
                 "generated_tokens": len(outputs[0]) - input_length,
