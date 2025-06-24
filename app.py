@@ -210,6 +210,9 @@ class Solver:
         self.total_cost = 0.0
         self.start_time = None
         self.end_time = None
+        
+        # Add step information tracking
+        self.step_info = []  # Store detailed information for each step
 
     def stream_solve_user_problem(self, user_query: str, user_image, api_key: str, messages: List[ChatMessage]) -> Iterator:
         import time
@@ -338,6 +341,21 @@ class Solver:
             if mem_after_query_analysis > self.max_memory:
                 self.max_memory = mem_after_query_analysis
             print(f"Query analysis memory usage: {mem_after_query_analysis:.2f} MB")
+            
+            # Record step information for query analysis
+            step_info = {
+                "step_number": 0,
+                "step_type": "Query Analysis",
+                "tool_name": "Query Analyzer",
+                "description": "Analyze user query and determine required skills and tools",
+                "time": query_analysis_time,
+                "tokens": query_analysis_tokens,
+                "cost": query_analysis_cost,
+                "memory": mem_after_query_analysis,
+                "input_tokens": self.planner.last_usage.get('prompt_tokens', 0) if hasattr(self.planner, 'last_usage') and self.planner.last_usage else 0,
+                "output_tokens": self.planner.last_usage.get('completion_tokens', 0) if hasattr(self.planner, 'last_usage') and self.planner.last_usage else 0
+            }
+            self.step_info.append(step_info)
             
             json_data["query_analysis"] = query_analysis
             query_analysis = query_analysis.replace("Concise Summary:", "**Concise Summary:**\n")
@@ -612,6 +630,23 @@ class Solver:
             step_end = time.time()
             self.step_times.append(step_end - step_start)
 
+            # Record step information for tool execution
+            step_info = {
+                "step_number": step_count,
+                "step_type": "Tool Execution",
+                "tool_name": tool_name,
+                "description": f"Execute {tool_name} with sub-goal: {sub_goal[:100]}...",
+                "time": step_end - step_start,
+                "tokens": tokens_used,
+                "cost": cost,
+                "memory": mem_after,
+                "input_tokens": input_tokens if 'input_tokens' in locals() else 0,
+                "output_tokens": output_tokens if 'output_tokens' in locals() else 0,
+                "context": context[:200] + "..." if len(context) > 200 else context,
+                "sub_goal": sub_goal[:200] + "..." if len(sub_goal) > 200 else sub_goal
+            }
+            self.step_info.append(step_info)
+
             if conclusion == 'STOP':
                 break
 
@@ -675,24 +710,72 @@ class Solver:
                 self.max_memory = mem_after_final_output
             print(f"Final output memory usage: {mem_after_final_output:.2f} MB")
             
+            # Record step information for final output generation
+            final_step_info = {
+                "step_number": len(self.step_info),
+                "step_type": "Final Output Generation",
+                "tool_name": "Direct Output Generator",
+                "description": "Generate final comprehensive answer based on all previous steps",
+                "time": final_output_time,
+                "tokens": final_output_tokens,
+                "cost": final_output_cost,
+                "memory": mem_after_final_output,
+                "input_tokens": self.planner.last_usage.get('prompt_tokens', 0) if hasattr(self.planner, 'last_usage') and self.planner.last_usage else 0,
+                "output_tokens": self.planner.last_usage.get('completion_tokens', 0) if hasattr(self.planner, 'last_usage') and self.planner.last_usage else 0
+            }
+            self.step_info.append(final_step_info)
+            
             # Extract conclusion from the final answer
             if isinstance(direct_output, str):
-                conclusion = direct_output.strip()
+                conclusion_text = direct_output.strip()
             elif isinstance(direct_output, dict):
                 # 你可以自定义错误信息或提取dict中的message
-                conclusion = str(direct_output)
+                conclusion_text = str(direct_output)
             else:
-                conclusion = str(direct_output)
+                conclusion_text = str(direct_output)
             
-            conclusion += f"\n\n---\n"
-            conclusion += f"**Step-wise elapsed time (s):** {self.step_times}\n"
-            conclusion += f"**Total elapsed time (s):** {self.end_time - self.start_time:.2f}\n"
-            conclusion += f"**Step-wise tokens used:** {self.step_tokens}\n"
-            conclusion += f"**Total tokens used:** {self.total_tokens}\n"
-            conclusion += f"**Step-wise memory usage (MB):** {self.step_memory}\n"
-            conclusion += f"**Max memory usage (MB):** {self.max_memory:.2f}\n"
-            conclusion += f"**Step-wise estimated cost ($):** {[round(c,6) for c in self.step_costs]}\n"
-            conclusion += f"**Total estimated cost ($):** {round(self.total_cost,6)}\n"
+            # Step-by-step breakdown
+            conclusion = f"🐙 **Conclusion:**\n{conclusion_text}\n\n---\n"
+            conclusion += f"**📊 Detailed Performance Statistics**\n\n"
+            
+            # Step-by-step breakdown
+            conclusion += f"**Step-by-Step Analysis:**\n"
+            
+            # Display detailed step information
+            for i, step in enumerate(self.step_info):
+                conclusion += f"**Step {step['step_number']}: {step['step_type']}**\n"
+                conclusion += f"  • Tool: {step['tool_name']}\n"
+                conclusion += f"  • Description: {step['description']}\n"
+                conclusion += f"  • Time: {step['time']:.2f}s\n"
+                conclusion += f"  • Tokens: {step['tokens']} (Input: {step['input_tokens']}, Output: {step['output_tokens']})\n"
+                conclusion += f"  • Cost: ${step['cost']:.6f}\n"
+                conclusion += f"  • Memory: {step['memory']:.2f} MB\n"
+                
+                # Add context and sub-goal for tool execution steps
+                if step['step_type'] == "Tool Execution" and 'context' in step:
+                    conclusion += f"  • Context: {step['context']}\n"
+                    conclusion += f"  • Sub-goal: {step['sub_goal']}\n"
+                
+                conclusion += "\n"
+            
+            # Summary statistics
+            conclusion += f"**📈 Summary Statistics:**\n"
+            conclusion += f"  • Total Steps: {len(self.step_times)}\n"
+            conclusion += f"  • Total Time: {self.end_time - self.start_time:.2f}s\n"
+            conclusion += f"  • Total Tokens: {self.total_tokens}\n"
+            conclusion += f"  • Total Cost: ${self.total_cost:.6f}\n"
+            conclusion += f"  • Peak Memory: {self.max_memory:.2f} MB\n"
+            conclusion += f"  • Average Time per Step: {(self.end_time - self.start_time) / len(self.step_times):.2f}s\n"
+            if self.total_tokens > 0:
+                conclusion += f"  • Average Tokens per Step: {self.total_tokens / len(self.step_tokens):.1f}\n"
+                conclusion += f"  • Cost per Token: ${self.total_cost / self.total_tokens:.8f}\n"
+            
+            # Raw data for reference
+            conclusion += f"\n**📋 Raw Data (for reference):**\n"
+            conclusion += f"  • Step Times: {[f'{t:.2f}s' for t in self.step_times]}\n"
+            conclusion += f"  • Step Tokens: {self.step_tokens}\n"
+            conclusion += f"  • Step Costs: {[f'${c:.6f}' for c in self.step_costs]}\n"
+            conclusion += f"  • Step Memory: {[f'{m:.2f}MB' for m in self.step_memory]}\n"
             
             # Add model-specific pricing information
             model_config = None
@@ -702,14 +785,13 @@ class Solver:
                     break
             
             if model_config and 'input_cost_per_1k_tokens' in model_config:
-                conclusion += f"\n**Model:** {self.planner.llm_engine_name}\n"
-                conclusion += f"**Input cost:** ${model_config['input_cost_per_1k_tokens']:.6f} per 1K tokens\n"
-                conclusion += f"**Output cost:** ${model_config['output_cost_per_1k_tokens']:.6f} per 1K tokens\n"
-                conclusion += f"**Pricing based on:** OpenAI Official Pricing (as of 2024)\n"
+                conclusion += f"\n**🔧 Model Configuration:**\n"
+                conclusion += f"  • Model: {self.planner.llm_engine_name}\n"
+                conclusion += f"  • Input Cost: ${model_config['input_cost_per_1k_tokens']:.6f} per 1K tokens\n"
+                conclusion += f"  • Output Cost: ${model_config['output_cost_per_1k_tokens']:.6f} per 1K tokens\n"
+                conclusion += f"  • Pricing Source: OpenAI Official Pricing (2024)\n"
             
-            final_answer = f"🐙 **Conclusion:**\n{conclusion}"
-            # Remove the ChatMessage that displays final answer in reasoning steps
-            # messages.append(ChatMessage(role="assistant", content=f"### 🐙 Final Answer:\n{direct_output}"))
+            final_answer = f"{conclusion}"
             yield messages, final_answer, visual_outputs_for_gradio, visual_description, "**Progress**: Completed!"
 
             # Save the direct output data
