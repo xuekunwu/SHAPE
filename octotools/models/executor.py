@@ -40,9 +40,19 @@ class Executor:
             self.query_cache_dir = os.path.join(self.query_cache_dir, timestamp)
         os.makedirs(self.query_cache_dir, exist_ok=True)
     
-    def generate_tool_command(self, question: str, image: str, context: str, sub_goal: str, tool_name: str, tool_metadata: Dict[str, Any], bytes_mode:bool = False) -> ToolCommand:
+    def generate_tool_command(self, question: str, image: str, context: str, sub_goal: str, tool_name: str, tool_metadata: Dict[str, Any], memory=None, bytes_mode:bool = False) -> ToolCommand:
         actual_image_path = image if not bytes_mode else 'image.jpg'
         safe_path = actual_image_path.replace("\\", "\\\\") if actual_image_path else ""
+        
+        # Get previous tool outputs from memory to pass file paths correctly
+        previous_outputs = {}
+        if memory:
+            actions = memory.get_actions()
+            if actions:
+                # Get the most recent action's result
+                latest_action = actions[-1]
+                if 'result' in latest_action:
+                    previous_outputs = latest_action['result']
         
         # Special handling for Fibroblast_State_Analyzer_Tool to use dynamic metadata file discovery
         if tool_name == "Fibroblast_State_Analyzer_Tool":
@@ -85,6 +95,31 @@ else:
         execution = {"error": "Failed to load metadata: " + str(e), "status": "failed"}"""
             )
         
+        # Special handling for Nuclei_Segmenter_Tool to use processed image from Image_Preprocessor_Tool
+        if tool_name == "Nuclei_Segmenter_Tool" and previous_outputs and 'processed_image_path' in previous_outputs:
+            processed_image_path = previous_outputs['processed_image_path']
+            return ToolCommand(
+                analysis="Using the processed image from Image_Preprocessor_Tool for nuclei segmentation",
+                explanation=f"Using the processed image path '{processed_image_path}' from the previous Image_Preprocessor_Tool step",
+                command=f"""execution = tool.execute(image="{processed_image_path}")"""
+            )
+        
+        # Special handling for Single_Cell_Cropper_Tool to use nuclei mask from Nuclei_Segmenter_Tool
+        if tool_name == "Single_Cell_Cropper_Tool" and previous_outputs and 'visual_outputs' in previous_outputs:
+            # Find nuclei mask file from previous outputs
+            nuclei_mask_path = None
+            for output_path in previous_outputs['visual_outputs']:
+                if 'nuclei_mask' in output_path and output_path.endswith('.png'):
+                    nuclei_mask_path = output_path
+                    break
+            
+            if nuclei_mask_path:
+                return ToolCommand(
+                    analysis="Using the nuclei mask from Nuclei_Segmenter_Tool for single cell cropping",
+                    explanation=f"Using the nuclei mask path '{nuclei_mask_path}' from the previous Nuclei_Segmenter_Tool step",
+                    command=f"""execution = tool.execute(original_image="{actual_image_path}", nuclei_mask="{nuclei_mask_path}", min_area=50, margin=25)"""
+                )
+        
         # For other tools, use the standard prompt
         prompt_generate_tool_command = f"""
 Task: Generate a precise command to execute the selected tool based on the given information.
@@ -95,17 +130,19 @@ Context: {context}
 Sub-Goal: {sub_goal}
 Selected Tool: {tool_name}
 Tool Metadata: {tool_metadata}
+Previous Tool Outputs: {previous_outputs}
 
 IMPORTANT: When the tool requires an image parameter, you MUST use the exact image path provided above: "{safe_path}"
 
 Instructions:
-1. Carefully review all provided information: the query, image path, context, sub-goal, selected tool, and tool metadata.
+1. Carefully review all provided information: the query, image path, context, sub-goal, selected tool, tool metadata, and previous tool outputs.
 2. Analyze the tool's input_types from the metadata to understand required and optional parameters.
-3. Construct a command or series of commands that aligns with the tool's usage pattern and addresses the sub-goal.
-4. Ensure all required parameters are included and properly formatted.
-5. Use appropriate values for parameters based on the given context, particularly the Context field which may contain relevant information from previous steps.
-6. If multiple steps are needed to prepare data for the tool, include them in the command construction.
-7. CRITICAL: If the tool requires an image parameter, use the exact image path "{safe_path}" provided above.
+3. If previous tool outputs are available, use the appropriate file paths from those outputs (e.g., processed_image_path, nuclei_mask paths, etc.).
+4. Construct a command or series of commands that aligns with the tool's usage pattern and addresses the sub-goal.
+5. Ensure all required parameters are included and properly formatted.
+6. Use appropriate values for parameters based on the given context, particularly the Context field which may contain relevant information from previous steps.
+7. If multiple steps are needed to prepare data for the tool, include them in the command construction.
+8. CRITICAL: If the tool requires an image parameter, use the exact image path "{safe_path}" provided above, unless a processed image path is available from previous outputs.
 
 Output Format:
 <analysis>: a step-by-step analysis of the context, sub-goal, and selected tool to guide the command construction.
@@ -129,7 +166,8 @@ Rules:
 8. Ensure the command directly addresses the sub-goal and query.
 9. Include ALL required parameters, data, and paths to execute the tool in the command itself.
 10. If preparation steps are needed, include them as separate Python statements before the tool.execute() calls.
-11. CRITICAL: If the tool requires an image parameter, use the exact image path "{safe_path}" provided above.
+11. CRITICAL: If the tool requires an image parameter, use the exact image path "{safe_path}" provided above, unless a processed image path is available from previous outputs.
+12. If previous tool outputs contain relevant file paths (e.g., processed_image_path, nuclei_mask paths), use those paths instead of the original image path when appropriate.
 
 Examples (Not to use directly unless relevant):
 
@@ -174,7 +212,7 @@ execution = tool.execute(image="path/to/image", labels=["baseball"])
 ```
 Reason: Do not use placeholder paths like "path/to/image". Use the actual image path provided.
 
-Remember: Your <command> field MUST be valid Python code including any necessary data preparation steps and one or more execution = tool.execute( calls, without any additional explanatory text. The format execution = tool.execute must be strictly followed, and the last line must begin with execution = tool.execute to capture the final output. ALWAYS use the actual image path "{safe_path}" when the tool requires an image parameter.
+Remember: Your <command> field MUST be valid Python code including any necessary data preparation steps and one or more execution = tool.execute( calls, without any additional explanatory text. The format execution = tool.execute must be strictly followed, and the last line must begin with execution = tool.execute to capture the final output. ALWAYS use the actual image path "{safe_path}" when the tool requires an image parameter, unless a processed image path is available from previous outputs.
 """
 
         try:
@@ -202,33 +240,30 @@ Remember: Your <command> field MUST be valid Python code including any necessary
                     
                     for line in lines:
                         line = line.strip()
-                        if line.lower().startswith('<analysis>') or line.lower().startswith('analysis:'):
-                            if '<analysis>' in line.lower():
-                                analysis = line.split('<analysis>')[1].split('</analysis>')[0].strip()
+                        if line.lower().startswith('<analysis>') and not line.lower().startswith('<analysis>:'):
+                            analysis = line.split('<analysis>')[1].split('</analysis>')[0].strip()
+                        elif line.lower().startswith('analysis:'):
+                            parts = line.split('analysis:', 1)
+                            if len(parts) > 1:
+                                analysis = parts[1].lstrip(' :')
                             else:
-                                parts = line.split('analysis:', 1)
-                                if len(parts) > 1:
-                                    analysis = parts[1].lstrip(' :')
-                                else:
-                                    analysis = ""
-                        elif line.lower().startswith('<explanation>') or line.lower().startswith('explanation:'):
-                            if '<explanation>' in line.lower():
-                                explanation = line.split('<explanation>')[1].split('</explanation>')[0].strip()
+                                analysis = ""
+                        elif line.lower().startswith('<explanation>') and not line.lower().startswith('<explanation>:'):
+                            explanation = line.split('<explanation>')[1].split('</explanation>')[0].strip()
+                        elif line.lower().startswith('explanation:'):
+                            parts = line.split('explanation:', 1)
+                            if len(parts) > 1:
+                                explanation = parts[1].lstrip(' :')
                             else:
-                                parts = line.split('explanation:', 1)
-                                if len(parts) > 1:
-                                    explanation = parts[1].lstrip(' :')
-                                else:
-                                    explanation = ""
-                        elif line.lower().startswith('<command>') or line.lower().startswith('command:'):
-                            if '<command>' in line.lower():
-                                command = line.split('<command>')[1].split('</command>')[0].strip()
+                                explanation = ""
+                        elif line.lower().startswith('<command>') and not line.lower().startswith('<command>:'):
+                            command = line.split('<command>')[1].split('</command>')[0].strip()
+                        elif line.lower().startswith('command:'):
+                            parts = line.split('command:', 1)
+                            if len(parts) > 1:
+                                command = parts[1].lstrip(' :')
                             else:
-                                parts = line.split('command:', 1)
-                                if len(parts) > 1:
-                                    command = parts[1].lstrip(' :')
-                                else:
-                                    command = ""
+                                command = ""
                     
                     # If we couldn't parse properly, try alternative patterns
                     if not analysis or not explanation or not command:
@@ -318,33 +353,30 @@ Remember: Your <command> field MUST be valid Python code including any necessary
                     
                     for line in lines:
                         line = line.strip()
-                        if line.lower().startswith('<analysis>') or line.lower().startswith('analysis:'):
-                            if '<analysis>' in line.lower():
-                                analysis = line.split('<analysis>')[1].split('</analysis>')[0].strip()
+                        if line.lower().startswith('<analysis>') and not line.lower().startswith('<analysis>:'):
+                            analysis = line.split('<analysis>')[1].split('</analysis>')[0].strip()
+                        elif line.lower().startswith('analysis:'):
+                            parts = line.split('analysis:', 1)
+                            if len(parts) > 1:
+                                analysis = parts[1].lstrip(' :')
                             else:
-                                parts = line.split('analysis:', 1)
-                                if len(parts) > 1:
-                                    analysis = parts[1].lstrip(' :')
-                                else:
-                                    analysis = ""
-                        elif line.lower().startswith('<explanation>') or line.lower().startswith('explanation:'):
-                            if '<explanation>' in line.lower():
-                                explanation = line.split('<explanation>')[1].split('</explanation>')[0].strip()
+                                analysis = ""
+                        elif line.lower().startswith('<explanation>') and not line.lower().startswith('<explanation>:'):
+                            explanation = line.split('<explanation>')[1].split('</explanation>')[0].strip()
+                        elif line.lower().startswith('explanation:'):
+                            parts = line.split('explanation:', 1)
+                            if len(parts) > 1:
+                                explanation = parts[1].lstrip(' :')
                             else:
-                                parts = line.split('explanation:', 1)
-                                if len(parts) > 1:
-                                    explanation = parts[1].lstrip(' :')
-                                else:
-                                    explanation = ""
-                        elif line.lower().startswith('<command>') or line.lower().startswith('command:'):
-                            if '<command>' in line.lower():
-                                command = line.split('<command>')[1].split('</command>')[0].strip()
+                                explanation = ""
+                        elif line.lower().startswith('<command>') and not line.lower().startswith('<command>:'):
+                            command = line.split('<command>')[1].split('</command>')[0].strip()
+                        elif line.lower().startswith('command:'):
+                            parts = line.split('command:', 1)
+                            if len(parts) > 1:
+                                command = parts[1].lstrip(' :')
                             else:
-                                parts = line.split('command:', 1)
-                                if len(parts) > 1:
-                                    command = parts[1].lstrip(' :')
-                                else:
-                                    command = ""
+                                command = ""
                     
                     # If we couldn't parse properly, try alternative patterns
                     if not analysis or not explanation or not command:
