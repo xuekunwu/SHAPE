@@ -106,8 +106,8 @@ class Initializer:
             print(f"\nChecking availability of {tool_name}...")
 
             try:
-                # Import the tool module
-                module_name = f"tools.{tool_name.lower().replace('_tool', '')}.tool"
+                # Import the tool module - fix the import path
+                module_name = f"octotools.tools.{tool_name.lower().replace('_tool', '').replace('_', '')}.tool"
                 module = importlib.import_module(module_name)
 
                 # Get the tool class
