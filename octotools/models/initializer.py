@@ -110,13 +110,39 @@ class Initializer:
                 # Import the tool module - fix the import path
                 # tool_name is the class name (e.g., FibroblastActivationScorerTool)
                 # We need to convert it to directory name format
-                if tool_name.lower().endswith('tool'):
-                    # Remove 'tool' suffix and convert to directory format
-                    base_name = tool_name[:-5]  # Remove 'Tool'
-                    # Convert CamelCase to snake_case for directory name
-                    tool_dir = re.sub(r'(?<!^)(?=[A-Z])', '_', base_name).lower()
+                
+                # 创建工具名称到目录名称的映射（类名格式：CamelCase）
+                tool_to_dir_mapping = {
+                    'FibroblastActivationScorerTool': 'fibroblast_activation_scorer',
+                    'FibroblastStateAnalyzerTool': 'fibroblast_state_analyzer',
+                    'ImagePreprocessorTool': 'image_preprocessor',
+                    'NucleiSegmenterTool': 'nuclei_segmenter',
+                    'SingleCellCropperTool': 'single_cell_cropper',
+                    'GeneralistSolutionGeneratorTool': 'generalist_solution_generator',
+                    'PythonCodeGeneratorTool': 'python_code_generator',
+                    'ArxivPaperSearcherTool': 'arxiv_paper_searcher',
+                    'PubmedSearchTool': 'pubmed_search',
+                    'NatureNewsFetcherTool': 'nature_news_fetcher',
+                    'GoogleSearchTool': 'google_search',
+                    'WikipediaKnowledgeSearcherTool': 'wikipedia_knowledge_searcher',
+                    'UrlTextExtractorTool': 'url_text_extractor',
+                    'ObjectDetectorTool': 'object_detector',
+                    'ImageCaptionerTool': 'image_captioner',
+                    'RelevantPatchZoomerTool': 'relevant_patch_zoomer',
+                    'TextDetectorTool': 'text_detector',
+                    'AdvancedObjectDetectorTool': 'advanced_object_detector'
+                }
+                
+                # 使用映射或默认转换
+                if tool_name in tool_to_dir_mapping:
+                    tool_dir = tool_to_dir_mapping[tool_name]
                 else:
-                    tool_dir = tool_name.lower()
+                    # 默认转换：去掉 Tool 后缀，转换为小写
+                    if tool_name.lower().endswith('tool'):
+                        base_name = tool_name[:-4] if tool_name.endswith('Tool') else tool_name[:-5]
+                        tool_dir = base_name.lower()
+                    else:
+                        tool_dir = tool_name.lower()
                 
                 module_name = f"octotools.tools.{tool_dir}.tool"
                 print(f"Attempting to import: {module_name}")
@@ -174,14 +200,69 @@ class Initializer:
     def _set_up_tools(self) -> None:
         print("Setting up tools...")
 
+        # 创建工具名称到目录名称的映射（工具名格式：带下划线）
+        tool_to_dir_mapping = {
+            'Fibroblast_Activation_Scorer_Tool': 'fibroblast_activation_scorer',
+            'Fibroblast_State_Analyzer_Tool': 'fibroblast_state_analyzer',
+            'Image_Preprocessor_Tool': 'image_preprocessor',
+            'Nuclei_Segmenter_Tool': 'nuclei_segmenter',
+            'Single_Cell_Cropper_Tool': 'single_cell_cropper',
+            'Generalist_Solution_Generator_Tool': 'generalist_solution_generator',
+            'Python_Code_Generator_Tool': 'python_code_generator',
+            'Arxiv_Paper_Searcher_Tool': 'arxiv_paper_searcher',
+            'Pubmed_Search_Tool': 'pubmed_search',
+            'Nature_News_Fetcher_Tool': 'nature_news_fetcher',
+            'Google_Search_Tool': 'google_search',
+            'Wikipedia_Knowledge_Searcher_Tool': 'wikipedia_knowledge_searcher',
+            'Url_Text_Extractor_Tool': 'url_text_extractor',
+            'Object_Detector_Tool': 'object_detector',
+            'Image_Captioner_Tool': 'image_captioner',
+            'Relevant_Patch_Zoomer_Tool': 'relevant_patch_zoomer',
+            'Text_Detector_Tool': 'text_detector',
+            'Advanced_Object_Detector_Tool': 'advanced_object_detector'
+        }
+        
+        # 创建目录名称到类名的映射
+        dir_to_class_mapping = {
+            'fibroblast_activation_scorer': 'FibroblastActivationScorerTool',
+            'fibroblast_state_analyzer': 'FibroblastStateAnalyzerTool',
+            'image_preprocessor': 'ImagePreprocessorTool',
+            'nuclei_segmenter': 'NucleiSegmenterTool',
+            'single_cell_cropper': 'SingleCellCropperTool',
+            'generalist_solution_generator': 'GeneralistSolutionGeneratorTool',
+            'python_code_generator': 'PythonCodeGeneratorTool',
+            'arxiv_paper_searcher': 'ArxivPaperSearcherTool',
+            'pubmed_search': 'PubmedSearchTool',
+            'nature_news_fetcher': 'NatureNewsFetcherTool',
+            'google_search': 'GoogleSearchTool',
+            'wikipedia_knowledge_searcher': 'WikipediaKnowledgeSearcherTool',
+            'url_text_extractor': 'UrlTextExtractorTool',
+            'object_detector': 'ObjectDetectorTool',
+            'image_captioner': 'ImageCaptionerTool',
+            'relevant_patch_zoomer': 'RelevantPatchZoomerTool',
+            'text_detector': 'TextDetectorTool',
+            'advanced_object_detector': 'AdvancedObjectDetectorTool'
+        }
+        
         # Keep enabled tools - 修复工具名称处理逻辑
         self.available_tools = []
         for tool in self.enabled_tools:
-            if tool.lower().endswith('_tool'):
-                tool_dir = tool[:-5].lower()  # 去掉 _Tool 或 _tool
+            if tool in tool_to_dir_mapping:
+                tool_dir = tool_to_dir_mapping[tool]
+                # 将目录名转换为类名并存储
+                if tool_dir in dir_to_class_mapping:
+                    class_name = dir_to_class_mapping[tool_dir]
+                    self.available_tools.append(class_name)
             else:
-                tool_dir = tool.lower()
-            self.available_tools.append(tool_dir)
+                # 默认转换：去掉 _Tool 后缀，转换为小写
+                if tool.lower().endswith('_tool'):
+                    tool_dir = tool[:-5].lower()  # 去掉 _Tool 或 _tool
+                else:
+                    tool_dir = tool.lower()
+                # 尝试转换为类名
+                if tool_dir in dir_to_class_mapping:
+                    class_name = dir_to_class_mapping[tool_dir]
+                    self.available_tools.append(class_name)
         
         # Load tools and get metadata
         self.load_tools_and_get_metadata()
