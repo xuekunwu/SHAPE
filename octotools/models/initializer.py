@@ -4,6 +4,7 @@ import importlib
 import inspect
 import traceback
 from typing import Dict, Any, List, Tuple
+from octotools.tools.activation_scorer.tool import ActivationScorerTool
 
 
 class Initializer:
