@@ -4,7 +4,7 @@ import importlib
 import inspect
 import traceback
 from typing import Dict, Any, List, Tuple
-from octotools.tools.activation_scorer.tool import ActivationScorerTool
+from octotools.tools.fibroblast_activation_scorer.tool import FibroblastActivationScorerTool
 
 
 class Initializer:
