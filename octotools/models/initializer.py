@@ -107,7 +107,10 @@ class Initializer:
 
             try:
                 # Import the tool module - fix the import path
-                module_name = f"octotools.tools.{tool_name.lower().replace('_tool', '').replace('_', '')}.tool"
+                # Convert tool name to directory name format (keep underscores)
+                tool_dir = tool_name.lower().replace('_tool', '')
+                module_name = f"octotools.tools.{tool_dir}.tool"
+                print(f"Attempting to import: {module_name}")
                 module = importlib.import_module(module_name)
 
                 # Get the tool class
