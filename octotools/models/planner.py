@@ -239,6 +239,30 @@ Please present your analysis in a clear, structured format.
             return "Error extracting context", "Error extracting sub-goal", "Error extracting tool name"
 
     def generate_next_step(self, question: str, image: str, query_analysis: str, memory: Memory, step_count: int, max_step_count: int, bytes_mode: bool = False) -> NextStep:
+        # --- Enforce strict tool dependency chain ---
+        TOOL_CHAIN = [
+            "Image_Preprocessor_Tool",
+            "Nuclei_Segmenter_Tool",
+            "Single_Cell_Cropper_Tool",
+            "Fibroblast_State_Analyzer_Tool",
+            "Fibroblast_Activation_Scorer_Tool"
+        ]
+        # Get finished tools from memory
+        finished_tools = [action['tool_name'] for action in memory.get_actions() if 'tool_name' in action]
+        # Find the next tool in the chain that hasn't been run
+        for tool in TOOL_CHAIN:
+            if tool in self.available_tools and tool not in finished_tools:
+                justification = f"Pipeline requires running {tool} after {finished_tools[-1] if finished_tools else 'start'}."
+                # You can further parse memory to provide more detailed context/sub_goal
+                context = f"Use output of previous step as input for {tool}."
+                sub_goal = f"Run {tool} on the output of previous step."
+                return NextStep(
+                    justification=justification,
+                    context=context,
+                    sub_goal=sub_goal,
+                    tool_name=tool
+                )
+        # If all tools in the chain are finished, fall back to LLM logic
         prompt_generate_next_step = f"""
 Task: Determine the optimal next step to address the given query based on the provided analysis, available tools, and previous steps taken.
 
