@@ -4,6 +4,7 @@ import importlib
 import inspect
 import traceback
 from typing import Dict, Any, List, Tuple
+import re
 
 
 class Initializer:
@@ -107,8 +108,16 @@ class Initializer:
 
             try:
                 # Import the tool module - fix the import path
-                # Convert tool name to directory name format (keep underscores)
-                tool_dir = tool_name.lower().replace('_tool', '')
+                # tool_name is the class name (e.g., FibroblastActivationScorerTool)
+                # We need to convert it to directory name format
+                if tool_name.lower().endswith('tool'):
+                    # Remove 'tool' suffix and convert to directory format
+                    base_name = tool_name[:-5]  # Remove 'Tool'
+                    # Convert CamelCase to snake_case for directory name
+                    tool_dir = re.sub(r'(?<!^)(?=[A-Z])', '_', base_name).lower()
+                else:
+                    tool_dir = tool_name.lower()
+                
                 module_name = f"octotools.tools.{tool_dir}.tool"
                 print(f"Attempting to import: {module_name}")
                 module = importlib.import_module(module_name)
@@ -165,8 +174,14 @@ class Initializer:
     def _set_up_tools(self) -> None:
         print("Setting up tools...")
 
-        # Keep enabled tools
-        self.available_tools = [tool.lower().replace('_tool', '') for tool in self.enabled_tools]
+        # Keep enabled tools - 修复工具名称处理逻辑
+        self.available_tools = []
+        for tool in self.enabled_tools:
+            if tool.lower().endswith('_tool'):
+                tool_dir = tool[:-5].lower()  # 去掉 _Tool 或 _tool
+            else:
+                tool_dir = tool.lower()
+            self.available_tools.append(tool_dir)
         
         # Load tools and get metadata
         self.load_tools_and_get_metadata()
