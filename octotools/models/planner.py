@@ -247,22 +247,37 @@ Please present your analysis in a clear, structured format.
             "Fibroblast_State_Analyzer_Tool",
             "Fibroblast_Activation_Scorer_Tool"
         ]
-        # Get finished tools from memory
-        finished_tools = [action['tool_name'] for action in memory.get_actions() if 'tool_name' in action]
-        # Find the next tool in the chain that hasn't been run
-        for tool in TOOL_CHAIN:
-            if tool in self.available_tools and tool not in finished_tools:
-                justification = f"Pipeline requires running {tool} after {finished_tools[-1] if finished_tools else 'start'}."
-                # You can further parse memory to provide more detailed context/sub_goal
-                context = f"Use output of previous step as input for {tool}."
-                sub_goal = f"Run {tool} on the output of previous step."
-                return NextStep(
-                    justification=justification,
-                    context=context,
-                    sub_goal=sub_goal,
-                    tool_name=tool
-                )
-        # If all tools in the chain are finished, fall back to LLM logic
+        
+        # Check if this is a fibroblast analysis query (contains keywords)
+        fibroblast_keywords = ["fibroblast", "activation", "cell state", "cell analysis", "quantify", "score"]
+        is_fibroblast_query = any(keyword.lower() in question.lower() for keyword in fibroblast_keywords)
+        
+        # If this is a fibroblast analysis query, enforce the strict dependency chain
+        if is_fibroblast_query:
+            # Get finished tools from memory
+            finished_tools = [action['tool_name'] for action in memory.get_actions() if 'tool_name' in action]
+            print(f"DEBUG: Finished tools: {finished_tools}")
+            print(f"DEBUG: Available tools: {self.available_tools}")
+            
+            # Find the next tool in the chain that hasn't been run
+            for tool in TOOL_CHAIN:
+                if tool in self.available_tools and tool not in finished_tools:
+                    justification = f"Pipeline requires running {tool} after {finished_tools[-1] if finished_tools else 'start'}."
+                    # You can further parse memory to provide more detailed context/sub_goal
+                    context = f"Use output of previous step as input for {tool}."
+                    sub_goal = f"Run {tool} on the output of previous step."
+                    print(f"DEBUG: Enforcing dependency chain - next tool: {tool}")
+                    return NextStep(
+                        justification=justification,
+                        context=context,
+                        sub_goal=sub_goal,
+                        tool_name=tool
+                    )
+            
+            # If all tools in the chain are finished, fall back to LLM logic
+            print(f"DEBUG: All tools in chain finished, falling back to LLM logic")
+        
+        # If not a fibroblast query or all tools finished, use LLM logic
         prompt_generate_next_step = f"""
 Task: Determine the optimal next step to address the given query based on the provided analysis, available tools, and previous steps taken.
 
@@ -319,8 +334,6 @@ Rules:
 - The tool name MUST exactly match one from the available tools list: {self.available_tools}.
 - Avoid redundancy by considering previous steps and building on prior results.
 - For analysis workflows: If data is prepared (e.g., cell crops generated), prioritize analysis tools over further data preparation.
-
-CRITICAL RULE: For any query related to fibroblast analysis, if the memory is empty or does not contain a result from `Image_Preprocessor_Tool`, the first step (step_count=1) MUST be to use `Image_Preprocessor_Tool` to process the image. This ensures a standardized starting point for the analysis pipeline.
 
 Example (do not copy, use only as reference):
 <justification>: [Your detailed explanation here]
