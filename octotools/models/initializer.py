@@ -107,42 +107,15 @@ class Initializer:
             print(f"\nChecking availability of {tool_name}...")
 
             try:
-                # Import the tool module - fix the import path
-                # tool_name is the class name (e.g., FibroblastActivationScorerTool)
-                # We need to convert it to directory name format
+                # Import the tool module - simplified import logic
+                # tool_name is class name (e.g. Fibroblast_Activation_Scorer_Tool)
+                # need to convert to directory name format
                 
-                # 创建工具名称到目录名称的映射（类名格式：CamelCase）
-                tool_to_dir_mapping = {
-                    'FibroblastActivationScorerTool': 'fibroblast_activation_scorer',
-                    'FibroblastStateAnalyzerTool': 'fibroblast_state_analyzer',
-                    'ImagePreprocessorTool': 'image_preprocessor',
-                    'NucleiSegmenterTool': 'nuclei_segmenter',
-                    'SingleCellCropperTool': 'single_cell_cropper',
-                    'GeneralistSolutionGeneratorTool': 'generalist_solution_generator',
-                    'PythonCodeGeneratorTool': 'python_code_generator',
-                    'ArxivPaperSearcherTool': 'arxiv_paper_searcher',
-                    'PubmedSearchTool': 'pubmed_search',
-                    'NatureNewsFetcherTool': 'nature_news_fetcher',
-                    'GoogleSearchTool': 'google_search',
-                    'WikipediaKnowledgeSearcherTool': 'wikipedia_knowledge_searcher',
-                    'UrlTextExtractorTool': 'url_text_extractor',
-                    'ObjectDetectorTool': 'object_detector',
-                    'ImageCaptionerTool': 'image_captioner',
-                    'RelevantPatchZoomerTool': 'relevant_patch_zoomer',
-                    'TextDetectorTool': 'text_detector',
-                    'AdvancedObjectDetectorTool': 'advanced_object_detector'
-                }
-                
-                # 使用映射或默认转换
-                if tool_name in tool_to_dir_mapping:
-                    tool_dir = tool_to_dir_mapping[tool_name]
+                # Remove _Tool suffix and convert to lowercase as directory name
+                if tool_name.lower().endswith('_tool'):
+                    tool_dir = tool_name[:-5].lower()  # Remove _Tool or _tool
                 else:
-                    # 默认转换：去掉 Tool 后缀，转换为小写
-                    if tool_name.lower().endswith('tool'):
-                        base_name = tool_name[:-4] if tool_name.endswith('Tool') else tool_name[:-5]
-                        tool_dir = base_name.lower()
-                    else:
-                        tool_dir = tool_name.lower()
+                    tool_dir = tool_name.lower()
                 
                 module_name = f"octotools.tools.{tool_dir}.tool"
                 print(f"Attempting to import: {module_name}")
@@ -160,31 +133,8 @@ class Initializer:
                     inputs['api_key'] = self.api_key
                 tool_instance = tool_class(**inputs)
 
-                # FIXME This is a temporary workaround to avoid running demo commands
+                # Add to available tools list
                 self.available_tools.append(tool_name)
-
-                # # TODO Run the first demo command if available
-                # demo_commands = tool_data.get('demo_commands', [])
-                # if demo_commands:
-                #     print(f"Running demo command: {demo_commands[0]['command']}")
-                #     # Extract the arguments from the demo command
-                #     command = demo_commands[0]['command']
-                #     args_start = command.index('(') + 1
-                #     args_end = command.rindex(')')
-                #     args_str = command[args_start:args_end]
-
-                #     # Create a dictionary of arguments
-                #     args_dict = eval(f"dict({args_str})")
-
-                #     # Execute the demo command
-                #     result = tool_instance.execute(**args_dict)
-                #     print(f"Demo command executed successfully. Result: {result}")
-
-                #     self.available_tools.append(tool_name)
-                # else:
-                #     print(f"No demo commands available for {tool_name}")
-                #     # If no demo commands, we'll assume the tool is available
-                #     self.available_tools.append(tool_name)
 
             except Exception as e:
                 print(f"Error checking availability of {tool_name}: {str(e)}")
@@ -200,69 +150,15 @@ class Initializer:
     def _set_up_tools(self) -> None:
         print("Setting up tools...")
 
-        # 创建工具名称到目录名称的映射（工具名格式：带下划线）
-        tool_to_dir_mapping = {
-            'Fibroblast_Activation_Scorer_Tool': 'fibroblast_activation_scorer',
-            'Fibroblast_State_Analyzer_Tool': 'fibroblast_state_analyzer',
-            'Image_Preprocessor_Tool': 'image_preprocessor',
-            'Nuclei_Segmenter_Tool': 'nuclei_segmenter',
-            'Single_Cell_Cropper_Tool': 'single_cell_cropper',
-            'Generalist_Solution_Generator_Tool': 'generalist_solution_generator',
-            'Python_Code_Generator_Tool': 'python_code_generator',
-            'Arxiv_Paper_Searcher_Tool': 'arxiv_paper_searcher',
-            'Pubmed_Search_Tool': 'pubmed_search',
-            'Nature_News_Fetcher_Tool': 'nature_news_fetcher',
-            'Google_Search_Tool': 'google_search',
-            'Wikipedia_Knowledge_Searcher_Tool': 'wikipedia_knowledge_searcher',
-            'Url_Text_Extractor_Tool': 'url_text_extractor',
-            'Object_Detector_Tool': 'object_detector',
-            'Image_Captioner_Tool': 'image_captioner',
-            'Relevant_Patch_Zoomer_Tool': 'relevant_patch_zoomer',
-            'Text_Detector_Tool': 'text_detector',
-            'Advanced_Object_Detector_Tool': 'advanced_object_detector'
-        }
-        
-        # 创建目录名称到类名的映射
-        dir_to_class_mapping = {
-            'fibroblast_activation_scorer': 'FibroblastActivationScorerTool',
-            'fibroblast_state_analyzer': 'FibroblastStateAnalyzerTool',
-            'image_preprocessor': 'ImagePreprocessorTool',
-            'nuclei_segmenter': 'NucleiSegmenterTool',
-            'single_cell_cropper': 'SingleCellCropperTool',
-            'generalist_solution_generator': 'GeneralistSolutionGeneratorTool',
-            'python_code_generator': 'PythonCodeGeneratorTool',
-            'arxiv_paper_searcher': 'ArxivPaperSearcherTool',
-            'pubmed_search': 'PubmedSearchTool',
-            'nature_news_fetcher': 'NatureNewsFetcherTool',
-            'google_search': 'GoogleSearchTool',
-            'wikipedia_knowledge_searcher': 'WikipediaKnowledgeSearcherTool',
-            'url_text_extractor': 'UrlTextExtractorTool',
-            'object_detector': 'ObjectDetectorTool',
-            'image_captioner': 'ImageCaptionerTool',
-            'relevant_patch_zoomer': 'RelevantPatchZoomerTool',
-            'text_detector': 'TextDetectorTool',
-            'advanced_object_detector': 'AdvancedObjectDetectorTool'
-        }
-        
-        # Keep enabled tools - 修复工具名称处理逻辑
+        # Keep enabled tools - simplified logic, use enabled_tools directly
         self.available_tools = []
         for tool in self.enabled_tools:
-            if tool in tool_to_dir_mapping:
-                tool_dir = tool_to_dir_mapping[tool]
-                # 将目录名转换为类名并存储
-                if tool_dir in dir_to_class_mapping:
-                    class_name = dir_to_class_mapping[tool_dir]
-                    self.available_tools.append(class_name)
+            # Remove _Tool suffix and convert to lowercase as directory name
+            if tool.lower().endswith('_tool'):
+                tool_dir = tool[:-5].lower()  # Remove _Tool or _tool
             else:
-                # 默认转换：去掉 _Tool 后缀，转换为小写
-                if tool.lower().endswith('_tool'):
-                    tool_dir = tool[:-5].lower()  # 去掉 _Tool 或 _tool
-                else:
-                    tool_dir = tool.lower()
-                # 尝试转换为类名
-                if tool_dir in dir_to_class_mapping:
-                    class_name = dir_to_class_mapping[tool_dir]
-                    self.available_tools.append(class_name)
+                tool_dir = tool.lower()
+            self.available_tools.append(tool_dir)
         
         # Load tools and get metadata
         self.load_tools_and_get_metadata()
