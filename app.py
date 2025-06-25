@@ -1304,7 +1304,7 @@ def main(args):
                             ["Fibroblast State Analysis", "examples/A5_01_1_1_Phase Contrast_001.png", "Analyze the fibroblast cell states in this image.", 
                              "Image_Preprocessor_Tool, Nuclei_Segmenter_Tool, Single_Cell_Cropper_Tool, Fibroblast_State_Analyzer_Tool", "540 cells identified and segmented successfully. Comprehensive analysis of fibroblast cell states have been performed with visualizations."],
                             # 新增激活分数示例
-                            ["Fibroblast Activation Scoring", "examples/A5_01_1_1_Phase Contrast_001.png", "Quantify the activation score of each fibroblast in this image using the reference map.",
+                            ["Fibroblast Activation Scoring", "examples/fibroblast.png", "Quantify the activation score of each fibroblast in this image using the reference map.",
                              "Image_Preprocessor_Tool, Nuclei_Segmenter_Tool, Single_Cell_Cropper_Tool, Fibroblast_State_Analyzer_Tool, Fibroblast_Activation_Scorer_Tool", "Activation scores for all fibroblasts have been computed and normalized based on the reference map."]
                         ]
                         
