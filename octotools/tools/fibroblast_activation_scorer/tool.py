@@ -138,7 +138,7 @@ class Fibroblast_Activation_Scorer_Tool(BaseTool):
         try:
             print(f"Downloading reference file from {repo_id}...")
             reference_path = hf_hub_download(
-                repo_id="5xuekun/adata_reference_dataset",
+                repo_id="5xuekun/adata_reference",
                 filename="adata_reference.h5ad",
                 repo_type="dataset"
             )
