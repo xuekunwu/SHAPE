@@ -137,13 +137,13 @@ class Fibroblast_Activation_Scorer_Tool(BaseTool):
         
         try:
             print(f"Downloading reference file from {repo_id}...")
-            local_path = hf_hub_download(
-                repo_id=repo_id,
-                filename=filename,
+            reference_path = hf_hub_download(
+                repo_id="5xuekun/adata_reference_dataset",
+                filename="adata_reference.h5ad",
                 repo_type="dataset"
             )
-            print(f"Reference file downloaded to: {local_path}")
-            return local_path
+            print(f"Reference file downloaded to: {reference_path}")
+            return reference_path
         except Exception as e:
             raise Exception(f"Failed to download reference file from {repo_id}: {str(e)}")
     
