@@ -7,7 +7,7 @@ from typing import Dict, Any, List, Tuple
 from octotools.engine.openai import ChatOpenAI
 from octotools.models.memory import Memory
 from octotools.models.formatters import QueryAnalysis, NextStep, MemoryVerification
-from octotools.tools.activation_scorer.tool import ActivationScorerTool
+from octotools.tools.fibroblast_activation_scorer.tool import FibroblastActivationScorerTool
 
 class Planner:
     def __init__(self, llm_engine_name: str, toolbox_metadata: dict = None, available_tools: List = None, api_key: str = None):
@@ -26,6 +26,12 @@ class Planner:
         
         # Initialize token usage tracking
         self.last_usage = {}
+
+        # Ensure Fibroblast_Activation_Scorer_Tool is in available_tools and toolbox_metadata
+        if "Fibroblast_Activation_Scorer_Tool" not in self.available_tools:
+            self.available_tools.append("Fibroblast_Activation_Scorer_Tool")
+        if "Fibroblast_Activation_Scorer_Tool" not in self.toolbox_metadata:
+            self.toolbox_metadata["Fibroblast_Activation_Scorer_Tool"] = FibroblastActivationScorerTool
 
     def get_image_info(self, image_path: str) -> Dict[str, Any]:
         image_info = {}
