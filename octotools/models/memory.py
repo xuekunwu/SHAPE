@@ -79,6 +79,6 @@ class Memory:
     def get_files(self) -> List[Dict[str, str]]:
         return self.files
     
-    def get_actions(self) -> Dict[str, Dict[str, Any]]:
-        return self.actions
+    def get_actions(self) -> List[Dict[str, Any]]:
+        return list(self.actions.values())
     
