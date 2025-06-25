@@ -718,7 +718,7 @@ class Solver:
                 "description": "Generate final comprehensive answer based on all previous steps",
                 "time": final_output_time,
                 "tokens": final_output_tokens,
-                "cost": final_output_cost,
+                "cost": final_output_cost if 'final_output_cost' in locals() else 0.0,
                 "memory": mem_after_final_output,
                 "input_tokens": self.planner.last_usage.get('prompt_tokens', 0) if hasattr(self.planner, 'last_usage') and self.planner.last_usage else 0,
                 "output_tokens": self.planner.last_usage.get('completion_tokens', 0) if hasattr(self.planner, 'last_usage') and self.planner.last_usage else 0
@@ -1188,7 +1188,8 @@ def main(args):
                     "Image_Preprocessor_Tool",
                     "Nuclei_Segmenter_Tool",
                     "Single_Cell_Cropper_Tool",
-                    "Fibroblast_State_Analyzer_Tool"
+                    "Fibroblast_State_Analyzer_Tool",
+                    "Fibroblast_Activation_Scorer_Tool"
                 ]
                 
                 # General tools
@@ -1300,8 +1301,11 @@ def main(args):
                              "Image_Preprocessor_Tool, Nuclei_Segmenter_Tool", "258 cells are identified and their nuclei are labeled."],
                             ["Single-Cell Cropping", "examples/A5_01_1_1_Phase Contrast_001.png", "Crop single cells from the segmented nuclei in this image.", 
                              "Image_Preprocessor_Tool, Nuclei_Segmenter_Tool, Single_Cell_Cropper_Tool", "Individual cell crops extracted from the image."],
-                            ["Fibroblast State Analysis", "examples/fibroblast.png", "Analyze the fibroblast cell states in this image.", 
-                             "Image_Preprocessor_Tool, Nuclei_Segmenter_Tool, Single_Cell_Cropper_Tool, Fibroblast_State_Analyzer_Tool", "540 cells identified and segmented successfully. Comprehensive analysis of fibroblast cell states have been performed with visualizations."]
+                            ["Fibroblast State Analysis", "examples/A5_01_1_1_Phase Contrast_001.png", "Analyze the fibroblast cell states in this image.", 
+                             "Image_Preprocessor_Tool, Nuclei_Segmenter_Tool, Single_Cell_Cropper_Tool, Fibroblast_State_Analyzer_Tool", "540 cells identified and segmented successfully. Comprehensive analysis of fibroblast cell states have been performed with visualizations."],
+                            # 新增激活分数示例
+                            ["Fibroblast Activation Scoring", "examples/A5_01_1_1_Phase Contrast_001.png", "Quantify the activation score of each fibroblast in this image using the reference map.",
+                             "Image_Preprocessor_Tool, Nuclei_Segmenter_Tool, Single_Cell_Cropper_Tool, Fibroblast_State_Analyzer_Tool, Fibroblast_Activation_Scorer_Tool", "Activation scores for all fibroblasts have been computed and normalized based on the reference map."]
                         ]
                         
                         general_examples = [
