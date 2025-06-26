@@ -193,7 +193,8 @@ class Fibroblast_Activation_Scorer_Tool(BaseTool):
         if isinstance(cell_data, str):
             # Single file path
             if cell_data.endswith('.h5ad'):
-                return self._load_reference_data(cell_data)
+                # Load query data from h5ad file (not reference data)
+                return self._load_query_data(cell_data)
             else:
                 # Assume it's a single cell crop image
                 return self._create_adata_from_images([cell_data], self.reference_data)
@@ -203,7 +204,7 @@ class Fibroblast_Activation_Scorer_Tool(BaseTool):
                 # Multiple h5ad files - combine them
                 combined_data = []
                 for path in cell_data:
-                    data = self._load_reference_data(path)
+                    data = self._load_query_data(path)
                     combined_data.append(data)
                 return ad.concat(combined_data, join='outer')
             else:
@@ -211,6 +212,34 @@ class Fibroblast_Activation_Scorer_Tool(BaseTool):
                 return self._create_adata_from_images(cell_data, self.reference_data)
         else:
             raise ValueError("cell_data must be a string (file path) or list of strings (file paths)")
+    
+    def _load_query_data(self, query_path: str) -> ad.AnnData:
+        """
+        Load query data from h5ad file.
+        
+        Args:
+            query_path: Path to query h5ad file
+            
+        Returns:
+            AnnData: Loaded query data
+        """
+        if not SCANPY_AVAILABLE:
+            raise ImportError("scanpy not available. Please install with: pip install scanpy anndata")
+        
+        try:
+            print(f"Loading query data from: {query_path}")
+            query_data = sc.read_h5ad(query_path)
+            print(f"Query data loaded: {query_data.shape[0]} cells, {query_data.shape[1]} features")
+            
+            # Check if query data has required columns
+            required_obs_keys = ['predicted_class']
+            missing_keys = [key for key in required_obs_keys if key not in query_data.obs.columns]
+            if missing_keys:
+                print(f"⚠️  Query data missing required columns: {missing_keys}")
+            
+            return query_data
+        except Exception as e:
+            raise Exception(f"Failed to load query data from {query_path}: {str(e)}")
     
     def _create_adata_from_images(self, image_paths: List[str], reference_data: ad.AnnData = None) -> ad.AnnData:
         """
@@ -254,30 +283,119 @@ class Fibroblast_Activation_Scorer_Tool(BaseTool):
     
     def _calculate_activation_scores(self, query_data: ad.AnnData, reference_data: ad.AnnData) -> np.ndarray:
         """
-        Calculate activation scores using pseudotime and class weights, following the user's scientific workflow.
+        Calculate activation scores using a robust approach that handles variable mismatches.
         """
         import scanpy as sc
         import numpy as np
-        # 1. Ingest: map query to reference
-        sc.tl.ingest(query_data, reference_data)
-        # 2. Neighbors & Diffmap
-        sc.pp.neighbors(query_data)
-        sc.tl.diffmap(query_data)
-        sc.tl.dpt(query_data) 
-        # 3. Normalize pseudotime
-        pt_min = reference_data.obs["dpt_pseudotime"].min()
-        pt_max = reference_data.obs["dpt_pseudotime"].max()
-        query_data.obs["norm_dpt"] = (query_data.obs["dpt_pseudotime"] - pt_min) / (pt_max - pt_min)
-        # 4. Class weights
-        class_weights = {"dead": 0, "q-Fb": 0.5, "proto-MyoFb": 2, "p-MyoFb": 3, "np-MyoFb": 4}
-        query_data.obs["class_weight"] = query_data.obs["predicted_class"].map(class_weights).astype(float)
-        # 5. Raw activation score
-        query_data.obs["activation_score"] = query_data.obs["norm_dpt"] * query_data.obs["class_weight"]
-        # 6. Normalize activation score to [0,1]
-        act_min = query_data.obs["activation_score"].min()
-        act_max = query_data.obs["activation_score"].max()
-        query_data.obs["activation_score_norm"] = (query_data.obs["activation_score"] - act_min) / (act_max - act_min)
-        return query_data.obs["activation_score_norm"].values
+        import pandas as pd
+        
+        print(f"Query data shape: {query_data.shape}")
+        print(f"Reference data shape: {reference_data.shape}")
+        print(f"Query variables: {len(query_data.var_names)}")
+        print(f"Reference variables: {len(reference_data.var_names)}")
+        
+        # Check if variables match
+        if len(query_data.var_names) != len(reference_data.var_names):
+            print("⚠️  Variable count mismatch detected. Using robust activation scoring method.")
+            return self._calculate_robust_activation_scores(query_data, reference_data)
+        
+        # Check if variable names match
+        if not np.array_equal(query_data.var_names, reference_data.var_names):
+            print("⚠️  Variable names mismatch detected. Using robust activation scoring method.")
+            return self._calculate_robust_activation_scores(query_data, reference_data)
+        
+        # Check if reference data has required columns
+        required_obs_keys = ['dpt_pseudotime', 'predicted_class']
+        missing_keys = [key for key in required_obs_keys if key not in reference_data.obs.columns]
+        if missing_keys:
+            print(f"⚠️  Reference data missing required columns: {missing_keys}. Using robust activation scoring method.")
+            return self._calculate_robust_activation_scores(query_data, reference_data)
+        
+        # Filter out cells with null dpt_pseudotime from reference data
+        null_mask = reference_data.obs['dpt_pseudotime'].isnull()
+        if null_mask.sum() > 0:
+            print(f"⚠️  Found {null_mask.sum()} cells with null dpt_pseudotime in reference data. Filtering them out.")
+            clean_ref_data = reference_data[~null_mask].copy()
+            print(f"Clean reference data shape: {clean_ref_data.shape}")
+        else:
+            clean_ref_data = reference_data
+        
+        # If variables match and required columns exist, use the original method
+        print("✅ Variables match and required columns present. Using standard ingest-based activation scoring.")
+        try:
+            # 1. Ingest: map query to reference
+            print("Running sc.tl.ingest...")
+            sc.tl.ingest(query_data, clean_ref_data)
+            print("✅ Ingest completed")
+            
+            # 2. Neighbors & Diffmap
+            print("Running sc.pp.neighbors...")
+            sc.pp.neighbors(query_data)
+            print("✅ Neighbors computed")
+            
+            print("Running sc.tl.diffmap...")
+            sc.tl.diffmap(query_data)
+            print("✅ Diffmap computed")
+            
+            # 3. Set root cell for DPT calculation
+            print("Setting root cell for DPT calculation...")
+            if 'predicted_class' in query_data.obs.columns:
+                # Try to find a q-Fb cell as root
+                qfb_mask = query_data.obs['predicted_class'] == 'q-Fb'
+                if qfb_mask.sum() > 0:
+                    # Use the first q-Fb cell as root
+                    root_idx = np.where(qfb_mask)[0][0]
+                    query_data.uns['iroot'] = root_idx
+                    print(f"✅ Set root cell to q-Fb cell at index {root_idx}")
+                else:
+                    # If no q-Fb cells, use the first cell
+                    query_data.uns['iroot'] = 0
+                    print("✅ Set root cell to first cell (no q-Fb cells found)")
+            else:
+                # If no predicted_class, use the first cell
+                query_data.uns['iroot'] = 0
+                print("✅ Set root cell to first cell (no predicted_class available)")
+            
+            # 4. DPT
+            print("Running sc.tl.dpt...")
+            sc.tl.dpt(query_data)
+            print("✅ DPT computed")
+            
+            # Check if dpt_pseudotime was successfully calculated
+            if 'dpt_pseudotime' not in query_data.obs.columns:
+                print("⚠️  dpt_pseudotime calculation failed. Using robust activation scoring method.")
+                return self._calculate_robust_activation_scores(query_data, reference_data)
+            
+            # 5. Normalize pseudotime using reference data range
+            pt_min = clean_ref_data.obs["dpt_pseudotime"].min()
+            pt_max = clean_ref_data.obs["dpt_pseudotime"].max()
+            query_data.obs["norm_dpt"] = (query_data.obs["dpt_pseudotime"] - pt_min) / (pt_max - pt_min)
+            
+            # 6. Apply class weights
+            class_weights = {"dead": 0, "q-Fb": 0.5, "proto-MyoFb": 2, "p-MyoFb": 3, "np-MyoFb": 4}
+            query_data.obs["class_weight"] = query_data.obs["predicted_class"].map(class_weights).astype(float)
+            
+            # 7. Calculate raw activation score
+            query_data.obs["activation_score"] = query_data.obs["norm_dpt"] * query_data.obs["class_weight"]
+            
+            # 8. Normalize activation score to [0,1]
+            act_min = query_data.obs["activation_score"].min()
+            act_max = query_data.obs["activation_score"].max()
+            if act_max > act_min:  # Avoid division by zero
+                query_data.obs["activation_score_norm"] = (query_data.obs["activation_score"] - act_min) / (act_max - act_min)
+            else:
+                query_data.obs["activation_score_norm"] = 0.5  # Default to middle value if all scores are the same
+            
+            print(f"✅ Standard activation scoring completed successfully")
+            print(f"  - dpt_pseudotime range: [{query_data.obs['dpt_pseudotime'].min():.3f}, {query_data.obs['dpt_pseudotime'].max():.3f}]")
+            print(f"  - Activation scores range: [{query_data.obs['activation_score_norm'].min():.3f}, {query_data.obs['activation_score_norm'].max():.3f}]")
+            
+            return query_data.obs["activation_score_norm"].values
+        except Exception as e:
+            print(f"⚠️  Standard method failed: {e}. Falling back to robust method.")
+            import traceback
+            traceback.print_exc()
+            return self._calculate_robust_activation_scores(query_data, reference_data)
     
     def _generate_visualizations(self, query_data: ad.AnnData, reference_data: ad.AnnData, 
                                 activation_scores: np.ndarray, output_dir: str, 
