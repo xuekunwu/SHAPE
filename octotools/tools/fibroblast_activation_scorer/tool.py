@@ -318,27 +318,12 @@ class Fibroblast_Activation_Scorer_Tool(BaseTool):
                 plt.close()
                 viz_paths['activation_distribution'] = basic_viz_path
                 
-                # Box plot for activation scores
-                plt.figure(figsize=(12, 8))
-                
-                # Create box plot
-                plt.subplot(2, 1, 1)
-                box_plot = plt.boxplot(activation_scores, patch_artist=True)
-                box_plot['boxes'][0].set_facecolor('lightblue')
-                box_plot['medians'][0].set_color('red')
-                box_plot['medians'][0].set_linewidth(2)
+                # Box plot with overlaid points (用户期望的风格)
+                plt.figure(figsize=(8, 6))
+                sns.boxplot(y=activation_scores, color='#4CAF50', width=0.3, boxprops=dict(alpha=0.7))
+                sns.stripplot(y=activation_scores, color='black', alpha=0.6, jitter=0.2, size=5)
                 plt.ylabel('Activation Score')
-                plt.title('Box Plot of Fibroblast Activation Scores')
-                plt.grid(True, alpha=0.3)
-                
-                # Add individual cell points
-                plt.subplot(2, 1, 2)
-                plt.scatter(range(len(activation_scores)), activation_scores, alpha=0.6, s=20)
-                plt.xlabel('Cell Index')
-                plt.ylabel('Activation Score')
-                plt.title('Individual Cell Activation Scores')
-                plt.grid(True, alpha=0.3)
-                
+                plt.title('Activation Score Distribution (Box + Points)')
                 plt.tight_layout()
                 box_viz_path = os.path.join(output_dir, 'activation_score_boxplot.png')
                 plt.savefig(box_viz_path, dpi=300, bbox_inches='tight')
