@@ -474,6 +474,17 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                 # Set default recommendations for cases without features
                 recommendations = {"note": "No features available for advanced analysis"}
             
+            # 构建AnnData对象用于下游激活评分
+            obs_dict = {
+                'image_path': [r['image_path'] for r in results],
+                'predicted_class': [r['predicted_class'] for r in results],
+                'confidence': [r['confidence'] for r in results],
+                'is_above_threshold': [r['is_above_threshold'] for r in results],
+            }
+            obs = anndata.AnnData()._sanitize_obs(obs_dict)
+            X = np.array([r['features'] for r in results])
+            adata = anndata.AnnData(X=X, obs=obs)
+            
             return {
                 "summary": summary,
                 "cell_state_distribution": self._get_state_distribution(results),
@@ -491,7 +502,8 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                     "total_crops_processed": len(cell_crops),
                     "successful_analyses": len(results),
                     "metadata_files_used": self._list_metadata_files(query_cache_dir)
-                }
+                },
+                "adata": adata
             }
             
         except Exception as e:
