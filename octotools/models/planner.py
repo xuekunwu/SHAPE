@@ -267,17 +267,17 @@ Please present your analysis in a clear, structured format.
         
         needs_activation_scoring = any(keyword.lower() in question.lower() for keyword in activation_scoring_keywords)
         
-        # Only allow scorer after state analyzer and if question needs activation scoring
+        # Auto-continue to activation scorer after state analyzer completion
+        # This ensures the complete fibroblast analysis pipeline runs
         if (
             "Fibroblast_State_Analyzer_Tool" in finished_tools and
             "Fibroblast_Activation_Scorer_Tool" not in finished_tools and
-            "Fibroblast_Activation_Scorer_Tool" in self.available_tools and
-            needs_activation_scoring
+            "Fibroblast_Activation_Scorer_Tool" in self.available_tools
         ):
-            print(f"DEBUG: State analyzer finished, question needs activation scoring - triggering Fibroblast_Activation_Scorer_Tool")
-            justification = "State analysis completed. User question requests activation scoring, so now run the activation scorer."
+            print(f"DEBUG: State analyzer finished - automatically continuing to Fibroblast_Activation_Scorer_Tool")
+            justification = "State analysis completed. Now automatically running activation scoring to complete the fibroblast analysis pipeline."
             context = "Use the output of Fibroblast_State_Analyzer_Tool as input for Fibroblast_Activation_Scorer_Tool."
-            sub_goal = "Run Fibroblast_Activation_Scorer_Tool to provide quantitative activation scores."
+            sub_goal = "Run Fibroblast_Activation_Scorer_Tool to provide quantitative activation scores and complete the analysis."
             return NextStep(
                 justification=justification,
                 context=context,
@@ -289,10 +289,7 @@ Please present your analysis in a clear, structured format.
         if is_fibroblast_query:
             for tool in TOOL_CHAIN:
                 if tool in self.available_tools and tool not in finished_tools:
-                    # Skip scorer if not needed
-                    if tool == "Fibroblast_Activation_Scorer_Tool" and not needs_activation_scoring:
-                        print(f"DEBUG: Skipping Fibroblast_Activation_Scorer_Tool - question doesn't need activation scoring")
-                        continue
+                    # Always include activation scorer in fibroblast analysis pipeline
                     justification = f"Pipeline requires running {tool} after {finished_tools[-1] if finished_tools else 'start'}."
                     context = f"Use output of previous step as input for {tool}."
                     sub_goal = f"Run {tool} on the output of previous step."
