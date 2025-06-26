@@ -253,6 +253,7 @@ class Fibroblast_Activation_Scorer_Tool(BaseTool):
         # 2. Neighbors & Diffmap
         sc.pp.neighbors(query_data)
         sc.tl.diffmap(query_data)
+        sc.tl.dpt(query_data) 
         # 3. Normalize pseudotime
         pt_min = reference_data.obs["dpt_pseudotime"].min()
         pt_max = reference_data.obs["dpt_pseudotime"].max()
