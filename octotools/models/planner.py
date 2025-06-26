@@ -267,15 +267,16 @@ Please present your analysis in a clear, structured format.
         
         needs_activation_scoring = any(keyword.lower() in question.lower() for keyword in activation_scoring_keywords)
         
-        # If Fibroblast_State_Analyzer_Tool is finished and the question specifically asks for activation scoring
-        if ("Fibroblast_State_Analyzer_Tool" in finished_tools and 
+        # Only allow scorer after state analyzer and if question needs activation scoring
+        if (
+            "Fibroblast_State_Analyzer_Tool" in finished_tools and
             "Fibroblast_Activation_Scorer_Tool" not in finished_tools and
             "Fibroblast_Activation_Scorer_Tool" in self.available_tools and
-            needs_activation_scoring):
-            
-            print(f"DEBUG: Question requires activation scoring - forcing Fibroblast_Activation_Scorer_Tool")
-            justification = "Question specifically asks for activation scoring/quantification. State analysis completed, now providing quantitative activation scores."
-            context = "Use the cell state analysis results to calculate quantitative activation scores with reference data."
+            needs_activation_scoring
+        ):
+            print(f"DEBUG: State analyzer finished, question needs activation scoring - triggering Fibroblast_Activation_Scorer_Tool")
+            justification = "State analysis completed. User question requests activation scoring, so now run the activation scorer."
+            context = "Use the output of Fibroblast_State_Analyzer_Tool as input for Fibroblast_Activation_Scorer_Tool."
             sub_goal = "Run Fibroblast_Activation_Scorer_Tool to provide quantitative activation scores."
             return NextStep(
                 justification=justification,
@@ -284,18 +285,15 @@ Please present your analysis in a clear, structured format.
                 tool_name="Fibroblast_Activation_Scorer_Tool"
             )
         
-        # If this is a fibroblast analysis query, enforce the strict dependency chain
+        # Otherwise, follow the strict tool chain
         if is_fibroblast_query:
-            # Find the next tool in the chain that hasn't been run
             for tool in TOOL_CHAIN:
                 if tool in self.available_tools and tool not in finished_tools:
-                    # Skip Fibroblast_Activation_Scorer_Tool if question doesn't need activation scoring
+                    # Skip scorer if not needed
                     if tool == "Fibroblast_Activation_Scorer_Tool" and not needs_activation_scoring:
                         print(f"DEBUG: Skipping Fibroblast_Activation_Scorer_Tool - question doesn't need activation scoring")
                         continue
-                    
                     justification = f"Pipeline requires running {tool} after {finished_tools[-1] if finished_tools else 'start'}."
-                    # You can further parse memory to provide more detailed context/sub_goal
                     context = f"Use output of previous step as input for {tool}."
                     sub_goal = f"Run {tool} on the output of previous step."
                     print(f"DEBUG: Enforcing dependency chain - next tool: {tool}")
@@ -305,8 +303,6 @@ Please present your analysis in a clear, structured format.
                         sub_goal=sub_goal,
                         tool_name=tool
                     )
-            
-            # If all tools in the chain are finished, fall back to LLM logic
             print(f"DEBUG: All tools in chain finished, falling back to LLM logic")
         
         # If not a fibroblast query or all tools finished, use LLM logic
