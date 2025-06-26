@@ -496,6 +496,29 @@ Example (do not copy, use only as reference):
         else:
             image_info = self.get_image_info(image)
 
+        # Special handling for fibroblast analysis pipeline
+        # Check if this is a fibroblast analysis that needs activation scoring
+        fibroblast_keywords = ["fibroblast", "activation", "cell state", "cell analysis", "quantify", "score"]
+        is_fibroblast_query = any(keyword.lower() in question.lower() for keyword in fibroblast_keywords)
+        
+        # Get finished tools from memory
+        finished_tools = [action['tool_name'] for action in memory.get_actions() if 'tool_name' in action]
+        
+        # Special case: If this is a fibroblast analysis and state analyzer just finished,
+        # but activation scorer hasn't run yet, we should continue
+        if (is_fibroblast_query and 
+            "Fibroblast_State_Analyzer_Tool" in finished_tools and 
+            "Fibroblast_Activation_Scorer_Tool" not in finished_tools and
+            "Fibroblast_Activation_Scorer_Tool" in self.available_tools):
+            
+            print(f"DEBUG: Fibroblast analysis detected - state analyzer finished but activation scorer not run yet")
+            print(f"DEBUG: Continuing to activation scorer for complete fibroblast analysis")
+            
+            return MemoryVerification(
+                analysis="Fibroblast state analysis completed successfully. However, the complete fibroblast analysis pipeline requires activation scoring to provide quantitative activation scores. The Fibroblast_Activation_Scorer_Tool is available and should be run to complete the analysis.",
+                stop_signal=False
+            )
+
         prompt_memory_verification = f"""
 Task: Thoroughly evaluate the completeness and accuracy of the memory for fulfilling the given query, considering the potential need for additional tool usage.
 
