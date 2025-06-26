@@ -1168,7 +1168,7 @@ def main(args):
     with gr.Blocks() as demo:
         # Theming https://www.gradio.app/guides/theming-guide
         
-        gr.Markdown("# Chat with FBagent: An augmented agentic approach to resolve fibroblast states at single-cell multimodal resolution")  # Title
+        gr.Markdown("# Chat with FBagent: An augmented agentic approach to resolve fibroblast states at single-cell resolution")  # Title
         gr.Markdown("""
         **FBagent** is an open-source assistant for interpreting cell images, powered by large language models and tool-based reasoning. It supports morphological reasoning, patch extraction, and multi-omic integration.
         """)
