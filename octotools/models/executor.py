@@ -95,6 +95,70 @@ else:
         execution = {"error": "Failed to load metadata: " + str(e), "status": "failed"}"""
             )
         
+        # Special handling for Fibroblast_Activation_Scorer_Tool to use cell data from state analyzer
+        if tool_name == "Fibroblast_Activation_Scorer_Tool":
+            return ToolCommand(
+                analysis="Using cell data from Fibroblast_State_Analyzer_Tool for activation scoring",
+                explanation="Loading cell crops from the most recent metadata file and using them for activation scoring with reference data",
+                command="""import json
+import os
+import glob
+
+# Dynamically find the most recent metadata file for cell crops
+metadata_dir = 'solver_cache/temp/tool_cache'
+metadata_files = glob.glob(os.path.join(metadata_dir, 'cell_crops_metadata_*.json'))
+if not metadata_files:
+    execution = {"error": "No metadata files found for cell crops", "status": "failed"}
+else:
+    # Use the most recent metadata file
+    latest_metadata_file = max(metadata_files, key=os.path.getctime)
+    print("Using metadata file for activation scoring: " + latest_metadata_file)
+    
+    try:
+        # Load cell crops from metadata
+        with open(latest_metadata_file, 'r') as f:
+            metadata = json.load(f)
+        
+        # Extract cell crop paths
+        cell_crops = []
+        if isinstance(metadata, list):
+            for item in metadata:
+                if isinstance(item, dict):
+                    # Try different possible keys for crop path
+                    for path_key in ['crop_path', 'path', 'image_path', 'file_path']:
+                        if path_key in item:
+                            cell_crops.append(item[path_key])
+                            break
+        elif isinstance(metadata, dict):
+            # Handle dictionary format
+            if 'cell_metadata' in metadata:
+                for item in metadata['cell_metadata']:
+                    for path_key in ['crop_path', 'path', 'image_path', 'file_path']:
+                        if path_key in item:
+                            cell_crops.append(item[path_key])
+                            break
+        
+        if cell_crops and len(cell_crops) > 0:
+            print(f"Found {len(cell_crops)} cell crops for activation scoring")
+            # Execute the activation scorer with cell crops
+            execution = tool.execute(
+                cell_data=cell_crops,
+                reference_source='huggingface',
+                reference_repo_id='5xuekun/adata_reference',
+                reference_filename='adata_reference.h5ad',
+                output_dir='output_visualizations',
+                visualization_type='all',
+                confidence_threshold=0.5,
+                batch_size=100
+            )
+        else:
+            execution = {"error": "No valid cell crops found in metadata", "status": "failed"}
+        
+    except Exception as e:
+        print("Error loading cell data for activation scoring: " + str(e))
+        execution = {"error": "Failed to load cell data: " + str(e), "status": "failed"}"""
+            )
+        
         # Special handling for Nuclei_Segmenter_Tool to use processed image from Image_Preprocessor_Tool
         if tool_name == "Nuclei_Segmenter_Tool" and previous_outputs and 'processed_image_path' in previous_outputs:
             processed_image_path = previous_outputs['processed_image_path']
