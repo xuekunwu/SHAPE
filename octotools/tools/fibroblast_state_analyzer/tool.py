@@ -79,7 +79,7 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
     Processes individual cell crops to determine their activation state.
     """
     
-    def __init__(self, model_path=None, backbone_size="large", confidence_threshold=0.5):
+    def __init__(self, model_path=None, backbone_size="base", confidence_threshold=0.5):
         super().__init__(
             tool_name="Fibroblast_State_Analyzer_Tool",
             tool_description="Analyzes fibroblast cell states using deep learning to classify individual cells into different activation states. Generates comprehensive visualizations including UMAP plots for cell distribution analysis, PCA plots, confidence distributions, and cell state bar charts. UMAP visualization is particularly useful for understanding cell clustering and spatial relationships in the feature space.",
@@ -495,7 +495,7 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                 "visual_outputs": visual_outputs,
                 "parameters": {
                     "confidence_threshold": confidence_threshold,
-                    "backbone_size": "large",
+                    "backbone_size": "base",
                     "model_path": None
                 },
                 "cell_state_descriptions": self.class_descriptions,
