@@ -511,6 +511,7 @@ class Fibroblast_Activation_Scorer_Tool(BaseTool):
                     'activation_range': [float(np.min(activation_scores)), float(np.max(activation_scores))]
                 },
                 'visualizations': viz_paths,
+                'visual_outputs': list(viz_paths.values()),
                 'metadata': {
                     'reference_source': reference_source,
                     'reference_path': reference_path,
