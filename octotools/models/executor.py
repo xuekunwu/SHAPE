@@ -88,10 +88,11 @@ else:
                 visualization_type='all'
             )
             # 保存AnnData为h5ad文件，供下游激活评分工具使用
-            if hasattr(execution, 'adata'):
-                adata_path = os.path.join('solver_cache/temp/tool_cache', 'fibroblast_state_analyzed.h5ad')
-                execution['adata'].write(adata_path)
-                execution['analyzed_h5ad_path'] = adata_path
+            # Note: This logic is now handled in execute_tool_command method
+            # if hasattr(execution, 'adata'):
+            #     adata_path = os.path.join('solver_cache/temp/tool_cache', 'fibroblast_state_analyzed.h5ad')
+            #     execution['adata'].write_h5ad(adata_path)
+            #     execution['analyzed_h5ad_path'] = adata_path
         else:
             execution = {"error": "No valid cell crops found in metadata", "status": "failed"}
         
@@ -490,6 +491,36 @@ Remember: Your <command> field MUST be valid Python code including any necessary
             
             # Execute the entire command as a single block to preserve variable definitions
             result = execute_with_timeout(command, local_context)
+            
+            # Special handling for Fibroblast_State_Analyzer_Tool to save h5ad file
+            if tool_name == "Fibroblast_State_Analyzer_Tool" and isinstance(result, dict) and 'adata' in result:
+                try:
+                    import anndata
+                    adata_path = os.path.join(self.tool_cache_dir, 'fibroblast_state_analyzed.h5ad')
+                    print(f"Saving AnnData to h5ad file: {adata_path}")
+                    
+                    # Ensure the directory exists
+                    os.makedirs(os.path.dirname(adata_path), exist_ok=True)
+                    
+                    # Save the AnnData object
+                    result['adata'].write_h5ad(adata_path)
+                    result['analyzed_h5ad_path'] = adata_path
+                    print(f"Successfully saved h5ad file: {adata_path}")
+                    
+                    # Verify the file was created
+                    if os.path.exists(adata_path):
+                        file_size = os.path.getsize(adata_path)
+                        print(f"Verified h5ad file exists with size: {file_size} bytes")
+                    else:
+                        print(f"Warning: h5ad file was not created at {adata_path}")
+                        
+                except Exception as e:
+                    print(f"Error saving h5ad file: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    # Don't fail the entire execution, just log the error
+                    if 'analyzed_h5ad_path' not in result:
+                        result['analyzed_h5ad_path'] = None
             
             return result
 
