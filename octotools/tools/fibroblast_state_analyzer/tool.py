@@ -158,7 +158,7 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
             feat_dim_map = {
                 "vits14": 384, "vitb14": 768, "vitl14": 1024, "vitg14": 1536
             }
-            backbone_arch = backbone_archs.get(self.backbone_size, "vitl14")
+            backbone_arch = backbone_archs.get(self.backbone_size, "vitb14")
             backbone_name = f"dinov2_{backbone_arch}"
 
             # Load the DINOv2 backbone using torch.hub to match the training environment
