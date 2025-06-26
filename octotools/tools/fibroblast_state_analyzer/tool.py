@@ -22,6 +22,7 @@ import argparse
 import time
 from sklearn.decomposition import PCA
 import glob
+import pandas as pd
 
 # Configure logging first
 logging.basicConfig(level=logging.INFO)
@@ -481,9 +482,11 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                 'confidence': [r['confidence'] for r in results],
                 'is_above_threshold': [r['is_above_threshold'] for r in results],
             }
-            obs = anndata.AnnData()._sanitize_obs(obs_dict)
+            
+            # Fix for anndata compatibility - create AnnData with proper obs DataFrame
+            obs_df = pd.DataFrame(obs_dict)
             X = np.array([r['features'] for r in results])
-            adata = anndata.AnnData(X=X, obs=obs)
+            adata = anndata.AnnData(X=X, obs=obs_df)
             
             return {
                 "summary": summary,
