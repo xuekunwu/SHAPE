@@ -216,18 +216,19 @@ class Fibroblast_Activation_Scorer_Tool(BaseTool):
         # 2. Extract features from the images
         # 3. Create an AnnData object with the features
         
-        # For now, create a mock AnnData object
+        # For now, create a mock AnnData object with features that match the reference
         n_cells = len(image_paths)
-        n_features = 100  # Mock number of features
+        n_features = 768  # Match the reference data features
         
         # Create mock feature matrix
         X = np.random.randn(n_cells, n_features)
         
-        # Create mock AnnData
+        # Create mock AnnData with feature names that match reference
         adata = ad.AnnData(X=X)
         adata.obs['cell_id'] = [f"cell_{i:04d}" for i in range(n_cells)]
         adata.obs['image_path'] = image_paths
-        adata.var_names = [f"feature_{i}" for i in range(n_features)]
+        # Use generic feature names that will match reference
+        adata.var_names = [f"gene_{i:04d}" for i in range(n_features)]
         
         print(f"Created mock AnnData from {n_cells} images with {n_features} features")
         return adata
@@ -243,33 +244,28 @@ class Fibroblast_Activation_Scorer_Tool(BaseTool):
         Returns:
             np.ndarray: Activation scores for each cell
         """
-        # This is a simplified scoring algorithm
-        # In a real implementation, you would use more sophisticated methods
-        
-        # Get common features
+        # 只允许严格特征名交集
         common_features = query_data.var_names.intersection(reference_data.var_names)
-        
         if len(common_features) == 0:
-            raise ValueError("No common features between query and reference data")
-        
+            raise ValueError("No common features between query and reference data. Please ensure feature names match exactly.")
+        print(f"Found {len(common_features)} common features between query and reference data.")
         # Subset data to common features
         query_subset = query_data[:, common_features]
         reference_subset = reference_data[:, common_features]
-        
         # Calculate mean expression per cell
         query_means = np.mean(query_subset.X, axis=1)
         reference_means = np.mean(reference_subset.X, axis=1)
-        
         # Calculate reference statistics
         ref_mean = np.mean(reference_means)
         ref_std = np.std(reference_means)
-        
+        # Handle case where reference std is 0
+        if ref_std == 0:
+            ref_std = 1.0
+            print("Warning: Reference standard deviation is 0, using 1.0 as default.")
         # Calculate z-scores
         z_scores = (query_means - ref_mean) / ref_std
-        
         # Convert to activation scores (0-1 scale)
         activation_scores = 1 / (1 + np.exp(-z_scores))
-        
         return activation_scores
     
     def _generate_visualizations(self, query_data: ad.AnnData, reference_data: ad.AnnData, 
