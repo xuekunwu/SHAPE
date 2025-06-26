@@ -252,16 +252,48 @@ Please present your analysis in a clear, structured format.
         fibroblast_keywords = ["fibroblast", "activation", "cell state", "cell analysis", "quantify", "score"]
         is_fibroblast_query = any(keyword.lower() in question.lower() for keyword in fibroblast_keywords)
         
+        # Get finished tools from memory
+        finished_tools = [action['tool_name'] for action in memory.get_actions() if 'tool_name' in action]
+        print(f"DEBUG: Finished tools: {finished_tools}")
+        print(f"DEBUG: Available tools: {self.available_tools}")
+        
+        # Check if we need activation scoring based on question content
+        activation_scoring_keywords = [
+            "activation score", "activation level", "quantify activation", "activation quantification",
+            "score", "scoring", "quantitative", "quantification", "measure activation", "activation measure",
+            "activation degree", "activation intensity", "activation magnitude", "activation value",
+            "numerical", "numeric", "number", "value", "metric", "measurement"
+        ]
+        
+        needs_activation_scoring = any(keyword.lower() in question.lower() for keyword in activation_scoring_keywords)
+        
+        # If Fibroblast_State_Analyzer_Tool is finished and the question specifically asks for activation scoring
+        if ("Fibroblast_State_Analyzer_Tool" in finished_tools and 
+            "Fibroblast_Activation_Scorer_Tool" not in finished_tools and
+            "Fibroblast_Activation_Scorer_Tool" in self.available_tools and
+            needs_activation_scoring):
+            
+            print(f"DEBUG: Question requires activation scoring - forcing Fibroblast_Activation_Scorer_Tool")
+            justification = "Question specifically asks for activation scoring/quantification. State analysis completed, now providing quantitative activation scores."
+            context = "Use the cell state analysis results to calculate quantitative activation scores with reference data."
+            sub_goal = "Run Fibroblast_Activation_Scorer_Tool to provide quantitative activation scores."
+            return NextStep(
+                justification=justification,
+                context=context,
+                sub_goal=sub_goal,
+                tool_name="Fibroblast_Activation_Scorer_Tool"
+            )
+        
         # If this is a fibroblast analysis query, enforce the strict dependency chain
         if is_fibroblast_query:
-            # Get finished tools from memory
-            finished_tools = [action['tool_name'] for action in memory.get_actions() if 'tool_name' in action]
-            print(f"DEBUG: Finished tools: {finished_tools}")
-            print(f"DEBUG: Available tools: {self.available_tools}")
-            
             # Find the next tool in the chain that hasn't been run
             for tool in TOOL_CHAIN:
                 if tool in self.available_tools and tool not in finished_tools:
+                    # Skip Fibroblast_Activation_Scorer_Tool if question doesn't need activation scoring
+                    if tool == "Fibroblast_Activation_Scorer_Tool" and not needs_activation_scoring:
+                        print(f"DEBUG: Skipping Fibroblast_Activation_Scorer_Tool - question doesn't need activation scoring")
+                        continue
+                    
                     justification = f"Pipeline requires running {tool} after {finished_tools[-1] if finished_tools else 'start'}."
                     # You can further parse memory to provide more detailed context/sub_goal
                     context = f"Use output of previous step as input for {tool}."
