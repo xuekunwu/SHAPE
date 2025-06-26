@@ -166,7 +166,17 @@ class Fibroblast_Activation_Scorer_Tool(BaseTool):
             print(f"Loading reference data from: {reference_path}")
             reference_data = sc.read_h5ad(reference_path)
             print(f"Reference data loaded: {reference_data.shape[0]} cells, {reference_data.shape[1]} features")
-            return reference_data
+            
+            # Filter out cells with null dpt_pseudotime from reference data
+            null_mask = reference_data.obs['dpt_pseudotime'].isnull()
+            if null_mask.sum() > 0:
+                print(f"⚠️  Found {null_mask.sum()} cells with null dpt_pseudotime in reference data. Filtering them out.")
+                clean_ref_data = reference_data[~null_mask].copy()
+                print(f"Clean reference data shape: {clean_ref_data.shape}")
+            else:
+                clean_ref_data = reference_data
+            
+            return clean_ref_data
         except Exception as e:
             raise Exception(f"Failed to load reference data from {reference_path}: {str(e)}")
     
