@@ -55,7 +55,8 @@ class Fibroblast_Activation_Scorer_Tool(BaseTool):
         Quantifies fibroblast activation levels using reference data from Hugging Face.
         Automatically downloads reference files and provides comprehensive activation scoring
         with detailed visualizations including UMAP plots, activation distributions,
-        and statistical analysis. Supports both local and Hugging Face reference files.
+        box plots showing individual cell activation scores, and statistical analysis. 
+        Supports both local and Hugging Face reference files.
         """
         self.tool_version = "1.0.0"
         
@@ -77,7 +78,7 @@ class Fibroblast_Activation_Scorer_Tool(BaseTool):
         - activation_scores: Individual cell activation scores
         - reference_stats: Reference dataset statistics
         - comparison_results: Statistical comparison between query and reference
-        - visualizations: Paths to generated visualization files
+        - visualizations: Paths to generated visualization files (including box plots)
         - metadata: Processing metadata and parameters
         """
         
@@ -316,6 +317,33 @@ class Fibroblast_Activation_Scorer_Tool(BaseTool):
                 plt.savefig(basic_viz_path, dpi=300, bbox_inches='tight')
                 plt.close()
                 viz_paths['activation_distribution'] = basic_viz_path
+                
+                # Box plot for activation scores
+                plt.figure(figsize=(12, 8))
+                
+                # Create box plot
+                plt.subplot(2, 1, 1)
+                box_plot = plt.boxplot(activation_scores, patch_artist=True)
+                box_plot['boxes'][0].set_facecolor('lightblue')
+                box_plot['medians'][0].set_color('red')
+                box_plot['medians'][0].set_linewidth(2)
+                plt.ylabel('Activation Score')
+                plt.title('Box Plot of Fibroblast Activation Scores')
+                plt.grid(True, alpha=0.3)
+                
+                # Add individual cell points
+                plt.subplot(2, 1, 2)
+                plt.scatter(range(len(activation_scores)), activation_scores, alpha=0.6, s=20)
+                plt.xlabel('Cell Index')
+                plt.ylabel('Activation Score')
+                plt.title('Individual Cell Activation Scores')
+                plt.grid(True, alpha=0.3)
+                
+                plt.tight_layout()
+                box_viz_path = os.path.join(output_dir, 'activation_score_boxplot.png')
+                plt.savefig(box_viz_path, dpi=300, bbox_inches='tight')
+                plt.close()
+                viz_paths['activation_boxplot'] = box_viz_path
             
             if visualization_type in ['comprehensive', 'all']:
                 # Comprehensive analysis
@@ -328,19 +356,19 @@ class Fibroblast_Activation_Scorer_Tool(BaseTool):
                 axes[0, 0].set_title('Activation Score Distribution')
                 axes[0, 0].grid(True, alpha=0.3)
                 
-                # 2. Reference vs Query comparison
-                ref_means = np.mean(reference_data.X, axis=1)
-                query_means = np.mean(query_data.X, axis=1)
-                
-                axes[0, 1].hist(ref_means, bins=30, alpha=0.5, label='Reference', color='blue')
-                axes[0, 1].hist(query_means, bins=30, alpha=0.5, label='Query', color='red')
-                axes[0, 1].set_xlabel('Mean Expression')
-                axes[0, 1].set_ylabel('Number of Cells')
-                axes[0, 1].set_title('Expression Comparison')
-                axes[0, 1].legend()
+                # 2. Box plot of activation scores
+                box_plot = axes[0, 1].boxplot(activation_scores, patch_artist=True)
+                box_plot['boxes'][0].set_facecolor('lightgreen')
+                box_plot['medians'][0].set_color('red')
+                box_plot['medians'][0].set_linewidth(2)
+                axes[0, 1].set_ylabel('Activation Score')
+                axes[0, 1].set_title('Box Plot of Activation Scores')
                 axes[0, 1].grid(True, alpha=0.3)
                 
                 # 3. Activation score vs expression
+                ref_means = np.mean(reference_data.X, axis=1)
+                query_means = np.mean(query_data.X, axis=1)
+                
                 axes[1, 0].scatter(query_means, activation_scores, alpha=0.6)
                 axes[1, 0].set_xlabel('Mean Expression')
                 axes[1, 0].set_ylabel('Activation Score')
@@ -357,6 +385,9 @@ class Fibroblast_Activation_Scorer_Tool(BaseTool):
                 Std: {np.std(activation_scores):.3f}
                 Min: {np.min(activation_scores):.3f}
                 Max: {np.max(activation_scores):.3f}
+                Median: {np.median(activation_scores):.3f}
+                Q1: {np.percentile(activation_scores, 25):.3f}
+                Q3: {np.percentile(activation_scores, 75):.3f}
                 
                 High Activation (>0.7): {np.sum(activation_scores > 0.7)}
                 Low Activation (<0.3): {np.sum(activation_scores < 0.3)}
