@@ -43,6 +43,33 @@ class CustomEncoder(json.JSONEncoder):
             return str(obj)  # Convert ToolCommand to its string representation
         return super().default(obj)
 
+def make_json_serializable(obj):
+    """
+    Recursively convert an object to be JSON serializable.
+    Removes or converts non-serializable objects like AnnData.
+    """
+    if isinstance(obj, dict):
+        return {key: make_json_serializable(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [make_json_serializable(item) for item in obj]
+    elif hasattr(obj, '__class__') and 'AnnData' in obj.__class__.__name__:
+        # Convert AnnData objects to a serializable representation
+        return {
+            "type": "AnnData",
+            "shape": f"{obj.n_obs}x{obj.n_vars}",
+            "obs_keys": list(obj.obs.keys()) if hasattr(obj, 'obs') else [],
+            "var_keys": list(obj.var.keys()) if hasattr(obj, 'var') else [],
+            "message": "AnnData object (removed for JSON serialization)"
+        }
+    elif hasattr(obj, '__dict__'):
+        # For other objects, try to convert to dict
+        try:
+            return make_json_serializable(obj.__dict__)
+        except:
+            return str(obj)
+    else:
+        return obj
+
 # Filter model configs to only include OpenAI models
 def get_openai_model_configs():
     from llm_evaluation_scripts.hf_model_configs import HF_MODEL_CONFIGS
@@ -516,7 +543,7 @@ class Solver:
             # Display the command execution result
             messages.append(ChatMessage(
                 role="assistant",
-                content=f"**Result:**\n```json\n{json.dumps(result, indent=4)}\n```",
+                content=f"**Result:**\n```json\n{json.dumps(make_json_serializable(result), indent=4)}\n```",
                 metadata={"title": f"### 🛠️ Step {step_count}: Command Execution ({tool_name})"}))
             yield messages, query_analysis, visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Command executed"
 
@@ -1304,7 +1331,7 @@ def main(args):
                             ["Fibroblast State Analysis", "examples/A5_01_1_1_Phase Contrast_001.png", "Analyze the fibroblast cell states in this image.", 
                              "Image_Preprocessor_Tool, Nuclei_Segmenter_Tool, Single_Cell_Cropper_Tool, Fibroblast_State_Analyzer_Tool", "540 cells identified and segmented successfully. Comprehensive analysis of fibroblast cell states have been performed with visualizations."],
                             # 新增激活分数示例
-                            ["Fibroblast Activation Scoring", "examples/A5_01_1_1_Phase Contrast_001.png", "Quantify the activation score of each fibroblast in this image using the reference map.",
+                            ["Fibroblast Activation Scoring", "examples/A5_01_1_1_Phase Contrast_001.png", "Quantify the activation score of each fibroblast in this image.",
                              "Image_Preprocessor_Tool, Nuclei_Segmenter_Tool, Single_Cell_Cropper_Tool, Fibroblast_State_Analyzer_Tool, Fibroblast_Activation_Scorer_Tool", "Activation scores for all fibroblasts have been computed and normalized based on the reference map."]
                         ]
                         
