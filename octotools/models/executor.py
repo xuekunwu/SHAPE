@@ -87,6 +87,11 @@ else:
                 query_cache_dir='solver_cache/temp/tool_cache',
                 visualization_type='all'
             )
+            # 保存AnnData为h5ad文件，供下游激活评分工具使用
+            if hasattr(execution, 'adata'):
+                adata_path = os.path.join('solver_cache/temp/tool_cache', 'fibroblast_state_analyzed.h5ad')
+                execution['adata'].write(adata_path)
+                execution['analyzed_h5ad_path'] = adata_path
         else:
             execution = {"error": "No valid cell crops found in metadata", "status": "failed"}
         
@@ -95,68 +100,28 @@ else:
         execution = {"error": "Failed to load metadata: " + str(e), "status": "failed"}"""
             )
         
-        # Special handling for Fibroblast_Activation_Scorer_Tool to use cell data from state analyzer
+        # Special handling for Fibroblast_Activation_Scorer_Tool to use h5ad from state analyzer
         if tool_name == "Fibroblast_Activation_Scorer_Tool":
             return ToolCommand(
-                analysis="Using cell data from Fibroblast_State_Analyzer_Tool for activation scoring",
-                explanation="Loading cell crops from the most recent metadata file and using them for activation scoring with reference data",
-                command="""import json
-import os
-import glob
-
-# Dynamically find the most recent metadata file for cell crops
-metadata_dir = 'solver_cache/temp/tool_cache'
-metadata_files = glob.glob(os.path.join(metadata_dir, 'cell_crops_metadata_*.json'))
-if not metadata_files:
-    execution = {"error": "No metadata files found for cell crops", "status": "failed"}
+                analysis="Using AnnData h5ad from Fibroblast_State_Analyzer_Tool for activation scoring",
+                explanation="Loading AnnData h5ad file from state analyzer output for activation scoring with reference data",
+                command="""import os
+# Find the analyzed h5ad file from state analyzer output
+h5ad_path = os.path.join('solver_cache/temp/tool_cache', 'fibroblast_state_analyzed.h5ad')
+if not os.path.exists(h5ad_path):
+    execution = {"error": "No analyzed h5ad file found from state analyzer", "status": "failed"}
 else:
-    # Use the most recent metadata file
-    latest_metadata_file = max(metadata_files, key=os.path.getctime)
-    print("Using metadata file for activation scoring: " + latest_metadata_file)
-    
-    try:
-        # Load cell crops from metadata
-        with open(latest_metadata_file, 'r') as f:
-            metadata = json.load(f)
-        
-        # Extract cell crop paths
-        cell_crops = []
-        if isinstance(metadata, list):
-            for item in metadata:
-                if isinstance(item, dict):
-                    # Try different possible keys for crop path
-                    for path_key in ['crop_path', 'path', 'image_path', 'file_path']:
-                        if path_key in item:
-                            cell_crops.append(item[path_key])
-                            break
-        elif isinstance(metadata, dict):
-            # Handle dictionary format
-            if 'cell_metadata' in metadata:
-                for item in metadata['cell_metadata']:
-                    for path_key in ['crop_path', 'path', 'image_path', 'file_path']:
-                        if path_key in item:
-                            cell_crops.append(item[path_key])
-                            break
-        
-        if cell_crops and len(cell_crops) > 0:
-            print(f"Found {len(cell_crops)} cell crops for activation scoring")
-            # Execute the activation scorer with cell crops
-            execution = tool.execute(
-                cell_data=cell_crops,
-                reference_source='huggingface',
-                reference_repo_id='5xuekun/adata_reference',
-                reference_filename='adata_reference.h5ad',
-                output_dir='output_visualizations',
-                visualization_type='all',
-                confidence_threshold=0.5,
-                batch_size=100
-            )
-        else:
-            execution = {"error": "No valid cell crops found in metadata", "status": "failed"}
-        
-    except Exception as e:
-        print("Error loading cell data for activation scoring: " + str(e))
-        execution = {"error": "Failed to load cell data: " + str(e), "status": "failed"}"""
+    print(f'Using AnnData h5ad for activation scoring: {h5ad_path}')
+    execution = tool.execute(
+        cell_data=h5ad_path,
+        reference_source='huggingface',
+        reference_repo_id='5xuekun/adata_reference',
+        reference_filename='adata_reference.h5ad',
+        output_dir='output_visualizations',
+        visualization_type='all',
+        confidence_threshold=0.5,
+        batch_size=100
+    )"""
             )
         
         # Special handling for Nuclei_Segmenter_Tool to use processed image from Image_Preprocessor_Tool
