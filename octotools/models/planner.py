@@ -91,13 +91,27 @@ Instructions:
 1. Carefully read and understand the query and any accompanying inputs.
 2. Identify the main objectives or tasks within the query.
 3. List the specific skills that would be necessary to address the query comprehensively.
-4. Examine the available tools in the toolbox and determine which ones might relevant and useful for addressing the query. Make sure to consider the user metadata for each tool, including limitations and potential applications (if available).
+4. Examine the available tools in the toolbox and determine which ones are relevant and useful for addressing the query. Make sure to consider the user metadata for each tool, including limitations and potential applications (if available).
 5. Provide a brief explanation for each skill and tool you've identified, describing how it would contribute to answering the query.
+
+SPECIAL CONSIDERATIONS FOR FIBROBLAST ANALYSIS:
+- If the query involves fibroblast analysis, cell state analysis, or activation scoring, you MUST include the complete analysis pipeline tools
+- For fibroblast analysis tasks, the relevant tools should include: Image_Preprocessor_Tool, Nuclei_Segmenter_Tool, Single_Cell_Cropper_Tool, Fibroblast_State_Analyzer_Tool
+- If the query specifically asks for activation scoring, quantification, or numerical analysis, also include Fibroblast_Activation_Scorer_Tool
+- The tools should be listed in the logical order they would be used in the analysis pipeline
+
+TASK RECOGNITION GUIDELINES:
+- Cell analysis tasks: Include preprocessing, segmentation, and analysis tools
+- Image processing tasks: Include preprocessing and relevant analysis tools
+- Object detection tasks: Include detection and analysis tools
+- Text extraction tasks: Include text detection and extraction tools
+- Research tasks: Include search and knowledge tools
+- General analysis tasks: Include appropriate preprocessing and analysis tools
 
 Your response should include:
 1. A concise summary of the query's main points and objectives, as well as content in any accompanying inputs.
 2. A list of required skills, with a brief explanation for each.
-3. A list of relevant tools from the toolbox, with a brief explanation of how each tool would be utilized and its potential limitations.
+3. A list of relevant tools from the toolbox, with a brief explanation of how each tool would be utilized and its potential limitations. List tools in the logical order they would be used.
 4. Any additional considerations that might be important for addressing the query effectively.
 
 Please present your analysis in a clear, structured format.
