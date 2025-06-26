@@ -244,38 +244,29 @@ class Fibroblast_Activation_Scorer_Tool(BaseTool):
     
     def _calculate_activation_scores(self, query_data: ad.AnnData, reference_data: ad.AnnData) -> np.ndarray:
         """
-        Calculate activation scores by comparing query data to reference.
-        
-        Args:
-            query_data: Query cell data
-            reference_data: Reference cell data
-            
-        Returns:
-            np.ndarray: Activation scores for each cell
+        Calculate activation scores using pseudotime and class weights, following the user's scientific workflow.
         """
-        # 只允许严格特征名交集
-        common_features = query_data.var_names.intersection(reference_data.var_names)
-        if len(common_features) == 0:
-            raise ValueError("No common features between query and reference data. Please ensure feature names match exactly.")
-        print(f"Found {len(common_features)} common features between query and reference data.")
-        # Subset data to common features
-        query_subset = query_data[:, common_features]
-        reference_subset = reference_data[:, common_features]
-        # Calculate mean expression per cell
-        query_means = np.mean(query_subset.X, axis=1)
-        reference_means = np.mean(reference_subset.X, axis=1)
-        # Calculate reference statistics
-        ref_mean = np.mean(reference_means)
-        ref_std = np.std(reference_means)
-        # Handle case where reference std is 0
-        if ref_std == 0:
-            ref_std = 1.0
-            print("Warning: Reference standard deviation is 0, using 1.0 as default.")
-        # Calculate z-scores
-        z_scores = (query_means - ref_mean) / ref_std
-        # Convert to activation scores (0-1 scale)
-        activation_scores = 1 / (1 + np.exp(-z_scores))
-        return activation_scores
+        import scanpy as sc
+        import numpy as np
+        # 1. Ingest: map query to reference
+        sc.tl.ingest(query_data, reference_data)
+        # 2. Neighbors & Diffmap
+        sc.pp.neighbors(query_data)
+        sc.tl.diffmap(query_data)
+        # 3. Normalize pseudotime
+        pt_min = reference_data.obs["dpt_pseudotime"].min()
+        pt_max = reference_data.obs["dpt_pseudotime"].max()
+        query_data.obs["norm_dpt"] = (query_data.obs["dpt_pseudotime"] - pt_min) / (pt_max - pt_min)
+        # 4. Class weights
+        class_weights = {"dead": 0, "q-Fb": 0.5, "proto-MyoFb": 2, "p-MyoFb": 3, "np-MyoFb": 4}
+        query_data.obs["class_weight"] = query_data.obs["predicted_class"].map(class_weights).astype(float)
+        # 5. Raw activation score
+        query_data.obs["activation_score"] = query_data.obs["norm_dpt"] * query_data.obs["class_weight"]
+        # 6. Normalize activation score to [0,1]
+        act_min = query_data.obs["activation_score"].min()
+        act_max = query_data.obs["activation_score"].max()
+        query_data.obs["activation_score_norm"] = (query_data.obs["activation_score"] - act_min) / (act_max - act_min)
+        return query_data.obs["activation_score_norm"].values
     
     def _generate_visualizations(self, query_data: ad.AnnData, reference_data: ad.AnnData, 
                                 activation_scores: np.ndarray, output_dir: str, 
