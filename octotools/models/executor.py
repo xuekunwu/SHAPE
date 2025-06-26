@@ -105,11 +105,38 @@ else:
         if tool_name == "Fibroblast_Activation_Scorer_Tool":
             return ToolCommand(
                 analysis="Using AnnData h5ad from Fibroblast_State_Analyzer_Tool for activation scoring",
-                explanation="Loading AnnData h5ad file from state analyzer output for activation scoring with reference data",
+                explanation="Dynamically finding the analyzed h5ad file from state analyzer output for activation scoring with reference data",
                 command="""import os
-# Find the analyzed h5ad file from state analyzer output
-h5ad_path = os.path.join('solver_cache/temp/tool_cache', 'fibroblast_state_analyzed.h5ad')
-if not os.path.exists(h5ad_path):
+import glob
+
+# Dynamically find the analyzed h5ad file from state analyzer output
+h5ad_path = None
+
+# First, try to find it in the current tool cache directory
+if hasattr(tool, 'tool_cache_dir') and tool.tool_cache_dir:
+    potential_path = os.path.join(tool.tool_cache_dir, 'fibroblast_state_analyzed.h5ad')
+    if os.path.exists(potential_path):
+        h5ad_path = potential_path
+
+# If not found, search in all solver_cache subdirectories
+if not h5ad_path:
+    solver_cache_dir = 'solver_cache'
+    if os.path.exists(solver_cache_dir):
+        for root, dirs, files in os.walk(solver_cache_dir):
+            for file in files:
+                if file == 'fibroblast_state_analyzed.h5ad':
+                    h5ad_path = os.path.join(root, file)
+                    break
+            if h5ad_path:
+                break
+
+# If still not found, try the original hardcoded path as fallback
+if not h5ad_path:
+    fallback_path = os.path.join('solver_cache/temp/tool_cache', 'fibroblast_state_analyzed.h5ad')
+    if os.path.exists(fallback_path):
+        h5ad_path = fallback_path
+
+if not h5ad_path or not os.path.exists(h5ad_path):
     execution = {"error": "No analyzed h5ad file found from state analyzer", "status": "failed"}
 else:
     print(f'Using AnnData h5ad for activation scoring: {h5ad_path}')
