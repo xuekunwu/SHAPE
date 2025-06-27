@@ -175,11 +175,23 @@ Please present your analysis in a clear, structured format.
             return "No matched tool given: " + tool_name
         
         try:
+            print(f"DEBUG: extract_context_subgoal_and_tool - response type: {type(response)}")
+            print(f"DEBUG: extract_context_subgoal_and_tool - response: {response}")
+            
             # Check if response is a NextStep object
             if hasattr(response, 'context') and hasattr(response, 'sub_goal') and hasattr(response, 'tool_name'):
+                print(f"DEBUG: Processing NextStep object")
+                print(f"DEBUG: response.context: {response.context}")
+                print(f"DEBUG: response.sub_goal: {response.sub_goal}")
+                print(f"DEBUG: response.tool_name: {response.tool_name}")
+                print(f"DEBUG: available_tools: {self.available_tools}")
+                
                 context = response.context.strip()
                 sub_goal = response.sub_goal.strip()
                 tool_name = normalize_tool_name(response.tool_name.strip())
+                
+                print(f"DEBUG: Normalized tool_name: {tool_name}")
+                
                 return context, sub_goal, tool_name
             # Check if response is a string (fallback for non-structured models)
             elif isinstance(response, str):
@@ -236,21 +248,30 @@ Please present your analysis in a clear, structured format.
     
     def normalize_tool_name(self, tool_name: str) -> str:
         """Normalize the tool name to match the available tools."""
+        print(f"DEBUG: normalize_tool_name called with: '{tool_name}'")
+        print(f"DEBUG: available_tools: {self.available_tools}")
+        print(f"DEBUG: available_tools type: {type(self.available_tools)}")
+        print(f"DEBUG: available_tools length: {len(self.available_tools) if self.available_tools else 0}")
+        
         # First try exact match
         if tool_name in self.available_tools:
+            print(f"DEBUG: Exact match found: {tool_name}")
             return tool_name
         
         # Then try case-insensitive exact match
         tool_name_lower = tool_name.lower()
         for tool in self.available_tools:
             if tool.lower() == tool_name_lower:
+                print(f"DEBUG: Case-insensitive exact match found: {tool}")
                 return tool
         
         # Finally try partial match (tool_name contains available tool name)
         for tool in self.available_tools:
             if tool.lower() in tool_name_lower:
+                print(f"DEBUG: Partial match found: {tool}")
                 return tool
         
+        print(f"DEBUG: No match found for: {tool_name}")
         return "No matched tool given: " + tool_name
 
     def generate_next_step(self, question: str, image: str, query_analysis: str, memory: Memory, step_count: int, max_step_count: int, bytes_mode: bool = False) -> NextStep:
@@ -515,24 +536,39 @@ Example (do not copy, use only as reference):
                     tool_name="Generalist_Solution_Generator_Tool" if "Generalist_Solution_Generator_Tool" in self.available_tools else self.available_tools[0] if self.available_tools else "No tool available"
                 )
         
-        # Extract context, sub_goal, and tool_name from the NextStep object
-        context, sub_goal, tool_name = self.extract_context_subgoal_and_tool(next_step)
+        # For NextStep objects, extract the values directly without re-normalizing
+        if hasattr(next_step, 'context') and hasattr(next_step, 'sub_goal') and hasattr(next_step, 'tool_name'):
+            context = next_step.context.strip()
+            sub_goal = next_step.sub_goal.strip()
+            tool_name = next_step.tool_name.strip()
+            justification = getattr(next_step, 'justification', 'No justification provided')
+            
+            print(f"DEBUG: Extracted from NextStep object - tool_name: {tool_name}")
+            
+            # CRITICAL: Final check to prevent skipping Fibroblast_State_Analyzer_Tool
+            if (tool_name == "Fibroblast_Activation_Scorer_Tool" and 
+                "Single_Cell_Cropper_Tool" in finished_tools and 
+                "Fibroblast_State_Analyzer_Tool" not in finished_tools):
+                print(f"DEBUG: CRITICAL: Final override - forcing Fibroblast_State_Analyzer_Tool")
+                justification = "Fibroblast analysis pipeline requires Fibroblast_State_Analyzer_Tool to generate h5ad file before activation scoring."
+                context = "Use the cell crops from Single_Cell_Cropper_Tool as input for Fibroblast_State_Analyzer_Tool."
+                sub_goal = "Run Fibroblast_State_Analyzer_Tool on the cell crops to generate h5ad file for downstream activation scoring."
+                tool_name = "Fibroblast_State_Analyzer_Tool"
+            
+            return NextStep(
+                justification=justification,
+                context=context,
+                sub_goal=sub_goal,
+                tool_name=tool_name
+            )
         
-        # CRITICAL: Final check to prevent skipping Fibroblast_State_Analyzer_Tool
-        if (tool_name == "Fibroblast_Activation_Scorer_Tool" and 
-            "Single_Cell_Cropper_Tool" in finished_tools and 
-            "Fibroblast_State_Analyzer_Tool" not in finished_tools):
-            print(f"DEBUG: CRITICAL: Final override - forcing Fibroblast_State_Analyzer_Tool")
-            justification = "Fibroblast analysis pipeline requires Fibroblast_State_Analyzer_Tool to generate h5ad file before activation scoring."
-            context = "Use the cell crops from Single_Cell_Cropper_Tool as input for Fibroblast_State_Analyzer_Tool."
-            sub_goal = "Run Fibroblast_State_Analyzer_Tool on the cell crops to generate h5ad file for downstream activation scoring."
-            tool_name = "Fibroblast_State_Analyzer_Tool"
-        
+        # Fallback for unknown response types
+        print(f"WARNING: Unknown response type: {type(next_step)}")
         return NextStep(
-            justification=getattr(next_step, 'justification', 'No justification provided'),
-            context=context,
-            sub_goal=sub_goal,
-            tool_name=tool_name
+            justification="Unknown response type, using fallback",
+            context="Previous steps completed",
+            sub_goal="Continue analysis with available tools",
+            tool_name="Generalist_Solution_Generator_Tool" if "Generalist_Solution_Generator_Tool" in self.available_tools else self.available_tools[0] if self.available_tools else "No tool available"
         )
 
     def verificate_memory(self, question: str, image: str, query_analysis: str, memory: Memory, bytes_mode: bool = False) -> MemoryVerification:
