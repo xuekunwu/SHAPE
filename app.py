@@ -24,7 +24,7 @@ import traceback
 import psutil  # For memory usage
 from llm_evaluation_scripts.hf_model_configs import HF_MODEL_CONFIGS
 from datetime import datetime
-from octotools.models.utils import make_json_serializable, VisualizationConfig
+from octotools.models.utils import make_json_serializable, VisualizationConfig, normalize_tool_name
 
 # Add the project root to the Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
