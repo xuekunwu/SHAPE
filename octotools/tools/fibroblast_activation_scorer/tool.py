@@ -340,19 +340,15 @@ class Fibroblast_Activation_Scorer_Tool(BaseTool):
             # 3. Set root cell for DPT calculation
             print("Setting root cell for DPT calculation...")
             if 'predicted_class' in query_data.obs.columns:
-                # Try to find a q-Fb cell as root
                 qfb_mask = query_data.obs['predicted_class'] == 'q-Fb'
                 if qfb_mask.sum() > 0:
-                    # Use the first q-Fb cell as root
                     root_idx = np.where(qfb_mask)[0][0]
                     query_data.uns['iroot'] = root_idx
                     print(f"✅ Set root cell to q-Fb cell at index {root_idx}")
                 else:
-                    # If no q-Fb cells, use the first cell
                     query_data.uns['iroot'] = 0
                     print("✅ Set root cell to first cell (no q-Fb cells found)")
             else:
-                # If no predicted_class, use the first cell
                 query_data.uns['iroot'] = 0
                 print("✅ Set root cell to first cell (no predicted_class available)")
             
