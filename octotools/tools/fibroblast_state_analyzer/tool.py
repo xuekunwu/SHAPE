@@ -178,17 +178,10 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                 num_classes=len(self.class_names)
             ).to(self.device)
 
-            # Re-create the classifier head exactly as in the training notebook
+            # Set classifier head to a single Linear layer as in training
             feat_dim = feat_dim_map[backbone_arch]
-            hidden_dim = feat_dim // 2
-            self.model.backbone.head = nn.Sequential(
-                nn.Linear(feat_dim, hidden_dim),
-                nn.ReLU(inplace=True),
-                nn.Dropout(p=0),
-                nn.Linear(hidden_dim, len(self.class_names))
-            ).to(self.device)
-            
-            logger.info(f"Using {backbone_name} backbone with a custom {hidden_dim}-hidden-dim head.")
+            self.model.backbone.head = nn.Linear(feat_dim, len(self.class_names)).to(self.device)
+            logger.info(f"Using {backbone_name} backbone with a single Linear head.")
             
             # Load finetuned weights from HuggingFace Hub or local path
             model_loaded = False
