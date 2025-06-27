@@ -157,22 +157,14 @@ Please present your analysis in a clear, structured format.
 
     def extract_context_subgoal_and_tool(self, response) -> Tuple[str, str, str]:
         def normalize_tool_name(tool_name: str) -> str:
-            # First try exact match
-            if tool_name in self.available_tools:
-                return tool_name
-            
-            # Then try case-insensitive exact match
-            tool_name_lower = tool_name.lower()
+            # Normalize the tool name to match the available tools
             for tool in self.available_tools:
-                if tool.lower() == tool_name_lower:
-                    return tool
-            
-            # Finally try partial match (tool_name contains available tool name)
-            for tool in self.available_tools:
-                if tool.lower() in tool_name_lower:
-                    return tool
-            
-            return "No matched tool given: " + tool_name
+                if tool.lower() in tool_name.lower():
+                    tool_name = tool
+                    break
+            else:
+                tool_name = "No matched tool given: " + tool_name
+            return tool_name
         
         try:
             print(f"DEBUG: extract_context_subgoal_and_tool - response type: {type(response)}")
@@ -246,34 +238,6 @@ Please present your analysis in a clear, structured format.
             print(f"Error in extract_context_subgoal_and_tool: {e}")
             return "", "", "Error extracting tool name"
     
-    def normalize_tool_name(self, tool_name: str) -> str:
-        """Normalize the tool name to match the available tools."""
-        print(f"DEBUG: normalize_tool_name called with: '{tool_name}'")
-        print(f"DEBUG: available_tools: {self.available_tools}")
-        print(f"DEBUG: available_tools type: {type(self.available_tools)}")
-        print(f"DEBUG: available_tools length: {len(self.available_tools) if self.available_tools else 0}")
-        
-        # First try exact match
-        if tool_name in self.available_tools:
-            print(f"DEBUG: Exact match found: {tool_name}")
-            return tool_name
-        
-        # Then try case-insensitive exact match
-        tool_name_lower = tool_name.lower()
-        for tool in self.available_tools:
-            if tool.lower() == tool_name_lower:
-                print(f"DEBUG: Case-insensitive exact match found: {tool}")
-                return tool
-        
-        # Finally try partial match (tool_name contains available tool name)
-        for tool in self.available_tools:
-            if tool.lower() in tool_name_lower:
-                print(f"DEBUG: Partial match found: {tool}")
-                return tool
-        
-        print(f"DEBUG: No match found for: {tool_name}")
-        return "No matched tool given: " + tool_name
-
     def generate_next_step(self, question: str, image: str, query_analysis: str, memory: Memory, step_count: int, max_step_count: int, bytes_mode: bool = False) -> NextStep:
         # --- Enforce strict tool dependency chain ---
         TOOL_CHAIN = [
@@ -506,7 +470,12 @@ Example (do not copy, use only as reference):
                             tool_name = ""
                 
                 # Normalize tool name
-                tool_name = self.normalize_tool_name(tool_name)
+                for tool in self.available_tools:
+                    if tool.lower() in tool_name.lower():
+                        tool_name = tool
+                        break
+                else:
+                    tool_name = "No matched tool given: " + tool_name
                 
                 print(f"DEBUG: Parsed string response - tool_name: {tool_name}")
                 
