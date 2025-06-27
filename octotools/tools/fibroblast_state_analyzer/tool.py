@@ -774,34 +774,6 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
             logger.error(f"Error creating pie chart: {str(e)}")
             print(f"❌ Error creating pie chart: {str(e)}")
 
-        # 2. Confidence Distribution (Histogram)
-        try:
-            fig, ax = vis_config.create_professional_figure(figsize=(12, 8))
-            confidences = [r['confidence'] for r in results]
-            n, bins, patches = ax.hist(confidences, bins=20, edgecolor='black', alpha=0.7)
-            
-            q_fb_color = vis_config.get_professional_colors().get('q-Fb', '#66B22F')
-            for i in range(len(patches)):
-                if bins[i] >= self.confidence_threshold:
-                    patches[i].set_fc(q_fb_color)
-            
-            vis_config.apply_professional_styling(
-                ax, title="Confidence Score Distribution",
-                xlabel="Confidence Score", ylabel="Number of Cells"
-            )
-            ax.axvline(self.confidence_threshold, color='red', linestyle='--', linewidth=2, 
-                       label=f'Threshold: {self.confidence_threshold}')
-            ax.legend()
-            
-            conf_path = os.path.join(output_dir, "confidence_distribution.png")
-            vis_config.save_professional_figure(fig, conf_path)
-            plt.close(fig)
-            output_paths.append(conf_path)
-            print(f"✅ Created confidence histogram: {conf_path}")
-        except Exception as e:
-            logger.error(f"Error creating confidence histogram: {str(e)}")
-            print(f"❌ Error creating confidence histogram: {str(e)}")
-
         # 3. Bar Chart of Cell States
         try:
             fig, ax = vis_config.create_professional_figure(figsize=(12, 8))
