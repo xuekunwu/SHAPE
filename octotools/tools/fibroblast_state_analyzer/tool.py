@@ -818,6 +818,7 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
         }
 
     def _create_visualizations(self, results: list, features: np.ndarray, stats: dict, output_dir: str) -> list:
+        from octotools.models.utils import VisualizationConfig
         vis_config = VisualizationConfig()
         output_paths = []
         # 1. Pie chart of cell state distribution
