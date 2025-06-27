@@ -515,6 +515,9 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
             logger.info(f"Classification summary: {unique_classes} unique classes out of {len(self.class_names)} possible classes")
             logger.info(f"Class distribution: {dict(class_counts)}")
             
+            # Collect warnings for the final result
+            warnings = []
+            
             # Warn if not all classes are represented
             if unique_classes < len(self.class_names):
                 missing_classes = set(self.class_names) - set(class_counts.keys())
@@ -522,10 +525,8 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                 logger.warning(f"Missing classes: {missing_classes}")
                 logger.warning(f"This might indicate: 1) Limited test data diversity, 2) Model bias, 3) Training data imbalance")
                 
-                # Add warning to results
-                if "warnings" not in results:
-                    results["warnings"] = []
-                results["warnings"].append({
+                # Add warning to warnings list
+                warnings.append({
                     "type": "class_distribution",
                     "message": f"Only {unique_classes}/{len(self.class_names)} classes predicted. Missing: {missing_classes}",
                     "suggestion": "Consider using more diverse test data or checking model training balance"
@@ -540,6 +541,12 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                 if imbalance_ratio > 10:  # If most common class is 10x more frequent than least common
                     logger.warning(f"Extreme class imbalance detected: ratio = {imbalance_ratio:.1f}")
                     logger.warning(f"Most common: {max_count} cells, Least common: {min_count} cells")
+                    
+                    warnings.append({
+                        "type": "class_imbalance",
+                        "message": f"Extreme class imbalance detected: ratio = {imbalance_ratio:.1f}",
+                        "suggestion": "Consider using class-balanced training or data augmentation"
+                    })
             
             # Build AnnData object for downstream activation scoring
             obs_dict = {
@@ -593,7 +600,8 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                     "metadata_files_used": self._list_metadata_files(query_cache_dir)
                 },
                 "adata": adata,
-                "h5ad_path": h5ad_path
+                "h5ad_path": h5ad_path,
+                "warnings": warnings
             }
             
         except Exception as e:
