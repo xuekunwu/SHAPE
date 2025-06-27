@@ -157,14 +157,10 @@ Please present your analysis in a clear, structured format.
 
     def extract_context_subgoal_and_tool(self, response) -> Tuple[str, str, str]:
         def normalize_tool_name(tool_name: str) -> str:
-            # Normalize the tool name to match the available tools
             for tool in self.available_tools:
                 if tool.lower() in tool_name.lower():
-                    tool_name = tool
-                    break
-            else:
-                tool_name = "No matched tool given: " + tool_name
-            return tool_name
+                    return tool
+            return "No matched tool given: " + tool_name
         
         try:
             print(f"DEBUG: extract_context_subgoal_and_tool - response type: {type(response)}")
@@ -470,12 +466,7 @@ Example (do not copy, use only as reference):
                             tool_name = ""
                 
                 # Normalize tool name
-                for tool in self.available_tools:
-                    if tool.lower() in tool_name.lower():
-                        tool_name = tool
-                        break
-                else:
-                    tool_name = "No matched tool given: " + tool_name
+                tool_name = normalize_tool_name(tool_name)
                 
                 print(f"DEBUG: Parsed string response - tool_name: {tool_name}")
                 
@@ -509,7 +500,7 @@ Example (do not copy, use only as reference):
         if hasattr(next_step, 'context') and hasattr(next_step, 'sub_goal') and hasattr(next_step, 'tool_name'):
             context = next_step.context.strip()
             sub_goal = next_step.sub_goal.strip()
-            tool_name = next_step.tool_name.strip()
+            tool_name = normalize_tool_name(next_step.tool_name.strip())
             justification = getattr(next_step, 'justification', 'No justification provided')
             
             print(f"DEBUG: Extracted from NextStep object - tool_name: {tool_name}")
