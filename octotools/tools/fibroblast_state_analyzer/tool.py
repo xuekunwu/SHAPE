@@ -56,23 +56,8 @@ class DinoV2Classifier(nn.Module):
         self.backbone = backbone
         self.num_classes = num_classes
         
-    def forward(self, x, return_features=False):
-        """
-        Correctly processes the input tensor, extracts the classification token,
-        and returns logits. Optionally returns the feature tensor as well.
-        """
-        # DINOv2 backbone returns a dict. We need to extract the feature tensor.
-        features_dict = self.backbone.forward_features(x)
-        
-        # The classification token is what is used for linear probing.
-        features = features_dict['x_norm_clstoken']
-        
-        # Pass the feature tensor to our custom classifier head.
-        logits = self.backbone.head(features)
-        
-        if return_features:
-            return logits, features
-        return logits
+    def forward(self, x):
+        return self.backbone(x)
 
 class Fibroblast_State_Analyzer_Tool(BaseTool):
     """
@@ -80,33 +65,19 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
     Processes individual cell crops to determine their activation state.
     """
     
-    def __init__(self, model_path=None, backbone_size="base", confidence_threshold=0.5):
+    def __init__(self, model_path=None, backbone_size="large", confidence_threshold=0.5):
         super().__init__(
             tool_name="Fibroblast_State_Analyzer_Tool",
-            tool_description="Analyzes fibroblast cell states using deep learning to classify individual cells into different activation states. Generates comprehensive visualizations including UMAP plots for cell distribution analysis, PCA plots, confidence distributions, and cell state bar charts. UMAP visualization is particularly useful for understanding cell clustering and spatial relationships in the feature space.",
+            tool_description="Classifies fibroblast cell states from single-cell images using a DINOv2 backbone and a custom classifier head. Provides detailed statistics and visualizations.",
             tool_version="1.0.0",
             input_types={
-                "cell_crops": "List[str] - Paths to individual cell crop images",
-                "cell_metadata": "List[dict] - Metadata for each cell crop",
-                "batch_size": "int - Batch size for processing (default: 16)",
-                "query_cache_dir": "str - Directory for caching results",
-                "visualization_type": "str - Visualization method: 'pca', 'umap', 'auto', or 'all' (default: 'auto'). Use 'all' to generate all visualizations including UMAP for cell distribution analysis."
+                "cell_crops": "List[str] - List of cell crop image paths or PIL Images.",
+                "cell_metadata": "List[dict] - List of metadata dictionaries for each cell.",
+                "batch_size": "int - Batch size for processing (default: 16).",
+                "query_cache_dir": "str - Directory for caching results (default: 'solver_cache').",
+                "visualization_type": "str - Type of visualization ('pca', 'umap', 'auto', 'all')."
             },
-            output_type="dict - Analysis results with cell state classifications, statistics, and comprehensive visualizations including UMAP plots",
-            demo_commands=[
-                {
-                    "command": 'execution = tool.execute(cell_crops=["cell_0001.png", "cell_0002.png"], cell_metadata=[{"cell_id": 1}, {"cell_id": 2}], visualization_type="all")',
-                    "description": "Analyze cell states with all visualizations including UMAP for cell distribution analysis"
-                },
-                {
-                    "command": 'execution = tool.execute(cell_crops=["cell_0001.png"], visualization_type="umap")',
-                    "description": "Analyze with UMAP visualization to show cell clustering and distribution in feature space"
-                },
-                {
-                    "command": 'execution = tool.execute(cell_crops=["cell_0001.png"], visualization_type="all")',
-                    "description": "Generate comprehensive analysis with all visualizations: UMAP, PCA, confidence distributions, and cell state charts"
-                }
-            ],
+            output_type="dict - Analysis results with classifications and statistics.",
             user_metadata={
                 "limitation": "Requires GPU for optimal performance. Model accuracy depends on image quality and cell visibility. May struggle with very small or overlapping cells.",
                 "best_practice": "Use with high-quality cell crops from Single_Cell_Cropper_Tool. Ensure cells are well-separated and clearly visible in crops. For best results, use visualization_type='all' to get comprehensive visualizations including UMAP.",
@@ -115,20 +86,17 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                 "umap_benefits": "UMAP visualization provides superior insights into cell distribution patterns, helping identify clusters, outliers, and spatial relationships between different cell states in the high-dimensional feature space."
             }
         )
-        
         # Device configuration
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         logger.info(f"Fibroblast_State_Analyzer_Tool: Using device: {self.device}")
-        
         # Model configuration
         self.model_path = model_path
         self.backbone_size = backbone_size
-        self.confidence_threshold = confidence_threshold
-        
+        self.confidence_threshold = confidence_threshold  # 保留参数但不再用于过滤
         # Cell state classes with specific colors
         self.class_names = ["dead", "np-MyoFb", "p-MyoFb", "proto-MyoFb", "q-Fb"]
         self.class_descriptions = {
-            "dead": "Dead or dying cells",
+            "dead": "Dead cells",
             "np-MyoFb": "Non-proliferative myofibroblasts",
             "p-MyoFb": "Proliferative myofibroblasts", 
             "proto-MyoFb": "Proto-myofibroblasts",
@@ -160,13 +128,7 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
             logger.info("Initializing DINOv2 model (torch.hub)...")
             
             # Define backbone architecture based on size
-            backbone_archs = {
-                "small": "vits14", "base": "vitb14", "large": "vitl14", "giant": "vitg14"
-            }
-            feat_dim_map = {
-                "vits14": 384, "vitb14": 768, "vitl14": 1024, "vitg14": 1536
-            }
-            backbone_arch = backbone_archs.get(self.backbone_size, "vitb14")
+            backbone_arch = self.backbone_size
             backbone_name = f"dinov2_{backbone_arch}"
 
             # Load the DINOv2 backbone using torch.hub to match the training environment
@@ -179,60 +141,55 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                 num_classes=len(self.class_names)
             ).to(self.device)
 
-            # Set classifier head to a single Linear layer as in training
-            feat_dim = feat_dim_map[backbone_arch]
-            self.model.backbone.head = nn.Linear(feat_dim, len(self.class_names)).to(self.device)
-            logger.info(f"Using {backbone_name} backbone with a single Linear head.")
+            # Set classifier head to Sequential structure as in training
+            feat_dim = self.feat_dim_map[backbone_arch]
+            hidden_dim = feat_dim // 2
+            self.model.backbone.head = nn.Sequential(
+                nn.Linear(feat_dim, hidden_dim),
+                nn.ReLU(inplace=True),
+                nn.Dropout(p=0),  # no drop for inference
+                nn.Linear(hidden_dim, len(self.class_names))
+            ).to(self.device)
+            logger.info(f"Using {backbone_name} backbone with Sequential classifier head.")
             logger.info(f"Classifier head: {self.model.backbone.head}")
             logger.info(f"Expected output classes: {len(self.class_names)}")
             
             # Load finetuned weights from HuggingFace Hub or local path
             model_loaded = False
             
-            # Try to load weights based on backbone size
-            if self.model_path and os.path.exists(self.model_path):
-                try:
-                    logger.info(f"Attempting to load from local path: {self.model_path}")
-                    state_dict = torch.load(self.model_path, map_location=self.device, weights_only=True)
-                    if 'model_state_dict' in state_dict:
-                        self.model.load_state_dict(state_dict['model_state_dict'])
-                    else:
-                        self.model.load_state_dict(state_dict)
-                    logger.info("Successfully loaded model from local path")
-                    model_loaded = True
-                except Exception as local_e:
-                    logger.error(f"Failed to load from local path: {str(local_e)}")
-            
-            if not model_loaded:
-                try:
-                    # Try to load the new model.pt (trained on base backbone)
-                    logger.info("Attempting to download new model.pt (trained on base backbone) from HuggingFace Hub...")
-                    model_weights_path = hf_hub_download(
-                        repo_id="5xuekun/fb-classifier-model",
-                        filename="model.pth",
-                        token=os.getenv("HUGGINGFACE_TOKEN")
-                    )
-                    logger.info(f"Downloaded model weights to: {model_weights_path}")
-                    
-                    # Load the state dict
-                    checkpoint_data = torch.load(model_weights_path, map_location=self.device, weights_only=True)
-                    if 'model_state_dict' in checkpoint_data:
-                        self.model.load_state_dict(checkpoint_data['model_state_dict'])
-                    else:
-                        self.model.load_state_dict(checkpoint_data)
-                    logger.info("Successfully loaded finetuned weights from new model.pt")
-                    model_loaded = True
+            # 只允许从 HuggingFace Hub 下载权重，不支持本地权重，也不允许无权重
+            try:
+                logger.info("Attempting to download model from HuggingFace Hub...")
+                model_weights_path = hf_hub_download(
+                    repo_id="5xuekun/fb-classifier-model",
+                    filename="model.pt",
+                    token=os.getenv("HUGGINGFACE_TOKEN")
+                )
+                logger.info(f"Downloaded model weights to: {model_weights_path}")
 
-                except Exception as e:
-                    logger.warning(f"Failed to load weights from HuggingFace Hub: {str(e)}")
+                checkpoint = torch.load(model_weights_path, map_location=self.device)
+                if 'model_state_dict' in checkpoint:
+                    self.model.load_state_dict(checkpoint['model_state_dict'])
+                else:
+                    self.model.load_state_dict(checkpoint)
+                self.model.to(self.device)
+                self.model.eval()
+                logger.info("Successfully loaded finetuned weights from HuggingFace Hub")
+                model_loaded = True
+
+            except Exception as e:
+                logger.error(f"Failed to load weights from HuggingFace Hub: {str(e)}")
+                raise RuntimeError(f"Failed to load model weights from HuggingFace Hub: {e}")
 
             if not model_loaded:
                 logger.info("Using untrained classifier head")
 
-            self.model.eval()
-            
             # Verify model structure after loading
-            logger.info(f"Model loaded successfully. Classifier head output dimension: {self.model.backbone.head.out_features}")
+            if isinstance(self.model.backbone.head, nn.Sequential):
+                output_dim = self.model.backbone.head[-1].out_features
+            else:
+                output_dim = self.model.backbone.head.out_features
+            logger.info(f"Model loaded successfully. Classifier head output dimension: {output_dim}")
             logger.info(f"Expected number of classes: {len(self.class_names)}")
             
             # Test model with dummy input to verify output
@@ -247,11 +204,12 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                 else:
                     logger.info("Model output dimension matches expected number of classes")
             
-            # Define transforms for preprocessing
+            # Define transforms for preprocessing - 与训练时完全一致
             self.transform = transforms.Compose([
-                transforms.Resize((224, 224)),
+                transforms.Resize(224, interpolation=transforms.InterpolationMode.BICUBIC),
+                transforms.CenterCrop(224),  # Optional but recommended
                 transforms.ToTensor(),
-                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+                transforms.Normalize(mean=[0.4636, 0.5032, 0.5822], std=[0.2483, 0.2660, 0.2907]),
             ])
             
             # Mark model as initialized
@@ -266,7 +224,10 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
         """Check if the model has been trained by examining classifier weights."""
         try:
             # Check the norm of the last layer's weights
-            final_layer_weights = self.model.backbone.head[-1].weight.data
+            if isinstance(self.model.backbone.head, nn.Sequential):
+                final_layer_weights = self.model.backbone.head[-1].weight.data
+            else:
+                final_layer_weights = self.model.backbone.head.weight.data
             weights_norm = torch.norm(final_layer_weights).item()
             return weights_norm > 0.1 # A simple heuristic
         except Exception as e:
@@ -276,11 +237,27 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
     def _preprocess_image(self, image_path: str) -> torch.Tensor:
         """Preprocess a single image for model input."""
         try:
-            # Load and convert to RGB
-            img = Image.open(image_path).convert("RGB")
+            if image_path.lower().endswith('.tif') or image_path.lower().endswith('.tiff'):
+                from skimage import io
+                image = io.imread(image_path).astype(np.float32)
+                
+                if image.dtype == np.uint16:
+                    image = image / 65535.0  # 16-bit normalization
+                else:
+                    image = image / 255.0    # 8-bit normalization
+                
+                if len(image.shape) == 2:
+                    image = np.repeat(image[:, :, np.newaxis], 3, axis=-1)  # (H, W) → (H, W, 3)
+                
+                image = Image.fromarray((image * 255).astype(np.uint8)).convert("RGB")
+            else:
+                image = Image.open(image_path).convert("RGB")
             
-            # Apply transforms
-            img_tensor = self.transform(img).unsqueeze(0)
+            img_tensor = self.transform(image)
+            
+            img_tensor = torch.clamp(img_tensor, 0.0, 1.0)
+            
+            img_tensor = img_tensor.unsqueeze(0)
             return img_tensor.to(self.device)
             
         except Exception as e:
@@ -292,49 +269,37 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
         try:
             # Preprocess image
             img_tensor = self._preprocess_image(image_path)
-            
             # Get predictions and features
             with torch.no_grad():
+                # Get logits from the model
+                logits = model(img_tensor)
                 # Extract features from backbone (before classifier head)
-                # DINOv2 backbone returns a dict with 'x_norm_clstoken' as the CLS token
-                backbone_output = model.backbone(img_tensor)
-                
-                # Extract CLS token features (this is the embedding we want for UMAP)
+                backbone_output = model.backbone.forward_features(img_tensor)
                 if isinstance(backbone_output, dict):
-                    # DINOv2 returns dict with 'x_norm_clstoken' key
                     features = backbone_output['x_norm_clstoken']  # Shape: [1, feat_dim]
                 else:
-                    # Fallback: if backbone returns tensor directly, use it
                     features = backbone_output
                     if features.dim() > 2:
-                        # If it's [1, seq_len, feat_dim], take the CLS token (first token)
-                        features = features[:, 0, :]  # Shape: [1, feat_dim]
-                
-                # Get classification logits through the full model
-                logits = model(img_tensor)
+                        features = features[:, 0, :]
                 probs = torch.softmax(logits, dim=1)
                 pred_idx = probs.argmax(dim=1).item()
                 confidence = probs[0][pred_idx].item()
-                
                 # Debug: Log all probabilities for verification
                 logger.debug(f"Classification for {os.path.basename(image_path)}:")
                 logger.debug(f"Logits: {logits.squeeze().cpu().numpy()}")
                 logger.debug(f"Probabilities: {probs.squeeze().cpu().numpy()}")
                 logger.debug(f"Predicted class: {self.class_names[pred_idx]} (index: {pred_idx})")
                 logger.debug(f"Confidence: {confidence:.4f}")
-            
             # Create result
             result = {
                 "image_path": image_path,
                 "predicted_class": self.class_names[pred_idx],
                 "confidence": confidence,
                 "features": features.squeeze(0).cpu().numpy(),
-                "all_probabilities": probs.squeeze(0).cpu().numpy().tolist(),  # Add all probabilities for debugging
-                "all_logits": logits.squeeze(0).cpu().numpy().tolist()  # Add all logits for debugging
+                "all_probabilities": probs.squeeze(0).cpu().numpy().tolist(),
+                "all_logits": logits.squeeze(0).cpu().numpy().tolist()
             }
-            
-            return result, features.squeeze(0)  # Remove batch dimension
-            
+            return result, features.squeeze(0)
         except Exception as e:
             logger.error(f"Error classifying cell {image_path}: {str(e)}")
             return {
@@ -410,7 +375,6 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                 batch_paths = cell_crops[i:i+batch_size]
                 valid_paths_in_batch = []
                 img_tensors = []
-
                 for path in batch_paths:
                     try:
                         img_tensors.append(self._preprocess_image(path).squeeze(0))
@@ -418,26 +382,26 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                     except Exception as e:
                         logger.warning(f"Skipping problematic crop {path}: {e}")
                         continue
-                
                 if not img_tensors:
                     logger.warning(f"Skipping empty batch from index {i}")
                     continue
-
                 batch_tensor = torch.stack(img_tensors)
-                
-                # Get model output in no_grad context
                 with torch.no_grad():
-                    logits, features = self.model(batch_tensor, return_features=True)
+                    logits = self.model(batch_tensor)
                     probs = F.softmax(logits, dim=1)
                     confidences, predictions = torch.max(probs, dim=1)
-                
-                # Process batch results, ensuring we only use valid paths
+                    backbone_output = self.model.backbone.forward_features(batch_tensor)
+                    if isinstance(backbone_output, dict):
+                        features = backbone_output['x_norm_clstoken']
+                    else:
+                        features = backbone_output
+                        if features.dim() > 2:
+                            features = features[:, 0, :]
                 for j, path in enumerate(valid_paths_in_batch):
                     if j < len(predictions):
                         pred_index = predictions[j].item()
                         confidence = confidences[j].item()
                         feature_vector = features[j].cpu().numpy()
-                        
                         result = {
                             "image_path": path,
                             "predicted_class": self.class_names[pred_index],
@@ -445,7 +409,7 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                             "features": feature_vector
                         }
                         results.append(result)
-                        features_list.append(feature_vector)  # Add features to the list
+                        features_list.append(feature_vector)
 
             print(f"Processing completed. Total results: {len(results)}, Total features: {len(features_list)}")
             
@@ -548,35 +512,35 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                         "suggestion": "Consider using class-balanced training or data augmentation"
                     })
             
-            # Build AnnData object for downstream activation scoring
+            # Build AnnData object for downstream activation scoring (strictly follow user format)
+            X = np.array(features_list)
+            image_names = [os.path.basename(r['image_path']) for r in results]
+            predicted_classes = [r['predicted_class'] for r in results]
+            groups = [r.get('group', '') for r in results]
+            cell_ids = [f"cell_{i}" for i in range(len(results))]
             obs_dict = {
-                'image_path': [r['image_path'] for r in results],
-                'predicted_class': [r['predicted_class'] for r in results],
-                'confidence': [r['confidence'] for r in results],
+                'predicted_class': predicted_classes,
+                'image_name': image_names,
+                'group': groups,
+                'cell_id': cell_ids
             }
-            # Fix for anndata compatibility - create AnnData with proper obs DataFrame
+            import pandas as pd
             obs_df = pd.DataFrame(obs_dict)
-            X = np.array([r['features'] for r in results])
+            obs_df.index = cell_ids  # obs_names
+            import anndata
             adata = anndata.AnnData(X=X, obs=obs_df)
-            
-            # Save AnnData as h5ad file for downstream activation scoring
+            adata.obs_names = cell_ids
             try:
-                # Create output directory using VisualizationConfig
                 from octotools.models.utils import VisualizationConfig
                 output_dir = VisualizationConfig.get_output_dir(query_cache_dir)
-                
-                # Save h5ad file
                 h5ad_path = os.path.join(output_dir, "fibroblast_state_analyzed.h5ad")
                 adata.write(h5ad_path)
                 print(f"💾 AnnData saved to: {h5ad_path}")
-                
-                # Also save to tool cache directory for easier access
                 tool_cache_dir = os.path.join(query_cache_dir, "tool_cache")
                 os.makedirs(tool_cache_dir, exist_ok=True)
                 tool_cache_h5ad_path = os.path.join(tool_cache_dir, "fibroblast_state_analyzed.h5ad")
                 adata.write(tool_cache_h5ad_path)
                 print(f"💾 AnnData also saved to tool cache: {tool_cache_h5ad_path}")
-                
             except Exception as e:
                 print(f"⚠️ Warning: Failed to save AnnData as h5ad file: {str(e)}")
                 h5ad_path = None
@@ -584,15 +548,12 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
             return {
                 "summary": summary,
                 "cell_state_distribution": self._get_state_distribution(results),
-                "average_confidence": np.mean([r['confidence'] for r in results]),
                 "visual_outputs": visual_outputs,
                 "parameters": {
-                    "confidence_threshold": self.confidence_threshold,
-                    "backbone_size": "base",
+                    "backbone_size": "large",
                     "model_path": self.model_path
                 },
                 "cell_state_descriptions": self.class_descriptions,
-                "analysis_quality": self._assess_quality(results),
                 "recommendations": recommendations,
                 "metadata_info": {
                     "total_crops_processed": len(cell_crops),
@@ -619,11 +580,25 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
             Tuple of (cell_crops, cell_metadata)
         """
         try:
-            # Find all metadata files
-            metadata_files = glob.glob(os.path.join(cache_dir, 'cell_crops_metadata_*.json'))
+            # Find all metadata files in cache_dir and its subdirectories
+            metadata_files = []
+            
+            # Search in the main cache directory
+            metadata_files.extend(glob.glob(os.path.join(cache_dir, 'cell_crops_metadata_*.json')))
+            
+            # Search in tool_cache subdirectory (where single_cell_cropper saves files)
+            tool_cache_dir = os.path.join(cache_dir, 'tool_cache')
+            if os.path.exists(tool_cache_dir):
+                metadata_files.extend(glob.glob(os.path.join(tool_cache_dir, 'cell_crops_metadata_*.json')))
+            
+            # Search recursively in all subdirectories
+            for root, dirs, files in os.walk(cache_dir):
+                for file in files:
+                    if file.startswith('cell_crops_metadata_') and file.endswith('.json'):
+                        metadata_files.append(os.path.join(root, file))
             
             if not metadata_files:
-                print(f"No metadata files found in {cache_dir}")
+                print(f"No metadata files found in {cache_dir} or its subdirectories")
                 return [], []
             
             # Sort by modification time (newest first)
@@ -651,6 +626,14 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                     cell_metadata_list = metadata['crops']
                 elif 'cell_crops' in metadata:
                     cell_metadata_list = metadata['cell_crops']
+                elif 'cell_crops_paths' in metadata:
+                    # Handle single_cell_cropper format
+                    cell_crops_paths = metadata['cell_crops_paths']
+                    cell_metadata_list = metadata.get('cell_metadata', [])
+                    
+                    # If we have paths but no metadata, create basic metadata
+                    if cell_crops_paths and not cell_metadata_list:
+                        cell_metadata_list = [{'crop_path': path, 'cell_id': i} for i, path in enumerate(cell_crops_paths)]
                 else:
                     # Try to find any list in the dictionary that contains crop data
                     cell_metadata_list = None
@@ -795,25 +778,17 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
         except Exception as e:
             return [{"error": f"Failed to list files: {str(e)}"}]
 
-    def _calculate_statistics(self, results: List[Dict]) -> Dict[str, Any]:
+    def _calculate_statistics(self, results: list) -> dict:
         """Calculate statistics from classification results."""
         if not results:
             return {
                 "class_distribution": {},
-                "average_confidence": 0.0,
                 "total_cells": 0
             }
-        
-        # Class distribution
         class_counts = {}
-        total_confidence = 0.0
-        
         for result in results:
             predicted_class = result.get("predicted_class", "unknown")
             class_counts[predicted_class] = class_counts.get(predicted_class, 0) + 1
-            total_confidence += result.get("confidence", 0.0)
-        
-        # Calculate percentages
         total_cells = len(results)
         class_distribution = {
             class_name: {
@@ -822,44 +797,24 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
             }
             for class_name, count in class_counts.items()
         }
-        
         return {
             "class_distribution": class_distribution,
-            "average_confidence": total_confidence / total_cells,
             "total_cells": total_cells
         }
-    
-    def _create_visualizations(self, results: List[Dict], features: np.ndarray, stats: Dict, output_dir: str) -> List[str]:
-        """
-        Creates all visualizations based on the analysis results and returns their paths.
-        This function now contains all centralized plotting logic.
-        """
-        from octotools.models.utils import VisualizationConfig
+
+    def _create_visualizations(self, results: list, features: np.ndarray, stats: dict, output_dir: str) -> list:
         vis_config = VisualizationConfig()
         output_paths = []
-
-        # 1. Cell State Distribution (Pie Chart)
+        # 1. Pie chart of cell state distribution
         try:
-            fig, ax = vis_config.create_professional_figure(figsize=(12, 8))
-            class_distribution = stats.get('class_distribution', {})
-            labels = list(class_distribution.keys())
-            sizes = [class_distribution[label]['count'] for label in labels]
-            colors = [vis_config.get_professional_colors().get(state, '#CCCCCC') for state in labels]
-            
-            wedges, texts, autotexts = ax.pie(
-                sizes, labels=None, autopct='%1.1f%%', startangle=140, 
-                colors=colors, wedgeprops=dict(edgecolor='w', linewidth=2)
-            )
-            plt.setp(autotexts, size=22, color="black", fontweight='bold')
+            fig, ax = vis_config.create_professional_figure(figsize=(10, 8))
+            class_counts = Counter([r['predicted_class'] for r in results])
+            labels = list(class_counts.keys())
+            sizes = list(class_counts.values())
+            color_list = [vis_config.get_professional_colors().get(label, '#cccccc') for label in labels]
+            ax.pie(sizes, labels=labels, autopct='%1.1f%%', startangle=140, colors=color_list)
             ax.axis('equal')
-            vis_config.apply_professional_styling(ax, title="Cell State Composition")
-            
-            ax.legend(wedges, labels, title="Cell States", loc="center left",
-                      bbox_to_anchor=(1, 0, 0.5, 1),
-                      fontsize=vis_config.PROFESSIONAL_STYLE['legend.fontsize'],
-                      title_fontsize=vis_config.PROFESSIONAL_STYLE['legend.title_fontsize'])
-            
-            fig.tight_layout()
+            ax.set_title("Cell State Distribution", fontsize=18, fontweight='bold')
             pie_path = os.path.join(output_dir, "cell_state_distribution.png")
             vis_config.save_professional_figure(fig, pie_path)
             plt.close(fig)
@@ -868,23 +823,20 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
         except Exception as e:
             logger.error(f"Error creating pie chart: {str(e)}")
             print(f"❌ Error creating pie chart: {str(e)}")
-
-        # 3. Bar Chart of Cell States
+        # 2. Bar chart of cell states
         try:
             fig, ax = vis_config.create_professional_figure(figsize=(12, 8))
-            class_distribution = stats.get('class_distribution', {})
-            labels = list(class_distribution.keys())
-            sizes = [class_distribution[label]['count'] for label in labels]
-            colors = [vis_config.get_professional_colors().get(state, '#CCCCCC') for state in labels]
-            
-            ax.bar(labels, sizes, color=colors, edgecolor='black', linewidth=2)
-            vis_config.apply_professional_styling(
-                ax, title="Cell State Counts",
-                xlabel="Cell State", ylabel="Number of Cells"
-            )
-            ax.tick_params(axis='x', rotation=45)
-            fig.tight_layout()
-            
+            class_counts = Counter([r['predicted_class'] for r in results])
+            labels = list(class_counts.keys())
+            sizes = list(class_counts.values())
+            color_list = [vis_config.get_professional_colors().get(label, '#cccccc') for label in labels]
+            bars = ax.bar(labels, sizes, color=color_list, edgecolor='black', linewidth=2, alpha=1.0)
+            ax.set_title("Number of Each Cell State", fontsize=18, fontweight='bold')
+            ax.set_xlabel("Cell States", fontsize=16, fontweight='bold')
+            ax.set_ylabel("Number of Cells", fontsize=16, fontweight='bold')
+            ax.grid(True, alpha=0.4, linewidth=1.0)
+            ax.tick_params(axis='both', which='major', labelsize=14, width=2, length=6)
+            ax.tick_params(axis='x', rotation=45, labelsize=14)
             bar_path = os.path.join(output_dir, "cell_state_bars.png")
             vis_config.save_professional_figure(fig, bar_path)
             plt.close(fig)
@@ -893,74 +845,9 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
         except Exception as e:
             logger.error(f"Error creating bar chart: {str(e)}")
             print(f"❌ Error creating bar chart: {str(e)}")
-
-        # 4. UMAP Visualization
-        if ANNDATA_AVAILABLE:
-            try:
-                logger.info("Creating UMAP visualization...")
-                print("🔍 Creating UMAP visualization...")
-                adata = anndata.AnnData(X=features)
-                adata.obs['predicted_class'] = [r['predicted_class'] for r in results]
-
-                sc.pp.neighbors(adata, n_neighbors=min(10, len(adata) - 1), use_rep='X')
-                sc.tl.umap(adata)
-
-                fig, ax = plt.subplots(figsize=(10, 10), dpi=300)
-                
-                # Use a specific palette for cell states
-                palette = vis_config.get_professional_colors()
-                
-                # Let scanpy handle the legend creation initially
-                sc.pl.umap(adata, color='predicted_class', ax=ax, show=False, size=200,
-                           palette=palette, legend_loc='on data')
-
-                # Customize the existing legend
-                legend = ax.get_legend()
-                if legend:
-                    legend.set_title("Cell States")
-                    legend.get_title().set_fontsize(vis_config.PROFESSIONAL_STYLE['legend.title_fontsize'])
-                    legend.get_title().set_fontweight('bold')
-                    for text in legend.get_texts():
-                        text.set_fontsize(vis_config.PROFESSIONAL_STYLE['legend.fontsize'])
-                    legend.set_frame_on(True)
-                    legend.set_bbox_to_anchor((1.05, 0.5))
-                    legend.set_loc('center left')
-                    legend.get_frame().set_edgecolor('black')
-                    legend.get_frame().set_linewidth(1.5)
-                    legend.get_frame().set_facecolor('#F0F0F0')
-                
-                # Remove default scanpy title if it exists, since we set a custom one
-                if ax.get_title():
-                    ax.set_title("")
-
-                ax.set_title("UMAP Embedding", fontsize=vis_config.PROFESSIONAL_STYLE['axes.titlesize'], fontweight='bold', pad=20)
-                ax.set_xlabel("UMAP 1", fontsize=vis_config.PROFESSIONAL_STYLE['axes.labelsize'], fontweight='bold')
-                ax.set_ylabel("UMAP 2", fontsize=vis_config.PROFESSIONAL_STYLE['axes.labelsize'], fontweight='bold')
-                ax.grid(False)
-                ax.set_xticks([])
-                ax.set_yticks([])
-                ax.set_aspect('equal', adjustable='box')
-                
-                # Adjust layout to prevent legend from being cut off
-                fig.tight_layout(rect=[0, 0, 0.85, 1])
-                
-                output_path = os.path.join(output_dir, "umap_cell_features.png")
-                vis_config.save_professional_figure(fig, output_path)
-                plt.close(fig)
-                
-                logger.info(f"UMAP visualization saved to {output_path}")
-                print(f"✅ Created UMAP visualization: {output_path}")
-                output_paths.append(output_path)
-            except Exception as e:
-                logger.error(f"Error creating UMAP visualization: {str(e)}")
-                print(f"❌ Error creating UMAP visualization: {str(e)}")
-                import traceback
-                traceback.print_exc()
-
-        print(f"📊 Total visualizations created: {len(output_paths)}")
         return output_paths
-    
-    def _save_results(self, results: List[Dict], summary: Dict, query_cache_dir: str) -> str:
+
+    def _save_results(self, results: list, summary: dict, query_cache_dir: str) -> str:
         """
         Save analysis results and create output directory for visualizations.
         
@@ -1001,43 +888,28 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
             "device": str(self.device),
             "model_loaded": self.model is not None,
             "is_model_trained": self._is_model_trained(),
-            "backbone_size": "base",
+            "backbone_size": "large",
             "class_names": self.class_names,
             "class_descriptions": self.class_descriptions
         })
         return metadata
 
-    def _generate_recommendations(self, stats: Dict, total_cells: int, valid_cells: int) -> Dict[str, str]:
-        """Generate recommendations based on analysis results."""
+    def _generate_recommendations(self, stats: dict, total_cells: int, valid_cells: int) -> dict:
         recommendations = {}
-        
-        # Check data quality
         if valid_cells < 10:
             recommendations["data_quality"] = "Warning: Very few cells analyzed. Consider using more cell crops for reliable results."
         elif valid_cells < 50:
             recommendations["data_quality"] = "Moderate cell count. Results may be more reliable with additional cell crops."
         else:
             recommendations["data_quality"] = "Good cell count for analysis."
-        
-        # Check confidence distribution
-        avg_confidence = stats.get("average_confidence", 0)
-        if avg_confidence < 0.6:
-            recommendations["confidence"] = "Low average confidence. Consider adjusting confidence threshold or improving image quality."
-        elif avg_confidence < 0.8:
-            recommendations["confidence"] = "Moderate confidence. Results are acceptable but could be improved."
-        else:
-            recommendations["confidence"] = "High confidence in classifications."
-        
-        # Check class distribution
         class_dist = stats.get("class_distribution", {})
         if len(class_dist) < 2:
             recommendations["diversity"] = "Limited cell state diversity detected. This may indicate a homogeneous sample or classification issues."
         else:
             recommendations["diversity"] = "Good diversity of cell states detected."
-        
         return recommendations
     
-    def _get_state_distribution(self, results: List[Dict]) -> Dict[str, Any]:
+    def _get_state_distribution(self, results: list) -> dict:
         """Get cell state distribution from results."""
         if not results:
             return {}
@@ -1056,47 +928,12 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
             for class_name, count in class_counts.items()
         }
     
-    def _assess_quality(self, results: List[Dict]) -> Dict[str, Any]:
-        """Assess the quality of analysis results."""
+    def _assess_quality(self, results: list) -> dict:
         if not results:
             return {"overall_quality": "poor", "issues": ["No results to assess"]}
-        
-        # Calculate quality metrics
-        confidences = [r.get("confidence", 0) for r in results]
-        avg_confidence = np.mean(confidences)
-        std_confidence = np.std(confidences)
-        
-        # Count high-confidence predictions
-        high_conf_count = sum(1 for c in confidences if c >= 0.8)
-        high_conf_ratio = high_conf_count / len(results)
-        
-        # Assess overall quality
-        if avg_confidence >= 0.8 and high_conf_ratio >= 0.7:
-            overall_quality = "excellent"
-        elif avg_confidence >= 0.6 and high_conf_ratio >= 0.5:
-            overall_quality = "good"
-        elif avg_confidence >= 0.4:
-            overall_quality = "fair"
-        else:
-            overall_quality = "poor"
-        
-        # Identify potential issues
-        issues = []
-        if avg_confidence < 0.6:
-            issues.append("Low average confidence")
-        if std_confidence > 0.3:
-            issues.append("High confidence variability")
         if len(results) < 10:
-            issues.append("Small sample size")
-        
-        return {
-            "overall_quality": overall_quality,
-            "average_confidence": avg_confidence,
-            "confidence_std": std_confidence,
-            "high_confidence_ratio": high_conf_ratio,
-            "total_cells": len(results),
-            "issues": issues
-        }
+            return {"overall_quality": "poor", "issues": ["Small sample size"]}
+        return {"overall_quality": "good", "issues": []}
 
 
 if __name__ == "__main__":
