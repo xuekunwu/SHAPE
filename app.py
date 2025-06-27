@@ -1335,14 +1335,13 @@ def main(args):
                         fibroblast_examples = [
                             ["Image Preprocessing", "examples/A5_01_1_1_Phase Contrast_001.png", "Normalize this phase contrast image.", 
                              "Image_Preprocessor_Tool", "Illumination-corrected and brightness-normalized phase contrast image."],
-                            ["Cell Identification", "examples/A5_01_1_1_Phase Contrast_001.png", "How many cells are there in this image.", 
+                            ["Cell Identification", "examples/A2_02_1_1_Phase Contrast_001.png", "How many cells are there in this image.", 
                              "Image_Preprocessor_Tool, Nuclei_Segmenter_Tool", "258 cells are identified and their nuclei are labeled."],
-                            ["Single-Cell Cropping", "examples/A5_01_1_1_Phase Contrast_001.png", "Crop single cells from the segmented nuclei in this image.", 
+                            ["Single-Cell Cropping", "examples/A3_02_1_1_Phase Contrast_001.png", "Crop single cells from the segmented nuclei in this image.", 
                              "Image_Preprocessor_Tool, Nuclei_Segmenter_Tool, Single_Cell_Cropper_Tool", "Individual cell crops extracted from the image."],
-                            ["Fibroblast State Analysis", "examples/A5_01_1_1_Phase Contrast_001.png", "Analyze the fibroblast cell states in this image.", 
+                            ["Fibroblast State Analysis", "examples/A4_02_1_1_Phase Contrast_001.png", "Analyze the fibroblast cell states in this image.", 
                              "Image_Preprocessor_Tool, Nuclei_Segmenter_Tool, Single_Cell_Cropper_Tool, Fibroblast_State_Analyzer_Tool", "540 cells identified and segmented successfully. Comprehensive analysis of fibroblast cell states have been performed with visualizations."],
-                            # 新增激活分数示例
-                            ["Fibroblast Activation Scoring", "examples/A5_01_1_1_Phase Contrast_001.png", "Quantify the activation score of each fibroblast in this image.",
+                            ["Fibroblast Activation Scoring", "examples/A5_02_1_1_Phase Contrast_001.png", "Quantify the activation score of each fibroblast in this image.",
                              "Image_Preprocessor_Tool, Nuclei_Segmenter_Tool, Single_Cell_Cropper_Tool, Fibroblast_State_Analyzer_Tool, Fibroblast_Activation_Scorer_Tool", "Activation scores for all fibroblasts have been computed and normalized based on the reference map."]
                         ]
                         
