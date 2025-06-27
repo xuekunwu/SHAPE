@@ -23,6 +23,7 @@ import time
 from sklearn.decomposition import PCA
 import glob
 import pandas as pd
+from collections import Counter
 
 # Configure logging first
 logging.basicConfig(level=logging.INFO)
@@ -476,13 +477,16 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                 # Set default recommendations for cases without features
                 recommendations = {"note": "No features available for advanced analysis"}
             
-            # 构建AnnData对象用于下游激活评分
+            # After all results are collected, print class distribution for debug
+            print("Predicted class distribution:", Counter([r['predicted_class'] for r in results]))
+            
+            # Build AnnData object for downstream activation scoring
             obs_dict = {
                 'image_path': [r['image_path'] for r in results],
                 'predicted_class': [r['predicted_class'] for r in results],
                 'confidence': [r['confidence'] for r in results],
+                'is_above_threshold': [r['is_above_threshold'] for r in results],
             }
-            
             # Fix for anndata compatibility - create AnnData with proper obs DataFrame
             obs_df = pd.DataFrame(obs_dict)
             X = np.array([r['features'] for r in results])
