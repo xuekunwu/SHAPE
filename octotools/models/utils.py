@@ -295,4 +295,14 @@ def make_json_serializable_truncated(obj, max_length: int = 100000):
     else:
         result = str(obj)
         return result if len(result) <= max_length else result[:max_length - 3] + "..."
+
+def normalize_tool_name(tool_name: str, available_tools=None) -> str:
+    """Normalize the tool name to match the available tools."""
+    if available_tools is None:
+        return tool_name
+    for tool in available_tools:
+        if tool.lower() in tool_name.lower():
+            return tool
+    return "No matched tool given: " + tool_name
+    
     
