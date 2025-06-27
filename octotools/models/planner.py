@@ -209,48 +209,26 @@ Please present your analysis in a clear, structured format.
                             else:
                                 tool_name = ""
                     
-                    # If we couldn't parse properly, try alternative patterns
-                    if not context or not sub_goal or not tool_name:
-                        for line in lines:
-                            line = line.strip()
-                            if line.lower().startswith('context:') and not context:
-                                parts = line.split('context:', 1)
-                                if len(parts) > 1:
-                                    context = parts[1].lstrip(' :')
-                            elif line.lower().startswith('sub-goal:') and not sub_goal:
-                                parts = line.split('sub-goal:', 1)
-                                if len(parts) > 1:
-                                    sub_goal = parts[1].lstrip(' :')
-                            elif line.lower().startswith('tool:') and not tool_name:
-                                parts = line.split('tool:', 1)
-                                if len(parts) > 1:
-                                    tool_name = parts[1].lstrip(' :')
-                    
                     # Normalize tool name
-                    if tool_name:
-                        tool_name = normalize_tool_name(tool_name)
+                    tool_name = normalize_tool_name(tool_name)
                     
-                    # If still missing, use defaults
-                    if not context:
-                        context = "No context provided"
-                    if not sub_goal:
-                        sub_goal = "No sub-goal provided"
-                    if not tool_name:
-                        tool_name = "No tool specified"
-                    
-                    print(f"Parsed from string: context='{context}', sub_goal='{sub_goal}', tool_name='{tool_name}'")
                     return context, sub_goal, tool_name
                     
                 except Exception as parse_error:
                     print(f"Error parsing string response: {parse_error}")
-                    return "Error parsing context", "Error parsing sub-goal", "Error parsing tool name"
+                    return "", "", "Error parsing tool name"
             else:
-                print(f"Unexpected response type: {type(response)}")
-                return "Unknown context", "Unknown sub-goal", "Unknown tool"
-                
+                return "", "", "Unknown response type"
         except Exception as e:
-            print(f"Error extracting context, sub-goal, and tool name: {str(e)}")
-            return "Error extracting context", "Error extracting sub-goal", "Error extracting tool name"
+            print(f"Error in extract_context_subgoal_and_tool: {e}")
+            return "", "", "Error extracting tool name"
+    
+    def normalize_tool_name(self, tool_name: str) -> str:
+        """Normalize the tool name to match the available tools."""
+        for tool in self.available_tools:
+            if tool.lower() in tool_name.lower():
+                return tool
+        return "No matched tool given: " + tool_name
 
     def generate_next_step(self, question: str, image: str, query_analysis: str, memory: Memory, step_count: int, max_step_count: int, bytes_mode: bool = False) -> NextStep:
         # --- Enforce strict tool dependency chain ---
@@ -263,7 +241,7 @@ Please present your analysis in a clear, structured format.
         ]
         
         # Check if this is a fibroblast analysis query (contains keywords)
-        fibroblast_keywords = ["fibroblast", "activation", "cell state", "cell analysis", "quantify", "score"]
+        fibroblast_keywords = ["fibroblast", "activation", "cell state", "cell analysis", "quantify", "score", "cell", "microscopy", "image analysis"]
         is_fibroblast_query = any(keyword.lower() in question.lower() for keyword in fibroblast_keywords)
         
         # Get finished tools from memory
@@ -296,6 +274,22 @@ Please present your analysis in a clear, structured format.
         if is_fibroblast_analysis:
             print(f"DEBUG: Fibroblast analysis detected - enforcing strict tool chain")
             print(f"DEBUG: Checking each tool in TOOL_CHAIN...")
+            
+            # Check if we're trying to skip Fibroblast_State_Analyzer_Tool
+            if ("Single_Cell_Cropper_Tool" in finished_tools and 
+                "Fibroblast_State_Analyzer_Tool" not in finished_tools and
+                "Fibroblast_Activation_Scorer_Tool" in self.available_tools):
+                print(f"DEBUG: CRITICAL: Attempting to skip Fibroblast_State_Analyzer_Tool - FORCING execution")
+                justification = "Fibroblast analysis pipeline requires Fibroblast_State_Analyzer_Tool to generate h5ad file before activation scoring."
+                context = "Use the cell crops from Single_Cell_Cropper_Tool as input for Fibroblast_State_Analyzer_Tool."
+                sub_goal = "Run Fibroblast_State_Analyzer_Tool on the cell crops to generate h5ad file for downstream activation scoring."
+                return NextStep(
+                    justification=justification,
+                    context=context,
+                    sub_goal=sub_goal,
+                    tool_name="Fibroblast_State_Analyzer_Tool"
+                )
+            
             for i, tool in enumerate(TOOL_CHAIN):
                 print(f"DEBUG: Tool {i+1}: {tool}")
                 print(f"DEBUG:   - Available: {tool in self.available_tools}")
@@ -358,6 +352,10 @@ Previous Steps and Their Results:
 
 Current Step: {step_count} in {max_step_count} steps
 Remaining Steps: {max_step_count - step_count}
+
+CRITICAL RULES FOR FIBROBLAST ANALYSIS:
+1. Fibroblast_Activation_Scorer_Tool requires h5ad file from Fibroblast_State_Analyzer_Too
+2. NEVER skip Fibroblast_State_Analyzer_Tool when executing Fibroblast_Activation_Scorer_Tool
 
 Instructions:
 1. Analyze the context thoroughly, including the query, its analysis, any image, available tools and their metadata, and previous steps taken.
@@ -460,57 +458,56 @@ Example (do not copy, use only as reference):
                         else:
                             tool_name = ""
                 
-                # If we couldn't parse properly, try alternative patterns
-                if not justification or not context or not sub_goal or not tool_name:
-                    for line in lines:
-                        line = line.strip()
-                        if line.lower().startswith('justification:') and not justification:
-                            parts = line.split('justification:', 1)
-                            if len(parts) > 1:
-                                justification = parts[1].lstrip(' :')
-                        elif line.lower().startswith('context:') and not context:
-                            parts = line.split('context:', 1)
-                            if len(parts) > 1:
-                                context = parts[1].lstrip(' :')
-                        elif line.lower().startswith('sub-goal:') and not sub_goal:
-                            parts = line.split('sub-goal:', 1)
-                            if len(parts) > 1:
-                                sub_goal = parts[1].lstrip(' :')
-                        elif line.lower().startswith('tool:') and not tool_name:
-                            parts = line.split('tool:', 1)
-                            if len(parts) > 1:
-                                tool_name = parts[1].lstrip(' :')
+                # Normalize tool name
+                tool_name = self.normalize_tool_name(tool_name)
                 
-                # If still missing, use defaults
-                if not justification:
-                    justification = "No justification provided"
-                if not context:
-                    context = "No context provided"
-                if not sub_goal:
-                    sub_goal = "No sub-goal provided"
-                if not tool_name:
-                    tool_name = "No tool specified"
+                print(f"DEBUG: Parsed string response - tool_name: {tool_name}")
                 
-                # Create NextStep object manually
-                next_step = NextStep(
+                # CRITICAL: Check if LLM is trying to skip Fibroblast_State_Analyzer_Tool
+                if (tool_name == "Fibroblast_Activation_Scorer_Tool" and 
+                    "Single_Cell_Cropper_Tool" in finished_tools and 
+                    "Fibroblast_State_Analyzer_Tool" not in finished_tools):
+                    print(f"DEBUG: CRITICAL: LLM trying to skip Fibroblast_State_Analyzer_Tool - OVERRIDING")
+                    justification = "Fibroblast analysis pipeline requires Fibroblast_State_Analyzer_Tool to generate h5ad file before activation scoring."
+                    context = "Use the cell crops from Single_Cell_Cropper_Tool as input for Fibroblast_State_Analyzer_Tool."
+                    sub_goal = "Run Fibroblast_State_Analyzer_Tool on the cell crops to generate h5ad file for downstream activation scoring."
+                    tool_name = "Fibroblast_State_Analyzer_Tool"
+                
+                return NextStep(
                     justification=justification,
                     context=context,
                     sub_goal=sub_goal,
                     tool_name=tool_name
                 )
-                print(f"Created NextStep object from string: justification='{justification}', context='{context}', sub_goal='{sub_goal}', tool_name='{tool_name}'")
-                
             except Exception as parse_error:
                 print(f"Error parsing string response: {parse_error}")
-                # Create a default NextStep object
-                next_step = NextStep(
-                    justification="Error parsing justification",
-                    context="Error parsing context",
-                    sub_goal="Error parsing sub-goal",
-                    tool_name="Error parsing tool name"
+                # Fallback to a safe default
+                return NextStep(
+                    justification="Error parsing LLM response, using fallback",
+                    context="Previous steps completed",
+                    sub_goal="Continue analysis with available tools",
+                    tool_name="Generalist_Solution_Generator_Tool" if "Generalist_Solution_Generator_Tool" in self.available_tools else self.available_tools[0] if self.available_tools else "No tool available"
                 )
-            
-        return next_step
+        
+        # Extract context, sub_goal, and tool_name from the NextStep object
+        context, sub_goal, tool_name = self.extract_context_subgoal_and_tool(next_step)
+        
+        # CRITICAL: Final check to prevent skipping Fibroblast_State_Analyzer_Tool
+        if (tool_name == "Fibroblast_Activation_Scorer_Tool" and 
+            "Single_Cell_Cropper_Tool" in finished_tools and 
+            "Fibroblast_State_Analyzer_Tool" not in finished_tools):
+            print(f"DEBUG: CRITICAL: Final override - forcing Fibroblast_State_Analyzer_Tool")
+            justification = "Fibroblast analysis pipeline requires Fibroblast_State_Analyzer_Tool to generate h5ad file before activation scoring."
+            context = "Use the cell crops from Single_Cell_Cropper_Tool as input for Fibroblast_State_Analyzer_Tool."
+            sub_goal = "Run Fibroblast_State_Analyzer_Tool on the cell crops to generate h5ad file for downstream activation scoring."
+            tool_name = "Fibroblast_State_Analyzer_Tool"
+        
+        return NextStep(
+            justification=getattr(next_step, 'justification', 'No justification provided'),
+            context=context,
+            sub_goal=sub_goal,
+            tool_name=tool_name
+        )
 
     def verificate_memory(self, question: str, image: str, query_analysis: str, memory: Memory, bytes_mode: bool = False) -> MemoryVerification:
         if bytes_mode:
