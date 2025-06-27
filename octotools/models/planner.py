@@ -354,8 +354,11 @@ Current Step: {step_count} in {max_step_count} steps
 Remaining Steps: {max_step_count - step_count}
 
 CRITICAL RULES FOR FIBROBLAST ANALYSIS:
-1. Fibroblast_Activation_Scorer_Tool requires h5ad file from Fibroblast_State_Analyzer_Too
-2. NEVER skip Fibroblast_State_Analyzer_Tool when executing Fibroblast_Activation_Scorer_Tool
+1. If the query involves cell analysis, microscopy, or fibroblast analysis, follow this EXACT sequence:
+   - Image_Preprocessor_Tool → Nuclei_Segmenter_Tool → Single_Cell_Cropper_Tool → Fibroblast_State_Analyzer_Tool → Fibroblast_Activation_Scorer_Tool
+2. NEVER skip Fibroblast_State_Analyzer_Tool when doing cell analysis
+3. Fibroblast_Activation_Scorer_Tool requires h5ad file from Fibroblast_State_Analyzer_Tool
+4. If Single_Cell_Cropper_Tool has been executed but Fibroblast_State_Analyzer_Tool has not, ALWAYS choose Fibroblast_State_Analyzer_Tool next
 
 Instructions:
 1. Analyze the context thoroughly, including the query, its analysis, any image, available tools and their metadata, and previous steps taken.
