@@ -82,7 +82,6 @@ else:
             execution = tool.execute(
                 cell_crops=cell_crops, 
                 cell_metadata=cell_metadata, 
-                confidence_threshold=0.5, 
                 batch_size=16, 
                 query_cache_dir='solver_cache/temp/tool_cache',
                 visualization_type='all'
@@ -147,7 +146,6 @@ else:
         reference_filename='adata_reference.h5ad',
         output_dir='output_visualizations',
         visualization_type='all',
-        confidence_threshold=0.5,
         batch_size=100
     )"""
             )
