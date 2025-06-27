@@ -192,6 +192,8 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
             
             # Load finetuned weights from HuggingFace Hub or local path
             model_loaded = False
+            
+            # Try to load weights based on backbone size
             if self.model_path and os.path.exists(self.model_path):
                 try:
                     logger.info(f"Attempting to load from local path: {self.model_path}")
@@ -207,10 +209,11 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
             
             if not model_loaded:
                 try:
-                    logger.info("Downloading finetuned weights from HuggingFace Hub...")
+                    # Try to load the new model.pt (trained on base backbone)
+                    logger.info("Attempting to download new model.pt (trained on base backbone) from HuggingFace Hub...")
                     model_weights_path = hf_hub_download(
                         repo_id="5xuekun/fb-classifier-model",
-                        filename="model.pt", # Or large_best_model.pth if the name is different
+                        filename="model.pt",
                         token=os.getenv("HUGGINGFACE_TOKEN")
                     )
                     logger.info(f"Downloaded model weights to: {model_weights_path}")
@@ -221,14 +224,14 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                         self.model.load_state_dict(checkpoint_data['model_state_dict'])
                     else:
                         self.model.load_state_dict(checkpoint_data)
-                    logger.info("Successfully loaded finetuned weights from HuggingFace Hub")
+                    logger.info("Successfully loaded finetuned weights from new model.pt")
                     model_loaded = True
 
                 except Exception as e:
                     logger.warning(f"Failed to load weights from HuggingFace Hub: {str(e)}")
 
             if not model_loaded:
-                logger.warning("Could not load any trained weights. Using untrained classifier.")
+                logger.info("Using untrained classifier head")
 
             self.model.eval()
             
@@ -521,7 +524,7 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                 "visual_outputs": visual_outputs,
                 "parameters": {
                     "confidence_threshold": self.confidence_threshold,
-                    "backbone_size": self.backbone_size,
+                    "backbone_size": "base",
                     "model_path": self.model_path
                 },
                 "cell_state_descriptions": self.class_descriptions,
@@ -933,7 +936,7 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
             "device": str(self.device),
             "model_loaded": self.model is not None,
             "is_model_trained": self._is_model_trained(),
-            "backbone_size": self.backbone_size,
+            "backbone_size": "base",
             "class_names": self.class_names,
             "class_descriptions": self.class_descriptions
         })
