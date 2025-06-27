@@ -165,9 +165,12 @@ else:
         if tool_name == "Single_Cell_Cropper_Tool" and previous_outputs and 'visual_outputs' in previous_outputs:
             # Find nuclei mask file from previous outputs
             nuclei_mask_path = None
+            print(f"DEBUG: Looking for nuclei mask in previous outputs: {previous_outputs['visual_outputs']}")
             for output_path in previous_outputs['visual_outputs']:
-                if 'nuclei_mask' in output_path and output_path.endswith('.png'):
+                print(f"DEBUG: Checking output path: {output_path}")
+                if 'nuclei_mask' in output_path and output_path.endswith('.png') and 'viz' not in output_path:
                     nuclei_mask_path = output_path
+                    print(f"DEBUG: Found nuclei mask path: {nuclei_mask_path}")
                     break
             
             if nuclei_mask_path:
@@ -176,6 +179,10 @@ else:
                     explanation=f"Using the nuclei mask path '{nuclei_mask_path}' from the previous Nuclei_Segmenter_Tool step",
                     command=f"""execution = tool.execute(original_image="{actual_image_path}", nuclei_mask="{nuclei_mask_path}", min_area=50, margin=25)"""
                 )
+            else:
+                print(f"DEBUG: No nuclei mask found in previous outputs: {previous_outputs['visual_outputs']}")
+                # Fallback to standard command generation
+                pass
         
         # For other tools, use the standard prompt
         prompt_generate_tool_command = f"""
