@@ -183,6 +183,8 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
             feat_dim = feat_dim_map[backbone_arch]
             self.model.backbone.head = nn.Linear(feat_dim, len(self.class_names)).to(self.device)
             logger.info(f"Using {backbone_name} backbone with a single Linear head.")
+            logger.info(f"Classifier head: {self.model.backbone.head}")
+            logger.info(f"Expected output classes: {len(self.class_names)}")
             
             # Load finetuned weights from HuggingFace Hub or local path
             model_loaded = False
@@ -228,6 +230,22 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                 logger.info("Using untrained classifier head")
 
             self.model.eval()
+            
+            # Verify model structure after loading
+            logger.info(f"Model loaded successfully. Classifier head output dimension: {self.model.backbone.head.out_features}")
+            logger.info(f"Expected number of classes: {len(self.class_names)}")
+            
+            # Test model with dummy input to verify output
+            with torch.no_grad():
+                dummy_input = torch.randn(1, 3, 224, 224).to(self.device)
+                test_output = self.model(dummy_input)
+                logger.info(f"Test output shape: {test_output.shape}")
+                logger.info(f"Test output classes: {test_output.shape[1]}")
+                
+                if test_output.shape[1] != len(self.class_names):
+                    logger.error(f"Model output dimension mismatch! Expected {len(self.class_names)}, got {test_output.shape[1]}")
+                else:
+                    logger.info("Model output dimension matches expected number of classes")
             
             # Define transforms for preprocessing
             self.transform = transforms.Compose([
@@ -297,13 +315,22 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                 probs = torch.softmax(logits, dim=1)
                 pred_idx = probs.argmax(dim=1).item()
                 confidence = probs[0][pred_idx].item()
+                
+                # Debug: Log all probabilities for verification
+                logger.debug(f"Classification for {os.path.basename(image_path)}:")
+                logger.debug(f"Logits: {logits.squeeze().cpu().numpy()}")
+                logger.debug(f"Probabilities: {probs.squeeze().cpu().numpy()}")
+                logger.debug(f"Predicted class: {self.class_names[pred_idx]} (index: {pred_idx})")
+                logger.debug(f"Confidence: {confidence:.4f}")
             
             # Create result
             result = {
                 "image_path": image_path,
                 "predicted_class": self.class_names[pred_idx],
                 "confidence": confidence,
-                "features": features.squeeze(0).cpu().numpy()
+                "features": features.squeeze(0).cpu().numpy(),
+                "all_probabilities": probs.squeeze(0).cpu().numpy().tolist(),  # Add all probabilities for debugging
+                "all_logits": logits.squeeze(0).cpu().numpy().tolist()  # Add all logits for debugging
             }
             
             return result, features.squeeze(0)  # Remove batch dimension
@@ -479,6 +506,40 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
             
             # After all results are collected, print class distribution for debug
             print("Predicted class distribution:", Counter([r['predicted_class'] for r in results]))
+            
+            # Check for class distribution issues
+            class_counts = Counter([r['predicted_class'] for r in results])
+            unique_classes = len(class_counts)
+            total_cells = len(results)
+            
+            logger.info(f"Classification summary: {unique_classes} unique classes out of {len(self.class_names)} possible classes")
+            logger.info(f"Class distribution: {dict(class_counts)}")
+            
+            # Warn if not all classes are represented
+            if unique_classes < len(self.class_names):
+                missing_classes = set(self.class_names) - set(class_counts.keys())
+                logger.warning(f"Not all classes are represented in predictions!")
+                logger.warning(f"Missing classes: {missing_classes}")
+                logger.warning(f"This might indicate: 1) Limited test data diversity, 2) Model bias, 3) Training data imbalance")
+                
+                # Add warning to results
+                if "warnings" not in results:
+                    results["warnings"] = []
+                results["warnings"].append({
+                    "type": "class_distribution",
+                    "message": f"Only {unique_classes}/{len(self.class_names)} classes predicted. Missing: {missing_classes}",
+                    "suggestion": "Consider using more diverse test data or checking model training balance"
+                })
+            
+            # Check for extreme class imbalance
+            if unique_classes > 1:
+                max_count = max(class_counts.values())
+                min_count = min(class_counts.values())
+                imbalance_ratio = max_count / min_count if min_count > 0 else float('inf')
+                
+                if imbalance_ratio > 10:  # If most common class is 10x more frequent than least common
+                    logger.warning(f"Extreme class imbalance detected: ratio = {imbalance_ratio:.1f}")
+                    logger.warning(f"Most common: {max_count} cells, Least common: {min_count} cells")
             
             # Build AnnData object for downstream activation scoring
             obs_dict = {
