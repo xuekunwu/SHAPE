@@ -213,7 +213,7 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                     logger.info("Attempting to download new model.pt (trained on base backbone) from HuggingFace Hub...")
                     model_weights_path = hf_hub_download(
                         repo_id="5xuekun/fb-classifier-model",
-                        filename="model.pt",
+                        filename="model.pth",
                         token=os.getenv("HUGGINGFACE_TOKEN")
                     )
                     logger.info(f"Downloaded model weights to: {model_weights_path}")
