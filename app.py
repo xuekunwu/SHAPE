@@ -218,24 +218,26 @@ class Solver:
         self.executor = executor
         self.task = task
         self.task_description = task_description
+        self.output_types = output_types
         self.index = index
         self.verbose = verbose
         self.max_steps = max_steps
         self.max_time = max_time
         self.query_cache_dir = query_cache_dir
+        self.start_time = time.time()
+        self.step_tokens = []
+        # Initialize visual_outputs_for_gradio as instance variable to accumulate all visual outputs
+        self.visual_outputs_for_gradio = []
 
         self.output_types = output_types.lower().split(',')
         assert all(output_type in ["base", "final", "direct"] for output_type in self.output_types), "Invalid output type. Supported types are 'base', 'final', 'direct'."
 
         # Add statistics for evaluation
         self.step_times = []
-        self.step_tokens = []
-        self.total_tokens = 0
         self.step_memory = []
         self.max_memory = 0
         self.step_costs = []
         self.total_cost = 0.0
-        self.start_time = None
         self.end_time = None
         
         # Add step information tracking
@@ -246,7 +248,6 @@ class Solver:
         import os
         self.start_time = time.time()
         process = psutil.Process(os.getpid())
-        visual_outputs_for_gradio = []
         visual_description = "*Ready to display analysis results and processed images.*"
         
         # Handle image input - simplified logic based on original OctoTools
@@ -326,7 +327,6 @@ class Solver:
                 print(f"Query analysis tokens used: {query_analysis_tokens}")
                 print(f"Query analysis full usage: {self.planner.last_usage}")
                 self.step_tokens.append(query_analysis_tokens)
-                self.total_tokens += query_analysis_tokens
                 
                 # Calculate cost for query analysis
                 model_config = None
@@ -414,7 +414,7 @@ class Solver:
             messages.append(ChatMessage(role="OctoTools", 
                                         content=f"Generating the {step_count}-th step...",
                                         metadata={"title": f"🔄 Step {step_count}"}))
-            yield messages, query_analysis, visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count}"
+            yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count}"
 
             # [Step 5] Generate the next step
             next_step = self.planner.generate_next_step(user_query, img_path, query_analysis, self.memory, step_count, self.max_steps)
@@ -427,14 +427,14 @@ class Solver:
                 role="assistant",
                 content=f"**Context:** {context}\n\n**Sub-goal:** {sub_goal}\n\n**Tool:** `{tool_name}`",
                 metadata={"title": f"### 🎯 Step {step_count}: Action Prediction ({tool_name})"}))
-            yield messages, query_analysis, visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Action predicted"
+            yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Action predicted"
 
             # Handle tool execution or errors
             if tool_name not in self.planner.available_tools:
                 messages.append(ChatMessage(
                     role="assistant", 
                     content=f"⚠️ Error: Tool '{tool_name}' is not available."))
-                yield messages, query_analysis, visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Tool not available"
+                yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Tool not available"
                 continue
 
             # [Step 6-7] Generate and execute the tool command
@@ -446,12 +446,12 @@ class Solver:
             print(f"Tool '{tool_name}' result:", result)
             
             # Generate dynamic visual description based on tool and results
-            visual_description = self.generate_visual_description(tool_name, result, visual_outputs_for_gradio)
+            visual_description = self.generate_visual_description(tool_name, result, self.visual_outputs_for_gradio)
             
             if isinstance(result, dict):
                 if "visual_outputs" in result:
                     visual_output_files = result["visual_outputs"]
-                    visual_outputs_for_gradio = []
+                    # Append new visual outputs instead of reinitializing
                     for file_path in visual_output_files:
                         try:
                             # Skip comparison plots and non-image files
@@ -515,7 +515,7 @@ class Solver:
                             else:
                                 label = f"Analysis Result: {filename}"
                             
-                            visual_outputs_for_gradio.append((image, label))
+                            self.visual_outputs_for_gradio.append((image, label))
                             print(f"Successfully loaded image for Gradio: {filename}")
                             
                         except Exception as e:
@@ -529,7 +529,7 @@ class Solver:
                 role="assistant",
                 content=f"**Analysis:** {analysis}\n\n**Explanation:** {explanation}\n\n**Command:**\n```python\n{command}\n```",
                 metadata={"title": f"### 📝 Step {step_count}: Command Generation ({tool_name})"}))
-            yield messages, query_analysis, visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Command generated"
+            yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Command generated"
 
             # Save the command generation data
             command_generation_data = {
@@ -545,7 +545,7 @@ class Solver:
                 role="assistant",
                 content=f"**Result:**\n```json\n{json.dumps(make_json_serializable(result), indent=4)}\n```",
                 metadata={"title": f"### 🛠️ Step {step_count}: Command Execution ({tool_name})"}))
-            yield messages, query_analysis, visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Command executed"
+            yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Command executed"
 
             # Save the command execution data
             command_execution_data = {
@@ -573,7 +573,7 @@ class Solver:
                 role="assistant", 
                 content=f"**Analysis:**\n{context_verification}\n\n**Conclusion:** `{conclusion}` {conclusion_emoji}",
                 metadata={"title": f"### 🤖 Step {step_count}: Context Verification"}))
-            yield messages, query_analysis, visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Context verified"
+            yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Context verified"
 
             # After tool execution, estimate tokens and cost
             # Try to get token usage from result if available, else estimate
@@ -647,8 +647,6 @@ class Solver:
             print(f"Step {step_count} - Total tokens: {tokens_used}, Cost: ${cost:.6f}")
             
             self.step_tokens.append(tokens_used)
-            self.total_tokens += tokens_used
-            self.step_costs.append(cost)
             self.total_cost += cost
             mem_after = process.memory_info().rss / 1024 / 1024  # MB
             self.step_memory.append(mem_after)
@@ -694,7 +692,7 @@ class Solver:
                 final_output_tokens = self.planner.last_usage.get('total_tokens', 0)
                 print(f"Final output tokens used: {final_output_tokens}")
                 self.step_tokens.append(final_output_tokens)
-                self.total_tokens += final_output_tokens
+                self.total_cost += final_output_tokens * cost_per_token
                 
                 # Calculate cost for final output
                 model_config = None
@@ -789,13 +787,13 @@ class Solver:
             conclusion += f"**📈 Summary Statistics:**\n"
             conclusion += f"  • Total Steps: {len(self.step_times)}\n"
             conclusion += f"  • Total Time: {self.end_time - self.start_time:.2f}s\n"
-            conclusion += f"  • Total Tokens: {self.total_tokens}\n"
+            conclusion += f"  • Total Tokens: {self.step_tokens[-1]}\n"
             conclusion += f"  • Total Cost: ${self.total_cost:.6f}\n"
             conclusion += f"  • Peak Memory: {self.max_memory:.2f} MB\n"
             conclusion += f"  • Average Time per Step: {(self.end_time - self.start_time) / len(self.step_times):.2f}s\n"
-            if self.total_tokens > 0:
-                conclusion += f"  • Average Tokens per Step: {self.total_tokens / len(self.step_tokens):.1f}\n"
-                conclusion += f"  • Cost per Token: ${self.total_cost / self.total_tokens:.8f}\n"
+            if self.step_tokens[-1] > 0:
+                conclusion += f"  • Average Tokens per Step: {self.step_tokens[-1] / len(self.step_tokens):.1f}\n"
+                conclusion += f"  • Cost per Token: ${self.total_cost / self.step_tokens[-1]:.8f}\n"
             
             # Raw data for reference
             conclusion += f"\n**📋 Raw Data (for reference):**\n"
@@ -819,7 +817,7 @@ class Solver:
                 conclusion += f"  • Pricing Source: OpenAI Official Pricing (2024)\n"
             
             final_answer = f"{conclusion}"
-            yield messages, final_answer, visual_outputs_for_gradio, visual_description, "**Progress**: Completed!"
+            yield messages, final_answer, self.visual_outputs_for_gradio, visual_description, "**Progress**: Completed!"
 
             # Save the direct output data
             direct_output_data = {
@@ -843,7 +841,7 @@ class Solver:
                     final_output_tokens = self.planner.last_usage.get('total_tokens', 0)
                     print(f"Final output tokens used: {final_output_tokens}")
                     self.step_tokens.append(final_output_tokens)
-                    self.total_tokens += final_output_tokens
+                    self.total_cost += final_output_tokens * cost_per_token
                     
                     # Calculate cost for final output
                     model_config = None
@@ -891,7 +889,7 @@ class Solver:
         messages.append(ChatMessage(role="assistant", content="### ✅ Query Solved!"))
         # Use the final answer if available, otherwise use a default message
         completion_text = final_answer if final_answer else "Analysis completed successfully"
-        yield messages, completion_text, visual_outputs_for_gradio, visual_description, "**Progress**: Analysis completed!"
+        yield messages, completion_text, self.visual_outputs_for_gradio, visual_description, "**Progress**: Analysis completed!"
 
     def generate_visual_description(self, tool_name: str, result: dict, visual_outputs: list) -> str:
         """
