@@ -93,6 +93,21 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
         self.model_path = model_path
         self.backbone_size = backbone_size
         self.confidence_threshold = confidence_threshold  # 保留参数但不再用于过滤
+        
+        # Backbone configuration constants
+        self.backbone_archs = {
+            "small": "vits14",
+            "base": "vitb14", 
+            "large": "vitl14",
+            "giant": "vitg14",
+        }
+        self.feat_dim_map = {
+            "vits14": 384,
+            "vitb14": 768,
+            "vitl14": 1024,
+            "vitg14": 1536
+        }
+        
         # Cell state classes with specific colors
         self.class_names = ["dead", "np-MyoFb", "p-MyoFb", "proto-MyoFb", "q-Fb"]
         self.class_descriptions = {
@@ -128,7 +143,7 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
             logger.info("Initializing DINOv2 model (torch.hub)...")
             
             # Define backbone architecture based on size
-            backbone_arch = self.backbone_size
+            backbone_arch = self.backbone_archs.get(self.backbone_size, "vitl14")
             backbone_name = f"dinov2_{backbone_arch}"
 
             # Load the DINOv2 backbone using torch.hub to match the training environment
