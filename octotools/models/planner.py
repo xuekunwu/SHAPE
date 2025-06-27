@@ -281,9 +281,27 @@ Please present your analysis in a clear, structured format.
         
         needs_activation_scoring = any(keyword.lower() in question.lower() for keyword in activation_scoring_keywords)
         
-        # Auto-continue to activation scorer after state analyzer completion
+        # STRICT TOOL CHAIN ENFORCEMENT for fibroblast analysis
+        if is_fibroblast_query:
+            print(f"DEBUG: Fibroblast query detected - enforcing strict tool chain")
+            for tool in TOOL_CHAIN:
+                if tool in self.available_tools and tool not in finished_tools:
+                    justification = f"Fibroblast analysis pipeline requires running {tool} after {finished_tools[-1] if finished_tools else 'start'}."
+                    context = f"Use output of previous step as input for {tool}."
+                    sub_goal = f"Run {tool} on the output of previous step."
+                    print(f"DEBUG: Enforcing dependency chain - next tool: {tool}")
+                    return NextStep(
+                        justification=justification,
+                        context=context,
+                        sub_goal=sub_goal,
+                        tool_name=tool
+                    )
+            print(f"DEBUG: All tools in fibroblast chain finished, falling back to LLM logic")
+        
+        # Auto-continue to activation scorer after state analyzer completion (only for non-fibroblast queries)
         # This ensures the complete fibroblast analysis pipeline runs
         if (
+            not is_fibroblast_query and
             "Fibroblast_State_Analyzer_Tool" in finished_tools and
             "Fibroblast_Activation_Scorer_Tool" not in finished_tools and
             "Fibroblast_Activation_Scorer_Tool" in self.available_tools
@@ -298,23 +316,6 @@ Please present your analysis in a clear, structured format.
                 sub_goal=sub_goal,
                 tool_name="Fibroblast_Activation_Scorer_Tool"
             )
-        
-        # Otherwise, follow the strict tool chain
-        if is_fibroblast_query:
-            for tool in TOOL_CHAIN:
-                if tool in self.available_tools and tool not in finished_tools:
-                    # Always include activation scorer in fibroblast analysis pipeline
-                    justification = f"Pipeline requires running {tool} after {finished_tools[-1] if finished_tools else 'start'}."
-                    context = f"Use output of previous step as input for {tool}."
-                    sub_goal = f"Run {tool} on the output of previous step."
-                    print(f"DEBUG: Enforcing dependency chain - next tool: {tool}")
-                    return NextStep(
-                        justification=justification,
-                        context=context,
-                        sub_goal=sub_goal,
-                        tool_name=tool
-                    )
-            print(f"DEBUG: All tools in chain finished, falling back to LLM logic")
         
         # If not a fibroblast query or all tools finished, use LLM logic
         prompt_generate_next_step = f"""
