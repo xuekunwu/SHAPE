@@ -485,7 +485,6 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                 'image_path': [r['image_path'] for r in results],
                 'predicted_class': [r['predicted_class'] for r in results],
                 'confidence': [r['confidence'] for r in results],
-                'is_above_threshold': [r['is_above_threshold'] for r in results],
             }
             # Fix for anndata compatibility - create AnnData with proper obs DataFrame
             obs_df = pd.DataFrame(obs_dict)
