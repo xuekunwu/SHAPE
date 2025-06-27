@@ -87,7 +87,6 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
             input_types={
                 "cell_crops": "List[str] - Paths to individual cell crop images",
                 "cell_metadata": "List[dict] - Metadata for each cell crop",
-                "confidence_threshold": "float - Minimum confidence threshold for classification (default: 0.5)",
                 "batch_size": "int - Batch size for processing (default: 16)",
                 "query_cache_dir": "str - Directory for caching results",
                 "visualization_type": "str - Visualization method: 'pca', 'umap', 'auto', or 'all' (default: 'auto'). Use 'all' to generate all visualizations including UMAP for cell distribution analysis."
@@ -298,7 +297,6 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                 "image_path": image_path,
                 "predicted_class": self.class_names[pred_idx],
                 "confidence": confidence,
-                "is_above_threshold": confidence >= confidence_threshold,
                 "features": features.squeeze(0).cpu().numpy()
             }
             
@@ -313,14 +311,13 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                 "error": str(e)
             }, None
     
-    def execute(self, cell_crops=None, cell_metadata=None, confidence_threshold=0.5, batch_size=16, query_cache_dir="solver_cache", visualization_type='auto'):
+    def execute(self, cell_crops=None, cell_metadata=None, batch_size=16, query_cache_dir="solver_cache", visualization_type='auto'):
         """
         Execute fibroblast state analysis on cell crops.
         
         Args:
             cell_crops: List of cell crop image paths or PIL Images
             cell_metadata: List of metadata dictionaries for each cell
-            confidence_threshold: Minimum confidence for classification
             batch_size: Batch size for processing
             query_cache_dir: Directory for caching results
             visualization_type: Type of visualization ('pca', 'umap', 'auto', 'all')
@@ -329,7 +326,7 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
             dict: Analysis results with classifications and statistics
         """
         print(f"🚀 Fibroblast_State_Analyzer_Tool starting execution...")
-        print(f"📊 Parameters: confidence_threshold={confidence_threshold}, batch_size={batch_size}, visualization_type={visualization_type}")
+        print(f"📊 Parameters: batch_size={batch_size}, visualization_type={visualization_type}")
         
         # Load cell data if not provided
         if cell_crops is None or cell_metadata is None:
@@ -412,7 +409,6 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                             "image_path": path,
                             "predicted_class": self.class_names[pred_index],
                             "confidence": confidence,
-                            "is_above_threshold": confidence >= self.confidence_threshold,
                             "features": feature_vector
                         }
                         results.append(result)
@@ -480,7 +476,6 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                 'image_path': [r['image_path'] for r in results],
                 'predicted_class': [r['predicted_class'] for r in results],
                 'confidence': [r['confidence'] for r in results],
-                'is_above_threshold': [r['is_above_threshold'] for r in results],
             }
             
             # Fix for anndata compatibility - create AnnData with proper obs DataFrame
@@ -494,9 +489,9 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                 "average_confidence": np.mean([r['confidence'] for r in results]),
                 "visual_outputs": visual_outputs,
                 "parameters": {
-                    "confidence_threshold": confidence_threshold,
-                    "backbone_size": "base",
-                    "model_path": None
+                    "confidence_threshold": self.confidence_threshold,
+                    "backbone_size": self.backbone_size,
+                    "model_path": self.model_path
                 },
                 "cell_state_descriptions": self.class_descriptions,
                 "analysis_quality": self._assess_quality(results),
