@@ -271,6 +271,17 @@ Please present your analysis in a clear, structured format.
         print(f"DEBUG: Finished tools: {finished_tools}")
         print(f"DEBUG: Available tools: {self.available_tools}")
         
+        # Also check if we're already in a fibroblast analysis pipeline
+        fibroblast_tools = ["Image_Preprocessor_Tool", "Nuclei_Segmenter_Tool", "Single_Cell_Cropper_Tool", "Fibroblast_State_Analyzer_Tool", "Fibroblast_Activation_Scorer_Tool"]
+        is_in_fibroblast_pipeline = any(tool in finished_tools for tool in fibroblast_tools)
+        
+        # If we're already in the pipeline or the query is fibroblast-related, enforce the chain
+        is_fibroblast_analysis = is_fibroblast_query or is_in_fibroblast_pipeline
+        print(f"DEBUG: is_fibroblast_query: {is_fibroblast_query}")
+        print(f"DEBUG: is_in_fibroblast_pipeline: {is_in_fibroblast_pipeline}")
+        print(f"DEBUG: is_fibroblast_analysis: {is_fibroblast_analysis}")
+        print(f"DEBUG: TOOL_CHAIN: {TOOL_CHAIN}")
+        
         # Check if we need activation scoring based on question content
         activation_scoring_keywords = [
             "activation score", "activation level", "quantify activation", "activation quantification",
@@ -282,9 +293,13 @@ Please present your analysis in a clear, structured format.
         needs_activation_scoring = any(keyword.lower() in question.lower() for keyword in activation_scoring_keywords)
         
         # STRICT TOOL CHAIN ENFORCEMENT for fibroblast analysis
-        if is_fibroblast_query:
-            print(f"DEBUG: Fibroblast query detected - enforcing strict tool chain")
-            for tool in TOOL_CHAIN:
+        if is_fibroblast_analysis:
+            print(f"DEBUG: Fibroblast analysis detected - enforcing strict tool chain")
+            print(f"DEBUG: Checking each tool in TOOL_CHAIN...")
+            for i, tool in enumerate(TOOL_CHAIN):
+                print(f"DEBUG: Tool {i+1}: {tool}")
+                print(f"DEBUG:   - Available: {tool in self.available_tools}")
+                print(f"DEBUG:   - Finished: {tool in finished_tools}")
                 if tool in self.available_tools and tool not in finished_tools:
                     justification = f"Fibroblast analysis pipeline requires running {tool} after {finished_tools[-1] if finished_tools else 'start'}."
                     context = f"Use output of previous step as input for {tool}."
@@ -297,11 +312,17 @@ Please present your analysis in a clear, structured format.
                         tool_name=tool
                     )
             print(f"DEBUG: All tools in fibroblast chain finished, falling back to LLM logic")
+        else:
+            print(f"DEBUG: NOT a fibroblast analysis - using LLM logic")
+            print(f"DEBUG: is_fibroblast_query: {is_fibroblast_query}")
+            print(f"DEBUG: is_in_fibroblast_pipeline: {is_in_fibroblast_pipeline}")
+            print(f"DEBUG: finished_tools: {finished_tools}")
+            print(f"DEBUG: fibroblast_tools: {fibroblast_tools}")
         
         # Auto-continue to activation scorer after state analyzer completion (only for non-fibroblast queries)
         # This ensures the complete fibroblast analysis pipeline runs
         if (
-            not is_fibroblast_query and
+            not is_fibroblast_analysis and
             "Fibroblast_State_Analyzer_Tool" in finished_tools and
             "Fibroblast_Activation_Scorer_Tool" not in finished_tools and
             "Fibroblast_Activation_Scorer_Tool" in self.available_tools
