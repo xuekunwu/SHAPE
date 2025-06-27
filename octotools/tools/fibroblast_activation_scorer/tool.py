@@ -535,64 +535,8 @@ class Fibroblast_Activation_Scorer_Tool(BaseTool):
                 viz_paths['activation_boxplot'] = box_viz_path
             
             if visualization_type in ['comprehensive', 'all']:
-                # Comprehensive analysis
-                fig, axes = plt.subplots(2, 2, figsize=(15, 12))
-                
-                # 1. Activation score distribution
-                axes[0, 0].hist(activation_scores, bins=30, alpha=0.7, edgecolor='black')
-                axes[0, 0].set_xlabel('Activation Score')
-                axes[0, 0].set_ylabel('Number of Cells')
-                axes[0, 0].set_title('Activation Score Distribution')
-                axes[0, 0].grid(True, alpha=0.3)
-                
-                # 2. Box plot of activation scores
-                box_plot = axes[0, 1].boxplot(activation_scores, patch_artist=True)
-                box_plot['boxes'][0].set_facecolor('lightgreen')
-                box_plot['medians'][0].set_color('red')
-                box_plot['medians'][0].set_linewidth(2)
-                axes[0, 1].set_ylabel('Activation Score')
-                axes[0, 1].set_title('Box Plot of Activation Scores')
-                axes[0, 1].grid(True, alpha=0.3)
-                
-                # 3. Activation score vs expression
-                ref_means = np.mean(reference_data.X, axis=1)
-                query_means = np.mean(query_data.X, axis=1)
-                
-                axes[1, 0].scatter(query_means, activation_scores, alpha=0.6)
-                axes[1, 0].set_xlabel('Mean Expression')
-                axes[1, 0].set_ylabel('Activation Score')
-                axes[1, 0].set_title('Activation Score vs Expression')
-                axes[1, 0].grid(True, alpha=0.3)
-                
-                # 4. Statistical summary
-                stats_text = f"""
-                Query Cells: {len(activation_scores)}
-                Reference Cells: {reference_data.shape[0]}
-                
-                Activation Score Statistics:
-                Mean: {np.mean(activation_scores):.3f}
-                Std: {np.std(activation_scores):.3f}
-                Min: {np.min(activation_scores):.3f}
-                Max: {np.max(activation_scores):.3f}
-                Median: {np.median(activation_scores):.3f}
-                Q1: {np.percentile(activation_scores, 25):.3f}
-                Q3: {np.percentile(activation_scores, 75):.3f}
-                
-                High Activation (>0.7): {np.sum(activation_scores > 0.7)}
-                Low Activation (<0.3): {np.sum(activation_scores < 0.3)}
-                """
-                
-                axes[1, 1].text(0.1, 0.5, stats_text, transform=axes[1, 1].transAxes, 
-                               fontsize=10, verticalalignment='center',
-                               bbox=dict(boxstyle="round,pad=0.3", facecolor="lightgray"))
-                axes[1, 1].set_title('Statistical Summary')
-                axes[1, 1].axis('off')
-                
-                plt.tight_layout()
-                comprehensive_viz_path = os.path.join(output_dir, 'comprehensive_activation_analysis.png')
-                plt.savefig(comprehensive_viz_path, dpi=300, bbox_inches='tight')
-                plt.close()
-                viz_paths['comprehensive_analysis'] = comprehensive_viz_path
+                # Comprehensive analysis - REMOVED as requested
+                pass
             
             if visualization_type == 'all':
                 # Additional UMAP visualization if scanpy is available
