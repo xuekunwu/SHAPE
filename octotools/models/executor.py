@@ -163,15 +163,22 @@ Previous Tool Outputs: {previous_outputs}
 
 IMPORTANT: When the tool requires an image parameter, you MUST use the exact image path provided above: "{safe_path}"
 
+CRITICAL TOOL DEPENDENCY RULES:
+- Fibroblast_Activation_Scorer_Tool MUST use the h5ad file output from Fibroblast_State_Analyzer_Tool
+- Fibroblast_Activation_Scorer_Tool CANNOT use cell_crops_metadata files directly
+- If Fibroblast_State_Analyzer_Tool has not been executed yet, Fibroblast_Activation_Scorer_Tool should not be executed
+- The tool chain must be: Single_Cell_Cropper_Tool → Fibroblast_State_Analyzer_Tool → Fibroblast_Activation_Scorer_Tool
+
 Instructions:
 1. Carefully review all provided information: the query, image path, context, sub-goal, selected tool, tool metadata, and previous tool outputs.
 2. Analyze the tool's input_types from the metadata to understand required and optional parameters.
-3. If previous tool outputs are available, use the appropriate file paths from those outputs (e.g., processed_image_path, nuclei_mask paths, etc.).
+3. If previous tool outputs are available, use the appropriate file paths from those outputs (e.g., processed_image_path, nuclei_mask paths, h5ad files, etc.).
 4. Construct a command or series of commands that aligns with the tool's usage pattern and addresses the sub-goal.
 5. Ensure all required parameters are included and properly formatted.
 6. Use appropriate values for parameters based on the given context, particularly the Context field which may contain relevant information from previous steps.
 7. If multiple steps are needed to prepare data for the tool, include them in the command construction.
 8. CRITICAL: If the tool requires an image parameter, use the exact image path "{safe_path}" provided above, unless a processed image path is available from previous outputs.
+9. CRITICAL: For Fibroblast_Activation_Scorer_Tool, only use h5ad files from Fibroblast_State_Analyzer_Tool, never use cell_crops_metadata files.
 
 Output Format:
 <analysis>: a step-by-step analysis of the context, sub-goal, and selected tool to guide the command construction.
@@ -196,7 +203,8 @@ Rules:
 9. Include ALL required parameters, data, and paths to execute the tool in the command itself.
 10. If preparation steps are needed, include them as separate Python statements before the tool.execute() calls.
 11. CRITICAL: If the tool requires an image parameter, use the exact image path "{safe_path}" provided above, unless a processed image path is available from previous outputs.
-12. If previous tool outputs contain relevant file paths (e.g., processed_image_path, nuclei_mask paths), use those paths instead of the original image path when appropriate.
+12. If previous tool outputs contain relevant file paths (e.g., processed_image_path, nuclei_mask paths, h5ad files), use those paths instead of the original image path when appropriate.
+13. CRITICAL: Fibroblast_Activation_Scorer_Tool must use h5ad files from Fibroblast_State_Analyzer_Tool, not cell_crops_metadata files.
 
 Examples (Not to use directly unless relevant):
 
@@ -241,7 +249,13 @@ execution = tool.execute(image="path/to/image", labels=["baseball"])
 ```
 Reason: Do not use placeholder paths like "path/to/image". Use the actual image path provided.
 
-Remember: Your <command> field MUST be valid Python code including any necessary data preparation steps and one or more execution = tool.execute( calls, without any additional explanatory text. The format execution = tool.execute must be strictly followed, and the last line must begin with execution = tool.execute to capture the final output. ALWAYS use the actual image path "{safe_path}" when the tool requires an image parameter, unless a processed image path is available from previous outputs.
+<command>:
+```python
+execution = tool.execute(cell_data="cell_crops_metadata.json")
+```
+Reason: Fibroblast_Activation_Scorer_Tool must use h5ad files from Fibroblast_State_Analyzer_Tool, not cell_crops_metadata files.
+
+Remember: Your <command> field MUST be valid Python code including any necessary data preparation steps and one or more execution = tool.execute( calls, without any additional explanatory text. The format execution = tool.execute must be strictly followed, and the last line must begin with execution = tool.execute to capture the final output. ALWAYS use the actual image path "{safe_path}" when the tool requires an image parameter, unless a processed image path is available from previous outputs. CRITICAL: Fibroblast_Activation_Scorer_Tool must use h5ad files from Fibroblast_State_Analyzer_Tool.
 """
 
         try:
