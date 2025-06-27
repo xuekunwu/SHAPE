@@ -157,10 +157,21 @@ Please present your analysis in a clear, structured format.
 
     def extract_context_subgoal_and_tool(self, response) -> Tuple[str, str, str]:
         def normalize_tool_name(tool_name: str) -> str:
-            # Normalize the tool name to match the available tools
+            # First try exact match
+            if tool_name in self.available_tools:
+                return tool_name
+            
+            # Then try case-insensitive exact match
+            tool_name_lower = tool_name.lower()
             for tool in self.available_tools:
-                if tool.lower() in tool_name.lower():
+                if tool.lower() == tool_name_lower:
                     return tool
+            
+            # Finally try partial match (tool_name contains available tool name)
+            for tool in self.available_tools:
+                if tool.lower() in tool_name_lower:
+                    return tool
+            
             return "No matched tool given: " + tool_name
         
         try:
@@ -225,9 +236,21 @@ Please present your analysis in a clear, structured format.
     
     def normalize_tool_name(self, tool_name: str) -> str:
         """Normalize the tool name to match the available tools."""
+        # First try exact match
+        if tool_name in self.available_tools:
+            return tool_name
+        
+        # Then try case-insensitive exact match
+        tool_name_lower = tool_name.lower()
         for tool in self.available_tools:
-            if tool.lower() in tool_name.lower():
+            if tool.lower() == tool_name_lower:
                 return tool
+        
+        # Finally try partial match (tool_name contains available tool name)
+        for tool in self.available_tools:
+            if tool.lower() in tool_name_lower:
+                return tool
+        
         return "No matched tool given: " + tool_name
 
     def generate_next_step(self, question: str, image: str, query_analysis: str, memory: Memory, step_count: int, max_step_count: int, bytes_mode: bool = False) -> NextStep:
