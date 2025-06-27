@@ -198,6 +198,15 @@ def save_module_data(query_id: str, key: str, value: Any) -> None:
 
 ########### End of Test Huggingface Dataset ###########
 
+def normalize_tool_name(tool_name: str, available_tools=None) -> str:
+    """Normalize the tool name to match the available tools."""
+    if available_tools is None:
+        return tool_name
+    for tool in available_tools:
+        if tool.lower() in tool_name.lower():
+            return tool
+    return "No matched tool given: " + tool_name
+
 class Solver:
     def __init__(
         self,
@@ -421,6 +430,10 @@ class Solver:
             context, sub_goal, tool_name = self.planner.extract_context_subgoal_and_tool(next_step)
             step_data = {"step_count": step_count, "context": context, "sub_goal": sub_goal, "tool_name": tool_name, "time": round(time.time() - self.start_time, 5)}
             save_module_data(QUERY_ID, f"step_{step_count}_action_prediction", step_data)
+
+            # Always normalize tool_name before use
+            if hasattr(self.planner, 'available_tools'):
+                tool_name = normalize_tool_name(tool_name, self.planner.available_tools)
 
             # Display the step information
             messages.append(ChatMessage(
