@@ -7,6 +7,7 @@ from typing import Dict, Any, List, Tuple
 from octotools.engine.openai import ChatOpenAI
 from octotools.models.memory import Memory
 from octotools.models.formatters import QueryAnalysis, NextStep, MemoryVerification
+from octotools.models.utils import normalize_tool_name
 
 class Planner:
     def __init__(self, llm_engine_name: str, toolbox_metadata: dict = None, available_tools: List = None, api_key: str = None):
