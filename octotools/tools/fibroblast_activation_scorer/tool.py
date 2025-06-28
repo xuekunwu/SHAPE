@@ -516,7 +516,7 @@ class Fibroblast_Activation_Scorer_Tool(BaseTool):
                 # Basic activation score distribution
                 fig, ax = vis_config.create_professional_figure(figsize=(12, 8))
                 ax.hist(activation_scores, bins=30, alpha=0.7, edgecolor='black', color='#4CAF50')
-                vis_config.apply_professional_styling(ax, title='Distribution of Fibroblast Activation Scores', xlabel='Activation Score', ylabel='Number of Cells')
+                vis_config.apply_professional_styling(ax, title='Fibroblast Activation Scores Distribution (Histogram)', xlabel='Activation Score', ylabel='Number of Cells')
                 ax.grid(True, alpha=0.3)
                 basic_viz_path = os.path.join(output_dir, 'activation_score_distribution.png')
                 vis_config.save_professional_figure(fig, basic_viz_path)
@@ -524,9 +524,9 @@ class Fibroblast_Activation_Scorer_Tool(BaseTool):
                 viz_paths['activation_distribution'] = basic_viz_path
                 # Box plot with overlaid points - horizontal orientation
                 fig, ax = vis_config.create_professional_figure(figsize=(10, 6))
-                sns.boxplot(x=activation_scores, color='#4CAF50', width=0.3, boxprops=dict(alpha=0.7), ax=ax)
-                sns.stripplot(x=activation_scores, color='black', alpha=0.6, jitter=0.2, size=8, ax=ax)
-                vis_config.apply_professional_styling(ax, title='Activation Score Distribution (Box + Points)', xlabel='Activation Score')
+                sns.boxplot(x=activation_scores, color='#4CAF50', width=0.5, boxprops=dict(alpha=0.7), ax=ax)
+                sns.stripplot(x=activation_scores, color='black', alpha=0.6, jitter=0.5, size=12, ax=ax)
+                vis_config.apply_professional_styling(ax, title='Fibroblast Activation Scores Distribution (Boxplot)', xlabel='Activation Score')
                 plt.tight_layout()
                 box_viz_path = os.path.join(output_dir, 'activation_score_boxplot.png')
                 vis_config.save_professional_figure(fig, box_viz_path)
