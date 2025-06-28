@@ -523,7 +523,7 @@ class Fibroblast_Activation_Scorer_Tool(BaseTool):
                 plt.close(fig)
                 viz_paths['activation_distribution'] = basic_viz_path
                 # Box plot with overlaid points - horizontal orientation
-                fig, ax = vis_config.create_professional_figure(figsize=(10, 6))
+                fig, ax = vis_config.create_professional_figure(figsize=(8, 4))
                 sns.boxplot(x=activation_scores, color='#4CAF50', width=0.5, boxprops=dict(alpha=0.7), ax=ax)
                 sns.stripplot(x=activation_scores, color='black', alpha=0.6, jitter=0.2, size=12, ax=ax)
                 vis_config.apply_professional_styling(ax, title='Fibroblast Activation Scores Distribution (Boxplot)', xlabel='Activation Score')
