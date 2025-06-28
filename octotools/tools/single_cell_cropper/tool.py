@@ -308,7 +308,7 @@ class Single_Cell_Cropper_Tool(BaseTool):
             fig = plt.figure(figsize=(24, 16), dpi=300)
             gs = fig.add_gridspec(1, 2, width_ratios=[2, 1], hspace=0.25, wspace=0.15)
             
-            fig.suptitle("Single-Cell Cropping Summary.png)", fontsize=36, fontweight='bold', y=0.98)
+            fig.suptitle("Single-Cell Cropping Summary", fontsize=36, fontweight='bold', y=0.98)
 
             # --- Subplots ---
             ax1_container = fig.add_subplot(gs[0, 0])
