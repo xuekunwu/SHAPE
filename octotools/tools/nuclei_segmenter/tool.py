@@ -113,7 +113,9 @@ class Nuclei_Segmenter_Tool(BaseTool):
             # Save overlay visualization with professional styling
             output_path = os.path.join(output_dir, f"nuclei_overlay_{uuid4().hex[:8]}.png")
             fig, ax = VisualizationConfig.create_professional_figure(figsize=(12, 8))
-            ax.imshow(overlay)
+            # Ensure overlay has same brightness as original image
+            overlay_normalized = overlay.astype(np.float32) / 255.0
+            ax.imshow(overlay_normalized, vmin=0, vmax=1)
             ax.axis('off')
             VisualizationConfig.apply_professional_styling(
                 ax, title=f"Nuclei Segmentation - {len(np.unique(mask))-1} cells detected"
