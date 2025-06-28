@@ -298,19 +298,18 @@ class Single_Cell_Cropper_Tool(BaseTool):
         output_path = os.path.join(output_dir, "single_cell_cropper_summary.png")
 
         try:
-            fig = plt.figure(figsize=(16, 12), dpi=300)
+            fig = plt.figure(figsize=(20, 12), dpi=300)
             gs = fig.add_gridspec(1, 2, width_ratios=[2, 1], hspace=0.25, wspace=0.15)
             
             fig.suptitle("Single-Cell Cropping Summary", 
-                         fontsize=vis_config.PROFESSIONAL_STYLE['axes.titlesize'] + 8, 
-                         fontweight='bold', y=0.98)
+                         fontsize=24, fontweight='bold', y=0.98)
 
             # --- Subplots ---
             ax1_container = fig.add_subplot(gs[0, 0])
             ax2 = fig.add_subplot(gs[0, 1])
             
             # 1. Sample Crops Grid (using a robust sub-gridspec)
-            ax1_container.set_title("Sample Cell Crops", fontsize=vis_config.PROFESSIONAL_STYLE['axes.titlesize'], pad=20)
+            ax1_container.set_title("Sample Cell Crops", fontsize=20, fontweight='bold', pad=20)
             ax1_container.axis('off')
             if cell_crops:
                 gs_crops = ax1_container.get_subplotspec().subgridspec(4, 4, wspace=0.05, hspace=0.05)
@@ -324,7 +323,7 @@ class Single_Cell_Cropper_Tool(BaseTool):
                         pass # Silently skip if file is missing or corrupt
                     ax_grid.axis('off')
             
-            # 2. Statistics and Parameters Text
+            # 2. Statistics and Parameters Text - adjusted height to match cropper
             stats_text = (
                 f"Initial Nuclei Detected: {stats.get('initial_cell_count', 'N/A')}\n"
                 f"Filtered by Area (<{min_area}px): {stats.get('filtered_by_area', 'N/A')}\n"
@@ -335,9 +334,9 @@ class Single_Cell_Cropper_Tool(BaseTool):
                 f"  - Margin: {margin} pixels"
             )
             ax2.text(0.5, 0.5, stats_text, ha='center', va='center', transform=ax2.transAxes,
-                     fontsize=vis_config.PROFESSIONAL_STYLE['font.size'] + 4,
+                     fontsize=16, fontweight='bold',
                      bbox=dict(boxstyle='round,pad=0.5', facecolor='aliceblue', alpha=0.9))
-            ax2.set_title("Processing Statistics", fontsize=vis_config.PROFESSIONAL_STYLE['axes.titlesize'], pad=20)
+            ax2.set_title("Processing Statistics", fontsize=20, fontweight='bold', pad=20)
             ax2.axis('off')
 
             vis_config.save_professional_figure(fig, output_path, bbox_inches=None)
