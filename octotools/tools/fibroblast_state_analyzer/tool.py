@@ -825,25 +825,22 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
         try:
             fig, ax = vis_config.create_professional_figure(figsize=(12, 10))
             class_counts = Counter([r['predicted_class'] for r in results])
-            
-            # Define the correct order
             correct_order = ['q-Fb', 'proto-MyoFb', 'p-MyoFb', 'np-MyoFb', 'dead']
             labels = [label for label in correct_order if label in class_counts]
             sizes = [class_counts[label] for label in labels]
             color_list = [vis_config.get_professional_colors().get(label, '#cccccc') for label in labels]
-            
-            # Create pie chart with larger font sizes
-            wedges, texts, autotexts = ax.pie(sizes, labels=labels, autopct='%1.1f%%', 
-                                             startangle=140, colors=color_list, 
-                                             textprops={'fontsize': 14, 'fontweight': 'bold'})
-            
-            # Make autopct text larger
+            # 统一字体风格
+            pie_fontsize = vis_config.PROFESSIONAL_STYLE.get('font.size', 18)
+            title_fontsize = vis_config.PROFESSIONAL_STYLE.get('axes.titlesize', 24)
+            # Create pie chart
+            wedges, texts, autotexts = ax.pie(
+                sizes, labels=labels, autopct='%1.1f%%', startangle=140, colors=color_list,
+                textprops={'fontsize': pie_fontsize, 'fontweight': 'bold'})
             for autotext in autotexts:
-                autotext.set_fontsize(12)
+                autotext.set_fontsize(pie_fontsize)
                 autotext.set_fontweight('bold')
-            
             ax.axis('equal')
-            ax.set_title("Cell State Distribution", fontsize=20, fontweight='bold')
+            vis_config.apply_professional_styling(ax, title="Cell State Distribution")
             pie_path = os.path.join(output_dir, "cell_state_distribution.png")
             vis_config.save_professional_figure(fig, pie_path)
             plt.close(fig)
@@ -856,27 +853,19 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
         try:
             fig, ax = vis_config.create_professional_figure(figsize=(12, 8))
             class_counts = Counter([r['predicted_class'] for r in results])
-            
-            # Define the correct order
             correct_order = ['q-Fb', 'proto-MyoFb', 'p-MyoFb', 'np-MyoFb', 'dead']
             labels = [label for label in correct_order if label in class_counts]
             sizes = [class_counts[label] for label in labels]
             color_list = [vis_config.get_professional_colors().get(label, '#cccccc') for label in labels]
-            
             bars = ax.bar(labels, sizes, color=color_list, edgecolor='black', linewidth=2, alpha=1.0)
-            ax.set_title("Number of Each Cell State", fontsize=20, fontweight='bold')
-            ax.set_xlabel("Cell States", fontsize=18, fontweight='bold')
-            ax.set_ylabel("Number of Cells", fontsize=18, fontweight='bold')
+            vis_config.apply_professional_styling(ax, title="Number of Each Cell State", xlabel="Cell States", ylabel="Number of Cells")
             ax.grid(True, alpha=0.4, linewidth=1.0)
-            ax.tick_params(axis='both', which='major', labelsize=16, width=2, length=6)
-            ax.tick_params(axis='x', rotation=45, labelsize=16)
-            
-            # Add value labels on bars to avoid overlap
+            # Add value labels on bars
+            bar_fontsize = vis_config.PROFESSIONAL_STYLE.get('font.size', 18)
             for bar, size in zip(bars, sizes):
                 height = bar.get_height()
                 ax.text(bar.get_x() + bar.get_width()/2., height + 0.01,
-                       f'{size}', ha='center', va='bottom', fontsize=14, fontweight='bold')
-            
+                       f'{size}', ha='center', va='bottom', fontsize=bar_fontsize, fontweight='bold')
             bar_path = os.path.join(output_dir, "cell_state_bars.png")
             vis_config.save_professional_figure(fig, bar_path)
             plt.close(fig)
