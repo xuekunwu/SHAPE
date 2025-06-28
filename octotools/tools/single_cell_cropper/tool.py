@@ -45,7 +45,7 @@ class Single_Cell_Cropper_Tool(BaseTool):
         Execute single-cell cropping from nuclei segmentation results.
         
         Args:
-            original_image: Path to original brightfield image
+            original_image: Path to original brightfield image (should be query_image_processed.png)
             nuclei_mask: Path to nuclei segmentation mask
             min_area: Minimum area threshold for valid nuclei
             margin: Margin around each nucleus for cropping
@@ -56,8 +56,15 @@ class Single_Cell_Cropper_Tool(BaseTool):
             dict: Cropping results with cell crops and metadata
         """
         try:
-            # Load original image
-            original_img = cv2.imread(original_image, cv2.IMREAD_GRAYSCALE)
+            # Check if we should use processed image instead of original
+            if query_cache_dir and os.path.exists(os.path.join(query_cache_dir, "tool_cache", "query_image_processed.png")):
+                processed_image_path = os.path.join(query_cache_dir, "tool_cache", "query_image_processed.png")
+                print(f"Using processed image: {processed_image_path}")
+                original_img = cv2.imread(processed_image_path, cv2.IMREAD_GRAYSCALE)
+            else:
+                # Load original image
+                original_img = cv2.imread(original_image, cv2.IMREAD_GRAYSCALE)
+            
             if original_img is None:
                 return {
                     "error": f"Failed to load original image: {original_image}",
@@ -298,18 +305,18 @@ class Single_Cell_Cropper_Tool(BaseTool):
         output_path = os.path.join(output_dir, "single_cell_cropper_summary.png")
 
         try:
-            fig = plt.figure(figsize=(20, 12), dpi=300)
+            fig = plt.figure(figsize=(24, 16), dpi=300)
             gs = fig.add_gridspec(1, 2, width_ratios=[2, 1], hspace=0.25, wspace=0.15)
             
             fig.suptitle("Single-Cell Cropping Summary", 
-                         fontsize=24, fontweight='bold', y=0.98)
+                         fontsize=32, fontweight='bold', y=0.98)
 
             # --- Subplots ---
             ax1_container = fig.add_subplot(gs[0, 0])
             ax2 = fig.add_subplot(gs[0, 1])
             
             # 1. Sample Crops Grid (using a robust sub-gridspec)
-            ax1_container.set_title("Sample Cell Crops", fontsize=20, fontweight='bold', pad=20)
+            ax1_container.set_title("Sample Cell Crops", fontsize=28, fontweight='bold', pad=20)
             ax1_container.axis('off')
             if cell_crops:
                 gs_crops = ax1_container.get_subplotspec().subgridspec(4, 4, wspace=0.05, hspace=0.05)
@@ -334,9 +341,9 @@ class Single_Cell_Cropper_Tool(BaseTool):
                 f"  - Margin: {margin} pixels"
             )
             ax2.text(0.5, 0.5, stats_text, ha='center', va='center', transform=ax2.transAxes,
-                     fontsize=16, fontweight='bold',
+                     fontsize=20, fontweight='bold',
                      bbox=dict(boxstyle='round,pad=0.5', facecolor='aliceblue', alpha=0.9))
-            ax2.set_title("Processing Statistics", fontsize=20, fontweight='bold', pad=20)
+            ax2.set_title("Processing Statistics", fontsize=28, fontweight='bold', pad=20)
             ax2.axis('off')
 
             vis_config.save_professional_figure(fig, output_path, bbox_inches=None)
