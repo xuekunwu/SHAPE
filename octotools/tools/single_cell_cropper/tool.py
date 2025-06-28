@@ -308,15 +308,14 @@ class Single_Cell_Cropper_Tool(BaseTool):
             fig = plt.figure(figsize=(24, 16), dpi=300)
             gs = fig.add_gridspec(1, 2, width_ratios=[2, 1], hspace=0.25, wspace=0.15)
             
-            fig.suptitle("Single-Cell Cropping Summary", 
-                         fontsize=32, fontweight='bold', y=0.98)
+            fig.suptitle("Single-Cell Cropping Summary\n(Crops from query_image_processed.png)", fontsize=36, fontweight='bold', y=0.98)
 
             # --- Subplots ---
             ax1_container = fig.add_subplot(gs[0, 0])
             ax2 = fig.add_subplot(gs[0, 1])
             
             # 1. Sample Crops Grid (using a robust sub-gridspec)
-            ax1_container.set_title("Sample Cell Crops", fontsize=28, fontweight='bold', pad=20)
+            ax1_container.set_title("Sample Cell Crops", fontsize=32, fontweight='bold', pad=20)
             ax1_container.axis('off')
             if cell_crops:
                 gs_crops = ax1_container.get_subplotspec().subgridspec(4, 4, wspace=0.05, hspace=0.05)
@@ -340,10 +339,12 @@ class Single_Cell_Cropper_Tool(BaseTool):
                 f"  - Min Area: {min_area} pixels\n"
                 f"  - Margin: {margin} pixels"
             )
-            ax2.text(0.5, 0.5, stats_text, ha='center', va='center', transform=ax2.transAxes,
-                     fontsize=20, fontweight='bold',
-                     bbox=dict(boxstyle='round,pad=0.5', facecolor='aliceblue', alpha=0.9))
-            ax2.set_title("Processing Statistics", fontsize=28, fontweight='bold', pad=20)
+            ax2.set_title("Processing Statistics", fontsize=32, fontweight='bold', pad=20)
+            ax2.text(
+                0.5, 0.5, stats_text, ha='center', va='center', transform=ax2.transAxes,
+                fontsize=28, fontweight='bold', wrap=True,
+                bbox=dict(boxstyle='round,pad=1.0', facecolor='aliceblue', alpha=0.95)
+            )
             ax2.axis('off')
 
             vis_config.save_professional_figure(fig, output_path, bbox_inches=None)
