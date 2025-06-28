@@ -844,9 +844,9 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                 ax.scatter(
                     umap_coords[idx, 0], umap_coords[idx, 1],
                     label=cls,
-                    s=60,
+                    s=100,
                     color=color_map.get(cls, '#cccccc'),
-                    alpha=0.8,
+                    alpha=1,
                     edgecolor='k',
                     linewidth=0.5
                 )
