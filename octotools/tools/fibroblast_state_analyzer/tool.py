@@ -821,6 +821,44 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
         from octotools.models.utils import VisualizationConfig
         vis_config = VisualizationConfig()
         output_paths = []
+        # 0. UMAP embedding visualization
+        try:
+            import scanpy as sc
+            import anndata
+            # 构建AnnData对象
+            pred_classes = [r['predicted_class'] for r in results]
+            cell_ids = [f"cell_{i}" for i in range(len(results))]
+            obs_dict = {'predicted_class': pred_classes, 'cell_id': cell_ids}
+            import pandas as pd
+            obs_df = pd.DataFrame(obs_dict)
+            obs_df.index = cell_ids
+            adata = anndata.AnnData(X=np.array(features), obs=obs_df)
+            adata.obs_names = cell_ids
+            sc.pp.neighbors(adata)
+            sc.tl.umap(adata)
+            umap_coords = adata.obsm['X_umap']
+            fig, ax = vis_config.create_professional_figure(figsize=(10, 8))
+            color_map = vis_config.get_professional_colors()
+            for cls in sorted(set(pred_classes)):
+                idx = adata.obs['predicted_class'] == cls
+                ax.scatter(
+                    umap_coords[idx, 0], umap_coords[idx, 1],
+                    label=cls,
+                    s=60,
+                    color=color_map.get(cls, '#cccccc'),
+                    alpha=0.8,
+                    edgecolor='k',
+                    linewidth=0.5
+                )
+            vis_config.apply_professional_styling(ax, title="UMAP Embedding of Cell States", xlabel="UMAP1", ylabel="UMAP2")
+            ax.legend(title="Cell State", fontsize=vis_config.PROFESSIONAL_STYLE.get('font.size', 18), title_fontsize=vis_config.PROFESSIONAL_STYLE.get('axes.titlesize', 24))
+            umap_path = os.path.join(output_dir, "umap_embedding.png")
+            vis_config.save_professional_figure(fig, umap_path)
+            plt.close(fig)
+            output_paths.append(umap_path)
+            print(f"✅ Created UMAP embedding: {umap_path}")
+        except Exception as e:
+            print(f"❌ Error creating UMAP embedding: {e}")
         # 1. Pie chart of cell state distribution
         try:
             fig, ax = vis_config.create_professional_figure(figsize=(12, 10))
