@@ -315,7 +315,7 @@ class Single_Cell_Cropper_Tool(BaseTool):
             ax2 = fig.add_subplot(gs[0, 1])
             
             # 1. Sample Crops Grid (using a robust sub-gridspec)
-            ax1_container.set_title("Sample Cell Crops", fontsize=32, fontweight='bold', pad=20)
+            ax1_container.set_title("Exemplary Cell Crops", fontsize=32, fontweight='bold', pad=20)
             ax1_container.axis('off')
             if cell_crops:
                 gs_crops = ax1_container.get_subplotspec().subgridspec(4, 4, wspace=0.05, hspace=0.05)
