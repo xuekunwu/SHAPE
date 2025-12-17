@@ -1179,9 +1179,9 @@ def main(args):
     with gr.Blocks() as demo:
         # Theming https://www.gradio.app/guides/theming-guide
         
-        gr.Markdown("# Chat with Fibroblast Aagent: An augmented agentic approach to resolve fibroblast states at single-cell resolution")  # Title
+        gr.Markdown("# Chat with SHAPE: A self-supervised morphology agent for single-cell phenotype")  # Title
         gr.Markdown("""
-        **Fibroblast Aagent** is an open-source assistant for interpreting cell images, powered by large language models and tool-based reasoning.
+        **SHPAE** is an open-source assistant for interpreting cell images, powered by large language models and tool-based reasoning.
         """)
         
         with gr.Row():
