@@ -25,6 +25,7 @@ import psutil  # For memory usage
 from llm_evaluation_scripts.hf_model_configs import HF_MODEL_CONFIGS
 from datetime import datetime
 from octotools.models.utils import make_json_serializable, VisualizationConfig, normalize_tool_name
+from dataclasses import dataclass, field
 
 # Add the project root to the Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -198,6 +199,15 @@ def save_module_data(query_id: str, key: str, value: Any) -> None:
 
 ########### End of Test Huggingface Dataset ###########
 
+
+@dataclass
+class AgentState:
+    """Persistent session state to survive across turns."""
+    conversation: List[ChatMessage] = field(default_factory=list)
+    last_context: str = ""
+    last_sub_goal: str = ""
+    last_visual_description: str = "*Ready to display analysis results and processed images.*"
+
 def normalize_tool_name(tool_name: str, available_tools=None) -> str:
     """Normalize the tool name to match the available tools."""
     if available_tools is None:
@@ -220,7 +230,8 @@ class Solver:
         verbose: bool = True,
         max_steps: int = 10,
         max_time: int = 60,
-        query_cache_dir: str = "solver_cache"
+        query_cache_dir: str = "solver_cache",
+        agent_state: AgentState = None
     ):
         self.planner = planner
         self.memory = memory
@@ -233,6 +244,7 @@ class Solver:
         self.max_steps = max_steps
         self.max_time = max_time
         self.query_cache_dir = query_cache_dir
+        self.agent_state = agent_state or AgentState()
         self.start_time = time.time()
         self.step_tokens = []
         # Initialize visual_outputs_for_gradio as instance variable to accumulate all visual outputs
@@ -460,6 +472,8 @@ class Solver:
             # [Step 5] Generate the next step
             next_step = self.planner.generate_next_step(user_query, img_path, query_analysis, self.memory, step_count, self.max_steps)
             context, sub_goal, tool_name = self.planner.extract_context_subgoal_and_tool(next_step)
+            context = context or self.agent_state.last_context or ""
+            sub_goal = sub_goal or self.agent_state.last_sub_goal or ""
             step_data = {"step_count": step_count, "context": context, "sub_goal": sub_goal, "tool_name": tool_name, "time": round(time.time() - self.start_time, 5)}
             save_module_data(QUERY_ID, f"step_{step_count}_action_prediction", step_data)
 
@@ -638,6 +652,10 @@ class Solver:
             self.step_times.append(step_end - step_start)
 
             # Record step information for tool execution
+            context_text = context or self.agent_state.last_context or ""
+            sub_goal_text = sub_goal or self.agent_state.last_sub_goal or ""
+            self.agent_state.last_context = context_text
+            self.agent_state.last_sub_goal = sub_goal_text
             step_info = {
                 "step_number": step_count,
                 "step_type": "Tool Execution",
@@ -651,7 +669,6 @@ class Solver:
                 "output_tokens": output_tokens,
                 "context": context_text[:200] + "..." if len(context_text) > 200 else context_text,
                 "sub_goal": sub_goal_text[:200] + "..." if len(sub_goal_text) > 200 else sub_goal_text
-
             }
             self.step_info.append(step_info)
 
@@ -735,8 +752,8 @@ class Solver:
                 # Add context and sub-goal for tool execution steps
                 if step['step_type'] == "Tool Execution" and 'context' in step:
                     conclusion += f"  • Context: {step['context']}\n"
-                if 'sub_goal' in step and step['sub_goal'] != "":
-                    conclusion += f"  • Sub-goal: {step['sub_goal']}\n"
+                    if 'sub_goal' in step and step['sub_goal'] != "":
+                        conclusion += f"  • Sub-goal: {step['sub_goal']}\n"
                 
                 conclusion += "\n"
             
@@ -932,9 +949,11 @@ def solve_problem_gradio(user_query, user_image, max_steps=10, max_time=60, llm_
         clear_previous_viz: Whether to clear previous visualizations
         conversation_history: Persistent chat history to keep context across runs
     """
-    conversation_history = conversation_history or []
+    # Initialize or reuse persistent agent state
+    state: AgentState = conversation_history if isinstance(conversation_history, AgentState) else AgentState()
+    state.conversation = list(state.conversation)
     # Start with prior conversation so the session feels continuous
-    messages: List[ChatMessage] = list(conversation_history)
+    messages: List[ChatMessage] = list(state.conversation)
     if user_query:
         messages.append(ChatMessage(role="user", content=str(user_query)))
     
@@ -999,7 +1018,8 @@ For Hugging Face Spaces, add this as a secret in your Space settings.
 
 For more information about obtaining an OpenAI API key, visit: https://platform.openai.com/api-keys
 """)]
-        return new_history, "", [], "**Progress**: Ready", new_history
+        state.conversation = new_history
+        return new_history, "", [], "**Progress**: Ready", state
     
     # Debug: Print enabled_tools
     print(f"Debug - enabled_tools: {enabled_tools}")
@@ -1043,7 +1063,8 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
     except Exception as e:
         print(f"Error creating Initializer: {e}")
         new_history = messages + [gr.ChatMessage(role="assistant", content=f"⚠️ Error: Failed to initialize tools. {str(e)}")]
-        return new_history, "", [], "**Progress**: Error occurred", new_history
+        state.conversation = new_history
+        return new_history, "", [], "**Progress**: Error occurred", state
 
     # Instantiate Planner
     try:
@@ -1057,7 +1078,8 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
     except Exception as e:
         print(f"Error creating Planner: {e}")
         new_history = messages + [gr.ChatMessage(role="assistant", content=f"⚠️ Error: Failed to initialize planner. {str(e)}")]
-        return new_history, "", [], "**Progress**: Error occurred", new_history
+        state.conversation = new_history
+        return new_history, "", [], "**Progress**: Error occurred", state
 
     # Instantiate Memory
     memory = Memory()
@@ -1082,12 +1104,14 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
         verbose=True,          # Default verbose
         max_steps=max_steps,
         max_time=max_time,
-        query_cache_dir=query_cache_dir # NOTE
+        query_cache_dir=query_cache_dir, # NOTE
+        agent_state=state
     )
 
     if solver is None:
         new_history = messages + [gr.ChatMessage(role="assistant", content="⚠️ Error: Failed to initialize solver.")]
-        return new_history, "", [], "**Progress**: Error occurred", new_history
+        state.conversation = new_history
+        return new_history, "", [], "**Progress**: Error occurred", state
 
     try:
         # Stream the solution
@@ -1096,7 +1120,9 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
             save_steps_data(query_id, memory)
             
             # Return the current state
-            yield messages, text_output, gallery_output, progress_md, messages
+            state.conversation = messages
+            state.last_visual_description = visual_desc
+            yield messages, text_output, gallery_output, progress_md, state
             
     except Exception as e:
         print(f"Error in solve_problem_gradio: {e}")
@@ -1109,7 +1135,8 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
         
         # Return error message in the expected format
         error_messages = messages + [gr.ChatMessage(role="assistant", content=error_message)]
-        yield error_messages, "", [], "**Progress**: Error occurred", error_messages
+        state.conversation = error_messages
+        yield error_messages, "", [], "**Progress**: Error occurred", state
     finally:
         print(f"Task completed for query_id: {query_id}. Preparing to clean up cache directory: {query_cache_dir}")
         try:
@@ -1257,7 +1284,7 @@ def main(args):
                     with gr.Column(scale=6):
                         run_button = gr.Button("🚀 Start Analysis", variant="primary", size="lg")
                         progress_md = gr.Markdown("**Progress**: Ready")
-                        conversation_state = gr.State([])
+                        conversation_state = gr.State(AgentState())
 
                 # Output area - two columns instead of three
                 gr.Markdown("### 📊 Analysis Results")
