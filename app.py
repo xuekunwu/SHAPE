@@ -5,6 +5,7 @@ import argparse
 import time
 import io
 import uuid
+import glob
 import torch
 import shutil
 import logging
@@ -1112,33 +1113,57 @@ class BatchPipelineRunner:
                     if p.lower().endswith(".png") and "mask" in os.path.basename(p).lower():
                         mask_path = p
                         break
+            if not mask_path:
+                print(f"No mask found for {img.group}/{img.image_name}; skipping cropping")
+                continue
+            # Validate mask
             try:
-                res = tool.execute(original_image=img_path, nuclei_mask=mask_path) if mask_path else tool.execute(original_image=img_path)
-                crop_paths = res.get("cell_crops") or res.get("cropped_cells") or []
-                for idx, cp in enumerate(crop_paths):
+                with Image.open(mask_path) as mimg:
+                    mask_arr = np.array(mimg)
+                if mask_arr.ndim != 2:
+                    raise ValueError("Mask must be 2D")
+                if not np.issubdtype(mask_arr.dtype, np.integer):
+                    raise ValueError("Mask must be integer-labeled")
+                if mask_arr.max() <= 0:
+                    raise ValueError("Mask has no positive labels")
+            except Exception as e:
+                print(f"Invalid mask for {img.group}/{img.image_name}: {e}")
+                continue
+
+            output_dir = os.path.join(self.crops_dir, f"{img.group}_{img.image_name}_crops")
+            os.makedirs(output_dir, exist_ok=True)
+            try:
+                before_files = set(glob.glob(os.path.join(output_dir, "*.png")))
+                tool.run(
+                    image_path=img_path,
+                    mask_path=mask_path,
+                    output_dir=output_dir,
+                    min_area=200,
+                    margin=10,
+                    pad_to_square=True
+                )
+                after_files = [p for p in glob.glob(os.path.join(output_dir, "*.png")) if p not in before_files]
+                print(f"Cropping executed for {img.group}/{img.image_name}: {len(after_files)} crops saved", flush=True)
+                if len(after_files) == 0:
+                    raise ValueError("Cropping produced 0 crops")
+                for idx, cp in enumerate(sorted(after_files)):
                     try:
                         with Image.open(cp) as cimg:
                             crop_arr = np.array(cimg)
                         cell_id = f"{img.image_id}_cell_{idx}"
                         crop_id = f"{img.image_id}_crop_{idx}"
-                        target = os.path.join(self.crops_dir, f"{img.group}_{img.image_name}_cell_{idx}.png")
-                        try:
-                            shutil.copyfile(cp, target)
-                        except Exception as e:
-                            print(f"Failed to copy crop {cp} to {target}: {e}")
-                            target = cp
                         crops.append(CellCrop(
                             crop_id=crop_id,
                             group=img.group,
                             image_id=img.image_id,
                             cell_id=cell_id,
                             image=crop_arr,
-                            path=target
+                            path=cp
                         ))
                     except Exception as e:
                         print(f"Failed to load crop {cp}: {e}")
             except Exception as e:
-                print(f"Cropping failed for {img_path}: {e}")
+                print(f"Cropping failed for {img.group}/{img.image_name}: {e}")
         return crops
 
     def feature_batch(self, crops: List[CellCrop]) -> List[Dict[str, Any]]:
