@@ -76,6 +76,7 @@ class BatchImage:
     group: str
     image_id: str
     image_path: str
+    image_name: str
 
 
 @dataclass

@@ -1004,9 +1004,11 @@ class BatchPipelineRunner:
         self.initializer = initializer
         self.api_key = api_key
         self.cache_dir = cache_dir
+        self.raw_dir = os.path.join(cache_dir, "raw_images")
         self.preprocess_dir = os.path.join(cache_dir, "preprocess")
         self.segment_dir = os.path.join(cache_dir, "segment")
         self.crops_dir = os.path.join(cache_dir, "crops")
+        os.makedirs(self.raw_dir, exist_ok=True)
         os.makedirs(self.preprocess_dir, exist_ok=True)
         os.makedirs(self.segment_dir, exist_ok=True)
         os.makedirs(self.crops_dir, exist_ok=True)
@@ -1034,6 +1036,12 @@ class BatchPipelineRunner:
         processed = {}
         for img in batch_images:
             out_path = img.image_path
+            # Save original with provenance
+            try:
+                raw_target = os.path.join(self.raw_dir, f"{img.group}_{img.image_name}")
+                shutil.copyfile(img.image_path, raw_target)
+            except Exception as e:
+                print(f"Raw copy failed for {img.image_path}: {e}")
             if tool:
                 try:
                     res = tool.execute(image=img.image_path)
@@ -1043,7 +1051,7 @@ class BatchPipelineRunner:
             # Preserve provenance in filename
             try:
                 ext = Path(out_path).suffix or ".png"
-                target = os.path.join(self.preprocess_dir, f"{img.group}_{img.image_id}_processed{ext}")
+                target = os.path.join(self.preprocess_dir, f"{img.group}_{img.image_name}_processed{ext}")
                 shutil.copyfile(out_path, target)
                 out_path = target
             except Exception as e:
@@ -1068,7 +1076,7 @@ class BatchPipelineRunner:
                 new_vis = []
                 for p in vis:
                     try:
-                        target = os.path.join(self.segment_dir, f"{img.group}_{img.image_id}_{os.path.basename(p)}")
+                        target = os.path.join(self.segment_dir, f"{img.group}_{img.image_name}_{os.path.basename(p)}")
                         shutil.copyfile(p, target)
                         new_vis.append(target)
                     except Exception as e:
@@ -1103,7 +1111,7 @@ class BatchPipelineRunner:
                             crop_arr = np.array(cimg)
                         cell_id = f"{img.image_id}_cell_{idx}"
                         crop_id = f"{img.image_id}_crop_{idx}"
-                        target = os.path.join(self.crops_dir, f"{img.group}_{img.image_id}_cell_{idx}.png")
+                        target = os.path.join(self.crops_dir, f"{img.group}_{img.image_name}_cell_{idx}.png")
                         try:
                             shutil.copyfile(cp, target)
                         except Exception as e:
@@ -1190,7 +1198,7 @@ class BatchPipelineRunner:
         batch_images: List[BatchImage] = []
         for group, paths in grouped_inputs.items():
             for p in paths:
-                batch_images.append(BatchImage(group=group, image_id=str(uuid.uuid4()), image_path=p))
+                batch_images.append(BatchImage(group=group, image_id=str(uuid.uuid4()), image_path=p, image_name=os.path.basename(p)))
 
         print(f"[Batch] Starting preprocess for {len(batch_images)} images across {len(grouped_inputs)} groups", flush=True)
         preprocessed = self.preprocess_batch(batch_images)
@@ -1459,33 +1467,47 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
 
         # Stage: segmentation
         segmented = runner.segment_batch(batch_images, preprocessed)
-        messages.append(ChatMessage(role="assistant", content="✅ Segmentation complete"))
+        messages.append(ChatMessage(role="assistant", content="✅ Segmentation complete (image-level outputs saved)"))
         yield messages, "", [], "**Progress**: Segmentation complete", state
 
-        # Stage: cropping
+        # Stage: cropping (optional)
         crops = runner.crop_batch(batch_images, preprocessed, segmented)
+        if not crops:
+            messages.append(ChatMessage(role="assistant", content="⚠️ No crops generated; skipping feature extraction and aggregation."))
+            state.conversation = messages
+            yield messages, "", [], "**Progress**: Cropping produced 0 crops", state
+            return
         messages.append(ChatMessage(role="assistant", content=f"✅ Cropping complete ({len(crops)} crops)"))
         yield messages, "", [], "**Progress**: Cropping complete", state
 
         # Stage: feature extraction
         features = runner.feature_batch(crops)
+        if not features:
+            messages.append(ChatMessage(role="assistant", content="⚠️ No features extracted; skipping aggregation and LLM summary."))
+            state.conversation = messages
+            yield messages, "", [], "**Progress**: No features extracted", state
+            return
         messages.append(ChatMessage(role="assistant", content=f"✅ Feature extraction complete ({len(features)} feature rows)"))
         yield messages, "", [], "**Progress**: Feature extraction complete", state
 
         # Stage: aggregation
         aggregated = runner.aggregate(features)
+        if not aggregated:
+            messages.append(ChatMessage(role="assistant", content="⚠️ No aggregated data; skipping LLM summary."))
+            state.conversation = messages
+            yield messages, "", [], "**Progress**: No aggregated data", state
+            return
         messages.append(ChatMessage(role="assistant", content=f"✅ Aggregation complete ({len(aggregated)} groups)"))
         yield messages, "", [], "**Progress**: Aggregation complete", state
 
-        # Summary and LLM interpretation
+        # Summary and optional LLM interpretation
         summary_lines = ["### Group-level summary"]
         for row in aggregated:
             summary_lines.append(f"- {row['group']}: cells={row['cell_count']}, mean_area={row['mean_area']:.1f}, std_area={row['std_area']:.1f}")
         summary_md = "\n".join(summary_lines)
 
-        # LLM summarization with compact input
-        llm_summary = runner.summarize_groups(aggregated)
-        final_md = summary_md + "\n\n### LLM Summary\n" + str(llm_summary)
+        llm_summary = runner.summarize_groups(aggregated) if aggregated else ""
+        final_md = summary_md + ("\n\n### LLM Summary\n" + str(llm_summary) if llm_summary else "")
 
         messages.append(ChatMessage(role="assistant", content=final_md))
         state.conversation = messages
