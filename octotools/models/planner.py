@@ -73,12 +73,15 @@ class Planner:
 
         return self.base_response
 
-    def analyze_query(self, question: str, image: str, bytes_mode: bool = False) -> str:
+    def analyze_query(self, question: str, image: str, bytes_mode: bool = False, conversation_context: str = "", **kwargs) -> str:
         image_info = self.get_image_info(image)
         print("image_info: ", image_info)
 
         query_prompt = f"""
 Task: Analyze the given query with accompanying inputs and determine the skills and tools needed to address it effectively.
+
+Conversation so far:
+{conversation_context}
 
 Available tools: {self.available_tools}
 
@@ -235,8 +238,7 @@ Please present your analysis in a clear, structured format.
             print(f"Error in extract_context_subgoal_and_tool: {e}")
             return "", "", "Error extracting tool name"
     
-    def generate_next_step(self, question: str, image: str, query_analysis: str, memory: Memory, step_count: int, max_step_count: int, bytes_mode: bool = False, conversation_text: str
-          = "", **kwargs) -> NextStep:
+    def generate_next_step(self, question: str, image: str, query_analysis: str, memory: Memory, step_count: int, max_step_count: int, bytes_mode: bool = False, conversation_context: str = "", **kwargs) -> NextStep:
         # --- Enforce strict tool dependency chain ---
         TOOL_CHAIN = [
             "Image_Preprocessor_Tool",
@@ -341,6 +343,9 @@ Please present your analysis in a clear, structured format.
         # If not a fibroblast query or all tools finished, use LLM logic
         prompt_generate_next_step = f"""
 Task: Determine the optimal next step to address the given query based on the provided analysis, available tools, and previous steps taken.
+
+Conversation so far:
+{conversation_context}
 
 Context:
 Query: {question}
@@ -533,7 +538,7 @@ Example (do not copy, use only as reference):
             tool_name="Generalist_Solution_Generator_Tool" if "Generalist_Solution_Generator_Tool" in self.available_tools else self.available_tools[0] if self.available_tools else "No tool available"
         )
 
-    def verificate_memory(self, question: str, image: str, query_analysis: str, memory: Memory, bytes_mode: bool = False, conversation_history: str = "", **kwargs) -> MemoryVerification:
+    def verificate_memory(self, question: str, image: str, query_analysis: str, memory: Memory, bytes_mode: bool = False, conversation_context: str = "", **kwargs) -> MemoryVerification:
         if bytes_mode:
             image_info = self.get_image_info_bytes(image)
         else:
@@ -564,6 +569,9 @@ Example (do not copy, use only as reference):
 
         prompt_memory_verification = f"""
 Task: Thoroughly evaluate the completeness and accuracy of the memory for fulfilling the given query, considering the potential need for additional tool usage.
+
+Conversation so far:
+{conversation_context}
 
 Context:
 Query: {question}
@@ -771,7 +779,7 @@ stop_signal: [True or False]
                 print(f"Fallback error: {fallback_error}")
                 return "Error processing verification response", 'CONTINUE'
 
-    def generate_final_output(self, question: str, image: str, memory: Memory, bytes_mode: bool = False) -> str:
+    def generate_final_output(self, question: str, image: str, memory: Memory, bytes_mode: bool = False, conversation_context: str = "", **kwargs) -> str:
         if bytes_mode:
             image_info = self.get_image_info_bytes(image)
         else:
@@ -779,6 +787,9 @@ stop_signal: [True or False]
 
         prompt_generate_final_output = f"""
 Task: Generate the final output based on the query, image, and tools used in the process.
+
+Conversation so far:
+{conversation_context}
 
 Context:
 Query: {question}
@@ -844,13 +855,16 @@ Your response should be well-organized and include the following sections:
         return final_output
 
 
-    def generate_direct_output(self, question: str, image: str, memory: Memory, bytes_mode: bool = False) -> str:
+    def generate_direct_output(self, question: str, image: str, memory: Memory, bytes_mode: bool = False, conversation_context: str = "", **kwargs) -> str:
         if bytes_mode:
             image_info = self.get_image_info_bytes(image)
         else:
             image_info = self.get_image_info(image)
 
         prompt_generate_final_output = f"""
+Conversation so far:
+{conversation_context}
+
 Context:
 Query: {question}
 Image: {image_info}
