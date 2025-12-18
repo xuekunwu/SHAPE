@@ -40,7 +40,7 @@ class Executor:
             self.query_cache_dir = os.path.join(self.query_cache_dir, timestamp)
         os.makedirs(self.query_cache_dir, exist_ok=True)
     
-    def generate_tool_command(self, question: str, image: str, context: str, sub_goal: str, tool_name: str, tool_metadata: Dict[str, Any], memory=None, bytes_mode:bool = False) -> ToolCommand:
+    def generate_tool_command(self, question: str, image: str, context: str, sub_goal: str, tool_name: str, tool_metadata: Dict[str, Any], memory=None, bytes_mode:bool = False, conversation_history: str = "", **kwargs) -> ToolCommand:
         """
         Generate a tool command based on the given information.
         
