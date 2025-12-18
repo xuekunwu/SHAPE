@@ -1280,9 +1280,16 @@ def solve_problem_gradio(user_query, user_images, image_table, max_steps=10, max
         clear_previous_viz: Whether to clear previous visualizations
         conversation_history: Persistent chat history to keep context across runs
     """
-    # Normalize inputs into a single list of named inputs (works for single or multi-image)
-    messages: List[ChatMessage] = []
+    # Pre-initialize all locals that are referenced later to avoid UnboundLocalError
+    state: AgentState = conversation_history if isinstance(conversation_history, AgentState) else AgentState()
+    state.conversation = list(state.conversation)
+    state.analysis_session = state.analysis_session or AnalysisSession()
+    messages: List[ChatMessage] = list(state.conversation)
+    gallery_output: List[Any] = []
+    grouped_preview: Dict[str, List[str]] = {}
     named_inputs: List[Dict[str, str]] = []
+
+    # Normalize inputs into a single list of named inputs (works for single or multi-image)
     uploaded_files = user_images or []
     # Collect names from the table (single "name" column)
     table_names: List[str] = []
