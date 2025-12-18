@@ -7,7 +7,7 @@ from datetime import datetime
 
 from octotools.engine.openai import ChatOpenAI 
 from octotools.models.formatters import ToolCommand
-from octotools.models.task_state import ActiveTask, PlanDelta, PlanStep, TaskType
+from octotools.models.task_state import ActiveTask, PlanDelta, PlanStep, TaskType, AnalysisSession, AnalysisInput, InputDelta
 
 import signal
 import uuid
@@ -58,6 +58,39 @@ class Executor:
 
         active_task.completed_steps = [step.id for step in active_task.plan_steps if step.status == "completed"]
         return active_task
+
+    def apply_input_delta(self, analysis_session: Optional[AnalysisSession], input_delta: InputDelta) -> AnalysisSession:
+        if analysis_session is None:
+            analysis_session = AnalysisSession()
+
+        for name, analysis_input in input_delta.new_inputs.items():
+            analysis_session.inputs[name] = analysis_input
+            if analysis_session.active_input is None:
+                analysis_session.active_input = name
+
+        if input_delta.set_active and input_delta.set_active in analysis_session.inputs:
+            analysis_session.active_input = input_delta.set_active
+
+        if input_delta.compare_requested:
+            analysis_session.compare_requested = True
+
+        return analysis_session
+
+    def record_result(self, analysis_session: Optional[AnalysisSession], input_name: str, step_label: str, result: Any) -> None:
+        if analysis_session is None or not input_name:
+            return
+        if input_name not in analysis_session.results:
+            analysis_session.results[input_name] = {}
+        analysis_session.results[input_name][step_label] = result
+
+    def compare_results(self, analysis_session: Optional[AnalysisSession]) -> Optional[str]:
+        if not analysis_session or len(analysis_session.results) < 2:
+            return None
+        input_summaries = []
+        for name, steps in analysis_session.results.items():
+            visuals = sum(1 for r in steps.values() if isinstance(r, dict) and r.get("visual_outputs"))
+            input_summaries.append(f"{name}: {len(steps)} steps, {visuals} visual outputs")
+        return " | ".join(input_summaries)
 
     def next_pending_step(self, active_task: Optional[ActiveTask]) -> Optional[PlanStep]:
         if not active_task:

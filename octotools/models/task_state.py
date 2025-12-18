@@ -42,7 +42,30 @@ class PlanDelta:
 
 
 @dataclass
+class AnalysisInput:
+    name: str
+    path: str
+    input_type: str = "image"  # image, folder, etc.
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class AnalysisSession:
+    inputs: Dict[str, AnalysisInput] = field(default_factory=dict)
+    results: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    active_input: Optional[str] = None
+    compare_requested: bool = False
+
+
+@dataclass
+class InputDelta:
+    new_inputs: Dict[str, AnalysisInput] = field(default_factory=dict)
+    set_active: Optional[str] = None
+    compare_requested: bool = False
+
+
+@dataclass
 class ConversationState:
     conversation: List[Any] = field(default_factory=list)
     active_task: Optional[ActiveTask] = None
-
+    analysis_session: Optional[AnalysisSession] = None

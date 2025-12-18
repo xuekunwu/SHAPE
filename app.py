@@ -25,7 +25,7 @@ import psutil  # For memory usage
 from llm_evaluation_scripts.hf_model_configs import HF_MODEL_CONFIGS
 from datetime import datetime
 from octotools.models.utils import make_json_serializable, VisualizationConfig, normalize_tool_name
-from octotools.models.task_state import ConversationState, ActiveTask, TaskType
+from octotools.models.task_state import ConversationState, ActiveTask, TaskType, AnalysisSession, AnalysisInput
 from dataclasses import dataclass, field
 
 # Add the project root to the Python path
@@ -231,7 +231,8 @@ class Solver:
         max_steps: int = 10,
         max_time: int = 60,
         query_cache_dir: str = "solver_cache",
-        agent_state: AgentState = None
+        agent_state: AgentState = None,
+        analysis_session: AnalysisSession = None
     ):
         self.planner = planner
         self.memory = memory
@@ -245,6 +246,7 @@ class Solver:
         self.max_time = max_time
         self.query_cache_dir = query_cache_dir
         self.agent_state = agent_state or AgentState()
+        self.analysis_session = analysis_session
         self.start_time = time.time()
         self.step_tokens = []
         # Initialize visual_outputs_for_gradio as instance variable to accumulate all visual outputs
@@ -378,6 +380,15 @@ class Solver:
         else:
             print(f"DEBUG: no user_image provided")
             img_path = None
+
+        # Register the input in the analysis session
+        if self.analysis_session is None:
+            self.analysis_session = AnalysisSession()
+        input_name = self.analysis_session.active_input or "input_1"
+        if img_path:
+            self.analysis_session.inputs[input_name] = AnalysisInput(name=input_name, path=img_path, input_type="image")
+            if self.analysis_session.active_input is None:
+                self.analysis_session.active_input = input_name
 
         print(f"DEBUG: final img_path: {img_path}")
         print(f"=== DEBUG: Image processing completed ===")
@@ -517,6 +528,10 @@ class Solver:
             result = self.executor.execute_tool_command(tool_name, command)
             result = make_json_serializable(result)
             print(f"Tool '{tool_name}' result:", result)
+
+            # Persist result per input for later comparison
+            if self.analysis_session and self.analysis_session.active_input:
+                self.executor.record_result(self.analysis_session, self.analysis_session.active_input, f"step_{step_count}", result)
             
             # Generate dynamic visual description based on tool and results
             visual_description = self.generate_visual_description(tool_name, result, self.visual_outputs_for_gradio)
@@ -619,6 +634,16 @@ class Solver:
                 content=f"**Result:**\n```json\n{json.dumps(make_json_serializable(result), indent=4)}\n```",
                 metadata={"title": f"### 🛠️ Step {step_count}: Command Execution ({tool_name})"}))
             yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Command executed"
+
+            # If comparisons are requested and multiple inputs exist, generate a lightweight comparison summary
+            if self.analysis_session and self.analysis_session.compare_requested and len(self.analysis_session.inputs) > 1:
+                comparison_summary = self.executor.compare_results(self.analysis_session)
+                if comparison_summary:
+                    messages.append(ChatMessage(
+                        role="assistant",
+                        content=f"**Comparison across inputs:** {comparison_summary}",
+                        metadata={"title": f"### 📊 Step {step_count}: Comparative Analysis"}))
+                    yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Comparison updated"
 
             # Save the command execution data
             command_execution_data = {
@@ -969,6 +994,7 @@ def solve_problem_gradio(user_query, user_image, max_steps=10, max_time=60, llm_
     # Initialize or reuse persistent agent state
     state: AgentState = conversation_history if isinstance(conversation_history, AgentState) else AgentState()
     state.conversation = list(state.conversation)
+    state.analysis_session = state.analysis_session or AnalysisSession()
     # Start with prior conversation so the session feels continuous
     messages: List[ChatMessage] = list(state.conversation)
     if user_query:
@@ -1110,15 +1136,17 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
         initializer=initializer
     )
 
-    # Apply planning delta against any active task to preserve continuity
+    # Apply planning/input deltas against any active task to preserve continuity
     prior_task_id = state.active_task.task_id if state.active_task else None
-    plan_delta = planner.plan_task(
+    plan_delta, input_delta = planner.plan_task(
         user_query,
         state.active_task,
+        state.analysis_session,
         default_task_type=state.active_task.task_type if state.active_task else TaskType.ANALYSIS
     )
-    print(f"[Task] prior_task={prior_task_id}, intent={plan_delta.intent}")
+    print(f"[Task] prior_task={prior_task_id}, intent={plan_delta.intent}, compare={input_delta.compare_requested}")
     state.active_task = executor.apply_plan_delta(state.active_task, plan_delta, default_goal=user_query)
+    state.analysis_session = executor.apply_input_delta(state.analysis_session, input_delta)
     active_step = executor.next_pending_step(state.active_task)
     print(f"[Task] active_task_id={state.active_task.task_id if state.active_task else None}, active_step={active_step.id if active_step else None}")
     if active_step:
@@ -1143,7 +1171,8 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
         max_steps=max_steps,
         max_time=max_time,
         query_cache_dir=query_cache_dir, # NOTE
-        agent_state=state
+        agent_state=state,
+        analysis_session=state.analysis_session
     )
 
     if solver is None:
@@ -1207,6 +1236,7 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
                         step.status = "pending"
                         break
         state.active_task = state.active_task
+        state.analysis_session = self.analysis_session
         print(f"Task completed for query_id: {query_id}. Preparing to clean up cache directory: {query_cache_dir}")
         try:
             # Add a check to prevent deleting the root solver_cache
@@ -1230,9 +1260,10 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
         except Exception as e:
             print(f"❌ Error cleaning up cache directory {query_cache_dir}: {e}")
 
-    # Emit final state so the latest active_task (and statuses) persist into the next turn
+    # Emit final state so the latest active_task and analysis_session persist into the next turn
     state.conversation = messages
     final_progress = last_progress_md or "**Progress**: Completed"
+    state.analysis_session = state.analysis_session or AnalysisSession()
     yield messages, last_text_output, last_gallery_output, final_progress, state
 
 
