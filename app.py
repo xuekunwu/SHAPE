@@ -27,6 +27,7 @@ from octotools.models.utils import normalize_tool_name
 from octotools.models.task_state import ConversationState, ActiveTask, TaskType, AnalysisSession, AnalysisInput, BatchImage, CellCrop
 from dataclasses import dataclass, field
 import importlib
+from octotools.engine.openai import ChatOpenAI
 
 # Add the project root to the Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -1111,12 +1112,15 @@ class BatchPipelineRunner:
             grouped.setdefault(feat["group"], []).append(feat)
         summary = []
         for group, feats in grouped.items():
-            cell_count = len(feats)
-            mean_area = np.mean([f["area"] for f in feats]) if feats else 0
+            areas = [f["area"] for f in feats] if feats else []
+            cell_count = len(areas)
+            mean_area = float(np.mean(areas)) if areas else 0.0
+            std_area = float(np.std(areas)) if areas else 0.0
             summary.append({
                 "group": group,
                 "cell_count": int(cell_count),
-                "mean_area": float(mean_area)
+                "mean_area": mean_area,
+                "std_area": std_area
             })
         return summary
 
@@ -1128,19 +1132,56 @@ class BatchPipelineRunner:
             for p in paths:
                 batch_images.append(BatchImage(group=group, image_id=str(uuid.uuid4()), image_path=p))
 
+        print(f"[Batch] Starting preprocess for {len(batch_images)} images across {len(grouped_inputs)} groups", flush=True)
         preprocessed = self.preprocess_batch(batch_images)
+        print(f"[Batch] Preprocess complete", flush=True)
+        print(f"[Batch] Starting segmentation", flush=True)
         segmented = self.segment_batch(batch_images, preprocessed)
+        print(f"[Batch] Segmentation complete", flush=True)
+        print(f"[Batch] Starting cropping", flush=True)
         crops = self.crop_batch(batch_images, preprocessed, segmented)
+        print(f"[Batch] Cropping complete; total crops: {len(crops)}", flush=True)
+        print(f"[Batch] Starting feature extraction", flush=True)
         features = self.feature_batch(crops)
+        print(f"[Batch] Feature extraction complete; total feature rows: {len(features)}", flush=True)
+        print(f"[Batch] Starting aggregation", flush=True)
         aggregated = self.aggregate(features)
+        print(f"[Batch] Aggregation complete; groups summarized: {len(aggregated)}", flush=True)
+
         summary_lines = ["### Group-level summary"]
         for row in aggregated:
-            summary_lines.append(f"- {row['group']}: cells={row['cell_count']}, mean_area={row['mean_area']:.1f}")
+            summary_lines.append(f"- {row['group']}: cells={row['cell_count']}, mean_area={row['mean_area']:.1f}, std_area={row['std_area']:.1f}")
+
+        llm_input = {
+            "groups": [
+                {
+                    "group": row["group"],
+                    "cell_count": row["cell_count"],
+                    "mean_area": row["mean_area"],
+                    "std_area": row["std_area"],
+                }
+                for row in aggregated
+            ]
+        }
+        llm_input_text = json.dumps(llm_input, indent=2)
+        print(f"[Batch] LLM summarization input length: {len(llm_input_text)} chars", flush=True)
+        llm_summary = ""
+        try:
+            print("[Batch] LLM request started", flush=True)
+            llm = ChatOpenAI(model_string=self.initializer.model_string, is_multimodal=False, api_key=self.api_key)
+            prompt = f"Summarize key differences between groups based on cell counts and mean/std area.\nData:\n{llm_input_text}"
+            llm_summary = llm.generate(prompt)
+            print("[Batch] LLM request finished", flush=True)
+        except Exception as e:
+            llm_summary = f"(LLM summarization failed: {e})"
+            print(f"[Batch] LLM request failed: {e}", flush=True)
+
+        final_md = "\n".join(summary_lines) + "\n\n### LLM Summary\n" + str(llm_summary)
         return {
             "crops": crops,
             "features": features,
             "aggregated": aggregated,
-            "summary_md": "\n".join(summary_lines)
+            "summary_md": final_md
         }
 
 
