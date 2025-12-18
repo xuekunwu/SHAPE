@@ -12,7 +12,7 @@ import tempfile
 from PIL import Image
 import numpy as np
 from tifffile import imwrite as tiff_write
-from typing import List, Dict, Any, Iterator
+from typing import List, Dict, Any, Iterator, Optional
 import matplotlib.pyplot as plt
 import gradio as gr
 from gradio import ChatMessage
@@ -336,62 +336,50 @@ class Solver:
         cost = self._calculate_cost(input_tokens, output_tokens)
         return input_tokens, output_tokens, total_tokens, cost
 
-    def stream_solve_user_problem(self, user_query: str, user_image, api_key: str, messages: List[ChatMessage]) -> Iterator:
+    def stream_solve_user_problem(self, user_query: str, user_inputs: Optional[List[Dict[str, str]]], api_key: str, messages: List[ChatMessage]) -> Iterator:
         import time
         import os
         self.start_time = time.time()
         process = psutil.Process(os.getpid())
         visual_description = "*Ready to display analysis results and processed images.*"
         
-        # Handle image input - simplified logic based on original OctoTools
+        # Handle image inputs (multi-input aware)
         print(f"=== DEBUG: Image processing started ===")
-        print(f"DEBUG: user_image type: {type(user_image)}")
-        print(f"DEBUG: user_image is None: {user_image is None}")
-        
-        # Accept pre-parsed string path for primary image; keep compatibility with legacy inputs
-        if user_image:
-            print(f"DEBUG: user_image exists, processing...")
-            # Handle different image input formats from Gradio
-            if isinstance(user_image, dict) and 'path' in user_image:
-                img_path = user_image['path']
-                print(f"DEBUG: extracted path from dict: {img_path}")
-            elif isinstance(user_image, str) and os.path.exists(user_image):
-                img_path = user_image
-                print(f"DEBUG: user_image is valid string path: {img_path}")
-            elif hasattr(user_image, 'save'):
-                print(f"DEBUG: user_image is a PIL Image, saving...")
-                # It's a PIL Image object - save it like in original version
-                img_path = os.path.join(self.query_cache_dir, 'query_image.jpg')
-                print(f"DEBUG: saving to path: {img_path}")
-                print(f"DEBUG: query_cache_dir exists: {os.path.exists(self.query_cache_dir)}")
-                try:
-                    user_image.save(img_path)
-                    print(f"DEBUG: Image saved successfully to: {img_path}")
-                    print(f"DEBUG: file exists after save: {os.path.exists(img_path)}")
-                except Exception as e:
-                    print(f"DEBUG: Error saving image: {e}")
-                    import traceback
-                    print(f"DEBUG: Full traceback: {traceback.format_exc()}")
-                    img_path = None
-            else:
-                print(f"DEBUG: user_image is not a recognized format: {type(user_image)}")
-                if user_image:
-                    print(f"DEBUG: user_image attributes: {dir(user_image)}")
-                img_path = None
+        if user_inputs:
+            print(f"DEBUG: user_inputs provided: {user_inputs}")
         else:
-            print(f"DEBUG: no user_image provided")
-            img_path = None
+            print(f"DEBUG: user_inputs is None")
 
-        # Register the input in the analysis session
         if self.analysis_session is None:
             self.analysis_session = AnalysisSession()
-        input_name = self.analysis_session.active_input or "input_1"
-        if img_path and input_name not in self.analysis_session.inputs:
-            self.analysis_session.inputs[input_name] = AnalysisInput(name=input_name, path=img_path, input_type="image")
-            if self.analysis_session.active_input is None:
-                self.analysis_session.active_input = input_name
 
-        print(f"DEBUG: final img_path: {img_path}")
+        if user_inputs:
+            for item in user_inputs:
+                if not item or not item.get("path"):
+                    continue
+                name = (item.get("name") or "").strip()
+                if not name:
+                    messages.append(ChatMessage(role="assistant", content="Each uploaded image must have a non-empty name."))
+                    yield messages, "", [], visual_description, "**Progress**: Error"
+                    return
+                self.analysis_session.inputs[name] = AnalysisInput(
+                    name=name,
+                    path=item["path"],
+                    input_type=item.get("type", "image")
+                )
+            if not self.analysis_session.active_input and self.analysis_session.inputs:
+                self.analysis_session.active_input = list(self.analysis_session.inputs.keys())[0]
+
+        if not self.analysis_session.inputs:
+            error_msg = "No images provided. Upload and name at least one image."
+            messages.append(ChatMessage(role="assistant", content=error_msg))
+            yield messages, "", [], visual_description, "**Progress**: Error"
+            return
+
+        active_input_name = self.analysis_session.active_input or list(self.analysis_session.inputs.keys())[0]
+        img_path = self.analysis_session.inputs[active_input_name].path
+
+        print(f"DEBUG: active_input={active_input_name}, img_path={img_path}")
         print(f"=== DEBUG: Image processing completed ===")
 
         # Set tool cache directory
@@ -399,10 +387,7 @@ class Solver:
         self.executor.set_query_cache_dir(_tool_cache_dir) # NOTE: set query cache directory
         
         # Step 1: Display the received inputs
-        if user_image:
-            messages.append(ChatMessage(role="assistant", content=f"### 📝 Received Query:\n{user_query}\n### 🖼️ Image Uploaded"))
-        else:
-            messages.append(ChatMessage(role="assistant", content=f"### 📝 Received Query:\n{user_query}"))
+        messages.append(ChatMessage(role="assistant", content=f"### 📝 Received Query:\n{user_query}\n### 🖼️ Active Input: {active_input_name}"))
         yield messages, "", [], visual_description, "**Progress**: Input received"
 
         # [Step 3] Initialize problem-solving state
@@ -1100,11 +1085,11 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
 
     print(f"Debug - final enabled_tools: {enabled_tools}")
     
-    # Save the query data
+    # Save the query data (use first image path if available)
     save_query_data(
         query_id=query_id,
         query=user_query,
-        image_path=os.path.join(query_cache_dir, 'query_image.jpg') if user_image else None
+        image_path=primary_image_path
     )
 
     # Build named inputs from UI (files + editable table)
@@ -1136,7 +1121,6 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
         if not state.analysis_session.active_input:
             state.analysis_session.active_input = named_inputs[0]["name"]
     primary_image_path = named_inputs[0]["path"] if named_inputs else None
-    user_image = primary_image_path
 
     # Instantiate Initializer
     try:
@@ -1233,7 +1217,7 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
 
     try:
         # Stream the solution
-        for messages, text_output, gallery_output, visual_desc, progress_md in solver.stream_solve_user_problem(user_query, user_image, api_key, messages):
+        for messages, text_output, gallery_output, visual_desc, progress_md in solver.stream_solve_user_problem(user_query, named_inputs, api_key, messages):
             # Save steps data
             save_steps_data(query_id, memory)
             last_text_output = text_output
