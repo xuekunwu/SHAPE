@@ -483,7 +483,7 @@ class Solver:
 
             # [Step 5] Generate the next step
             conversation_text = self._format_conversation_history()
-            next_step = self.planner.generate_next_step(user_query, img_path, query_analysis, self.memory, step_count, self.max_steps, conversation_text=conversation_text)
+            next_step = self.planner.generate_next_step(user_query, img_path, query_analysis, self.memory, step_count, self.max_steps, conversation_context=conversation_text)
             context, sub_goal, tool_name = self.planner.extract_context_subgoal_and_tool(next_step)
             context = context or self.agent_state.last_context or ""
             sub_goal = sub_goal or self.agent_state.last_sub_goal or ""
@@ -512,7 +512,7 @@ class Solver:
             # [Step 6-7] Generate and execute the tool command
             safe_path = img_path.replace("\\", "\\\\") if img_path else None
             conversation_text = self._format_conversation_history()
-            tool_command = self.executor.generate_tool_command(user_query, safe_path, context, sub_goal, tool_name, self.planner.toolbox_metadata[tool_name], self.memory, conversation_history=conversation_text)
+            tool_command = self.executor.generate_tool_command(user_query, safe_path, context, sub_goal, tool_name, self.planner.toolbox_metadata[tool_name], self.memory, conversation_context=conversation_text)
             analysis, explanation, command = self.executor.extract_explanation_and_command(tool_command)
             result = self.executor.execute_tool_command(tool_name, command)
             result = make_json_serializable(result)
@@ -630,7 +630,7 @@ class Solver:
             # [Step 8] Memory update and stopping condition
             self.memory.add_action(step_count, tool_name, sub_goal, tool_command, result)
             conversation_text = self._format_conversation_history()
-            stop_verification = self.planner.verificate_memory(user_query, img_path, query_analysis, self.memory, conversation_history=conversation_text)
+            stop_verification = self.planner.verificate_memory(user_query, img_path, query_analysis, self.memory, conversation_context=conversation_text)
             context_verification, conclusion = self.planner.extract_conclusion(stop_verification)
 
             # Save the context verification data
@@ -698,7 +698,7 @@ class Solver:
             messages.append(ChatMessage(role="assistant", content="<br>"))
             final_output_start = time.time()
             conversation_text = self._format_conversation_history()
-            direct_output = self.planner.generate_direct_output(user_query, img_path, self.memory, conversation_history=conversation_text)
+            direct_output = self.planner.generate_direct_output(user_query, img_path, self.memory, conversation_context=conversation_text)
             final_output_end = time.time()
             final_output_time = final_output_end - final_output_start
             
@@ -821,7 +821,7 @@ class Solver:
         if 'final' in self.output_types:
             final_output_start = time.time()
             conversation_text = self._format_conversation_history()
-            final_output = self.planner.generate_final_output(user_query, img_path, self.memory, conversation_history=conversation_text) # Disabled visibility for now
+            final_output = self.planner.generate_final_output(user_query, img_path, self.memory, conversation_context=conversation_text) # Disabled visibility for now
             final_output_end = time.time()
             final_output_time = final_output_end - final_output_start
             # messages.append(ChatMessage(role="assistant", content=f"🎯 Final Output:\n{final_output}"))
