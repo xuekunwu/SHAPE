@@ -1004,6 +1004,12 @@ class BatchPipelineRunner:
         self.initializer = initializer
         self.api_key = api_key
         self.cache_dir = cache_dir
+        self.preprocess_dir = os.path.join(cache_dir, "preprocess")
+        self.segment_dir = os.path.join(cache_dir, "segment")
+        self.crops_dir = os.path.join(cache_dir, "crops")
+        os.makedirs(self.preprocess_dir, exist_ok=True)
+        os.makedirs(self.segment_dir, exist_ok=True)
+        os.makedirs(self.crops_dir, exist_ok=True)
 
     def _load_tool(self, tool_name: str):
         try:
@@ -1034,6 +1040,14 @@ class BatchPipelineRunner:
                     out_path = res.get("processed_image_path", out_path) if isinstance(res, dict) else out_path
                 except Exception as e:
                     print(f"Preprocess failed for {img.image_path}: {e}")
+            # Preserve provenance in filename
+            try:
+                ext = Path(out_path).suffix or ".png"
+                target = os.path.join(self.preprocess_dir, f"{img.group}_{img.image_id}_processed{ext}")
+                shutil.copyfile(out_path, target)
+                out_path = target
+            except Exception as e:
+                print(f"Preprocess copy failed for {out_path}: {e}")
             processed[img.image_id] = out_path
         return processed
 
@@ -1048,6 +1062,18 @@ class BatchPipelineRunner:
                     seg_res = tool.execute(image=img_path)
                 except Exception as e:
                     print(f"Segmentation failed for {img_path}: {e}")
+            # Copy visual outputs with provenance
+            vis = seg_res.get("visual_outputs") if isinstance(seg_res, dict) else None
+            if isinstance(vis, list):
+                new_vis = []
+                for p in vis:
+                    try:
+                        target = os.path.join(self.segment_dir, f"{img.group}_{img.image_id}_{os.path.basename(p)}")
+                        shutil.copyfile(p, target)
+                        new_vis.append(target)
+                    except Exception as e:
+                        print(f"Failed to copy segmentation output {p}: {e}")
+                seg_res["visual_outputs"] = new_vis
             results[img.image_id] = seg_res
         return results
 
@@ -1075,11 +1101,19 @@ class BatchPipelineRunner:
                     try:
                         with Image.open(cp) as cimg:
                             crop_arr = np.array(cimg)
+                        cell_id = f"{img.image_id}_cell_{idx}"
+                        crop_id = f"{img.image_id}_crop_{idx}"
+                        target = os.path.join(self.crops_dir, f"{img.group}_{img.image_id}_cell_{idx}.png")
+                        try:
+                            shutil.copyfile(cp, target)
+                        except Exception as e:
+                            print(f"Failed to copy crop {cp} to {target}: {e}")
+                            target = cp
                         crops.append(CellCrop(
-                            crop_id=str(uuid.uuid4()),
+                            crop_id=crop_id,
                             group=img.group,
                             image_id=img.image_id,
-                            cell_id=f"cell_{idx}",
+                            cell_id=cell_id,
                             image=crop_arr
                         ))
                     except Exception as e:
@@ -1123,6 +1157,32 @@ class BatchPipelineRunner:
                 "std_area": std_area
             })
         return summary
+
+    def summarize_groups(self, aggregated: List[Dict[str, Any]]) -> str:
+        llm_input = {
+            "groups": [
+                {
+                    "group": row["group"],
+                    "cell_count": row["cell_count"],
+                    "mean_area": row["mean_area"],
+                    "std_area": row["std_area"],
+                }
+                for row in aggregated
+            ]
+        }
+        llm_input_text = json.dumps(llm_input, indent=2)
+        print(f"[Batch] LLM summarization input length: {len(llm_input_text)} chars", flush=True)
+        llm_summary = ""
+        try:
+            print("[Batch] LLM request started", flush=True)
+            llm = ChatOpenAI(model_string=self.initializer.model_string, is_multimodal=False, api_key=self.api_key)
+            prompt = f"Summarize key differences between groups based on cell counts and mean/std area.\nData:\n{llm_input_text}"
+            llm_summary = llm.generate(prompt)
+            print("[Batch] LLM request finished", flush=True)
+        except Exception as e:
+            llm_summary = f"(LLM summarization failed: {e})"
+            print(f"[Batch] LLM request failed: {e}", flush=True)
+        return llm_summary
 
     def run(self, grouped_inputs: Dict[str, List[str]]) -> Dict[str, Any]:
         if np is None:
@@ -1387,13 +1447,50 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
         messages.append(ChatMessage(role="assistant", content="### 📝 Received Query\nDeterministic batch pipeline starting..."))
         yield messages, "", [], "**Progress**: Starting batch analysis", state
 
-        pipeline_result = runner.run(grouped_inputs)
-        summary_md = pipeline_result["summary_md"]
+        # Build batch images with provenance
+        batch_images: List[BatchImage] = []
+        for item in named_inputs:
+            batch_images.append(BatchImage(group=item["name"], image_id=str(uuid.uuid4()), image_path=item["path"]))
 
-        messages.append(ChatMessage(role="assistant", content=summary_md))
+        # Stage: preprocess
+        preprocessed = runner.preprocess_batch(batch_images)
+        messages.append(ChatMessage(role="assistant", content="✅ Preprocessing complete"))
+        yield messages, "", [], "**Progress**: Preprocessing complete", state
+
+        # Stage: segmentation
+        segmented = runner.segment_batch(batch_images, preprocessed)
+        messages.append(ChatMessage(role="assistant", content="✅ Segmentation complete"))
+        yield messages, "", [], "**Progress**: Segmentation complete", state
+
+        # Stage: cropping
+        crops = runner.crop_batch(batch_images, preprocessed, segmented)
+        messages.append(ChatMessage(role="assistant", content=f"✅ Cropping complete ({len(crops)} crops)"))
+        yield messages, "", [], "**Progress**: Cropping complete", state
+
+        # Stage: feature extraction
+        features = runner.feature_batch(crops)
+        messages.append(ChatMessage(role="assistant", content=f"✅ Feature extraction complete ({len(features)} feature rows)"))
+        yield messages, "", [], "**Progress**: Feature extraction complete", state
+
+        # Stage: aggregation
+        aggregated = runner.aggregate(features)
+        messages.append(ChatMessage(role="assistant", content=f"✅ Aggregation complete ({len(aggregated)} groups)"))
+        yield messages, "", [], "**Progress**: Aggregation complete", state
+
+        # Summary and LLM interpretation
+        summary_lines = ["### Group-level summary"]
+        for row in aggregated:
+            summary_lines.append(f"- {row['group']}: cells={row['cell_count']}, mean_area={row['mean_area']:.1f}, std_area={row['std_area']:.1f}")
+        summary_md = "\n".join(summary_lines)
+
+        # LLM summarization with compact input
+        llm_summary = runner.summarize_groups(aggregated)
+        final_md = summary_md + "\n\n### LLM Summary\n" + str(llm_summary)
+
+        messages.append(ChatMessage(role="assistant", content=final_md))
         state.conversation = messages
         state.analysis_session = state.analysis_session or AnalysisSession()
-        yield messages, summary_md, [], "**Progress**: Completed", state
+        yield messages, final_md, [], "**Progress**: Completed", state
     except Exception as e:
         error_message = f"⚠️ Error during batch analysis: {e}"
         messages.append(ChatMessage(role="assistant", content=error_message))
