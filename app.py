@@ -266,6 +266,20 @@ class Solver:
         self.model_config = self._get_model_config(planner.llm_engine_name)
         self.default_cost_per_token = self._get_default_cost_per_token()
 
+<<<<<<< HEAD
+=======
+    def _format_conversation_history(self) -> str:
+        """Render conversation history into a plain-text transcript for prompts."""
+        history = self.agent_state.conversation or []
+        lines = []
+        for msg in history:
+            # ChatMessage stores role/content; be defensive about attributes
+            role = getattr(msg, "role", "assistant")
+            content = getattr(msg, "content", "")
+            lines.append(f"{role}: {content}")
+        return "\n".join(lines)
+
+>>>>>>> Update SHAPE agent logic and OctoTools planner/executor
     def _get_model_config(self, model_id: str) -> dict:
         """Return the pricing config for the current model (cached on init)."""
         for config in OPENAI_MODEL_CONFIGS.values():
@@ -395,7 +409,8 @@ class Solver:
         print(f"Debug - img_path for query analysis: {img_path}")
         query_analysis_start = time.time()
         try:
-            query_analysis = self.planner.analyze_query(user_query, img_path)
+            conversation_text = self._format_conversation_history()
+            query_analysis = self.planner.analyze_query(user_query, img_path, conversation_text)
             query_analysis_end = time.time()
             query_analysis_time = query_analysis_end - query_analysis_start
             print(f"Debug - Query analysis completed: {len(query_analysis)} characters")
@@ -470,7 +485,8 @@ class Solver:
             yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count}"
 
             # [Step 5] Generate the next step
-            next_step = self.planner.generate_next_step(user_query, img_path, query_analysis, self.memory, step_count, self.max_steps)
+            conversation_text = self._format_conversation_history()
+            next_step = self.planner.generate_next_step(user_query, img_path, query_analysis, self.memory, step_count, self.max_steps, conversation_text=conversation_text)
             context, sub_goal, tool_name = self.planner.extract_context_subgoal_and_tool(next_step)
             context = context or self.agent_state.last_context or ""
             sub_goal = sub_goal or self.agent_state.last_sub_goal or ""
@@ -498,7 +514,8 @@ class Solver:
 
             # [Step 6-7] Generate and execute the tool command
             safe_path = img_path.replace("\\", "\\\\") if img_path else None
-            tool_command = self.executor.generate_tool_command(user_query, safe_path, context, sub_goal, tool_name, self.planner.toolbox_metadata[tool_name], self.memory)
+            conversation_text = self._format_conversation_history()
+            tool_command = self.executor.generate_tool_command(user_query, safe_path, context, sub_goal, tool_name, self.planner.toolbox_metadata[tool_name], self.memory, conversation_history=conversation_text)
             analysis, explanation, command = self.executor.extract_explanation_and_command(tool_command)
             result = self.executor.execute_tool_command(tool_name, command)
             result = make_json_serializable(result)
@@ -615,7 +632,8 @@ class Solver:
 
             # [Step 8] Memory update and stopping condition
             self.memory.add_action(step_count, tool_name, sub_goal, tool_command, result)
-            stop_verification = self.planner.verificate_memory(user_query, img_path, query_analysis, self.memory)
+            conversation_text = self._format_conversation_history()
+            stop_verification = self.planner.verificate_memory(user_query, img_path, query_analysis, self.memory, conversation_history=conversation_text)
             context_verification, conclusion = self.planner.extract_conclusion(stop_verification)
 
             # Save the context verification data
@@ -682,7 +700,8 @@ class Solver:
         if 'direct' in self.output_types:
             messages.append(ChatMessage(role="assistant", content="<br>"))
             final_output_start = time.time()
-            direct_output = self.planner.generate_direct_output(user_query, img_path, self.memory)
+            conversation_text = self._format_conversation_history()
+            direct_output = self.planner.generate_direct_output(user_query, img_path, self.memory, conversation_history=conversation_text)
             final_output_end = time.time()
             final_output_time = final_output_end - final_output_start
             
@@ -804,7 +823,8 @@ class Solver:
 
         if 'final' in self.output_types:
             final_output_start = time.time()
-            final_output = self.planner.generate_final_output(user_query, img_path, self.memory) # Disabled visibility for now
+            conversation_text = self._format_conversation_history()
+            final_output = self.planner.generate_final_output(user_query, img_path, self.memory, conversation_history=conversation_text) # Disabled visibility for now
             final_output_end = time.time()
             final_output_time = final_output_end - final_output_start
             # messages.append(ChatMessage(role="assistant", content=f"🎯 Final Output:\n{final_output}"))
