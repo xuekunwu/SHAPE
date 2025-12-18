@@ -16,18 +16,16 @@ from typing import List, Dict, Any, Iterator, Optional
 import matplotlib.pyplot as plt
 import gradio as gr
 from gradio import ChatMessage
-from pathlib import Path
 from huggingface_hub import CommitScheduler
-from octotools.models.formatters import ToolCommand
+from pathlib import Path
 import random
 import traceback
 import psutil  # For memory usage
 from llm_evaluation_scripts.hf_model_configs import HF_MODEL_CONFIGS
 from datetime import datetime
-from octotools.models.utils import make_json_serializable, VisualizationConfig, normalize_tool_name
+from octotools.models.utils import normalize_tool_name
 from octotools.models.task_state import ConversationState, ActiveTask, TaskType, AnalysisSession, AnalysisInput, BatchImage, CellCrop
 from dataclasses import dataclass, field
-import uuid
 import importlib
 
 # Add the project root to the Python path
@@ -40,8 +38,6 @@ from octotools.models.initializer import Initializer
 # Custom JSON encoder to handle ToolCommand objects
 class CustomEncoder(json.JSONEncoder):
     def default(self, obj):
-        if isinstance(obj, ToolCommand):
-            return str(obj)  # Convert ToolCommand to its string representation
         return super().default(obj)
 
 def make_json_serializable(obj):
@@ -984,6 +980,8 @@ def normalize_image_for_llm(image_path: str, cache_dir: str) -> str:
         return image_path
 
     try:
+        if Image is None:
+            raise ImportError("Pillow (PIL) is required for TIFF normalization")
         os.makedirs(cache_dir, exist_ok=True)
         with Image.open(image_path) as img:
             # Always convert to RGB to avoid mode issues
@@ -1057,6 +1055,8 @@ class BatchPipelineRunner:
         crops: List[CellCrop] = []
         if not tool:
             return crops
+        if Image is None or np is None:
+            raise ImportError("Pillow and numpy are required for cropping and feature extraction")
         for img in batch_images:
             img_path = preprocessed.get(img.image_id, img.image_path)
             seg_res = seg_results.get(img.image_id, {})
@@ -1088,6 +1088,8 @@ class BatchPipelineRunner:
         return crops
 
     def feature_batch(self, crops: List[CellCrop]) -> List[Dict[str, Any]]:
+        if np is None:
+            raise ImportError("numpy is required for feature extraction")
         features = []
         for crop in crops:
             arr = crop.image
@@ -1102,6 +1104,8 @@ class BatchPipelineRunner:
         return features
 
     def aggregate(self, features: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        if np is None:
+            raise ImportError("numpy is required for aggregation")
         grouped: Dict[str, List[Dict[str, Any]]] = {}
         for feat in features:
             grouped.setdefault(feat["group"], []).append(feat)
@@ -1117,6 +1121,8 @@ class BatchPipelineRunner:
         return summary
 
     def run(self, grouped_inputs: Dict[str, List[str]]) -> Dict[str, Any]:
+        if np is None:
+            raise ImportError("numpy is required for batch pipeline execution")
         batch_images: List[BatchImage] = []
         for group, paths in grouped_inputs.items():
             for p in paths:
@@ -1641,9 +1647,12 @@ if __name__ == "__main__":
     # Print environment information
     print("\n=== Environment Information ===")
     print(f"Running in HuggingFace Spaces: {IS_SPACES}")
-    print(f"CUDA Available: {torch.cuda.is_available()}")
-    if torch.cuda.is_available():
-        print(f"CUDA Device: {torch.cuda.get_device_name(0)}")
+    if torch:
+        print(f"CUDA Available: {torch.cuda.is_available()}")
+        if torch.cuda.is_available():
+            print(f"CUDA Device: {torch.cuda.get_device_name(0)}")
+    else:
+        print("CUDA Available: torch not installed")
     #print(f"API Key Source: {args.openai_api_source}")
     print("==============================\n")
     
