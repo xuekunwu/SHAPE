@@ -642,15 +642,16 @@ class Solver:
                 "step_number": step_count,
                 "step_type": "Tool Execution",
                 "tool_name": tool_name,
-                "description": f"Execute {tool_name} with sub-goal: {sub_goal[:100]}...",
+                "description": f"Execute {tool_name} with sub-goal: {sub_goal_text[:100]}...",
                 "time": step_end - step_start,
                 "tokens": tokens_used,
                 "cost": cost,
                 "memory": mem_after,
                 "input_tokens": input_tokens,
                 "output_tokens": output_tokens,
-                "context": context[:200] + "..." if len(context) > 200 else context,
-                "sub_goal": sub_goal[:200] + "..." if len(sub_goal) > 200 else sub_goal
+                "context": context_text[:200] + "..." if len(context_text) > 200 else context_text,
+                "sub_goal": sub_goal_text[:200] + "..." if len(sub_goal_text) > 200 else sub_goal_text
+
             }
             self.step_info.append(step_info)
 
@@ -734,7 +735,8 @@ class Solver:
                 # Add context and sub-goal for tool execution steps
                 if step['step_type'] == "Tool Execution" and 'context' in step:
                     conclusion += f"  • Context: {step['context']}\n"
-                conclusion += f"  • Sub-goal: {step['sub_goal']}\n"
+                if 'sub_goal' in step and step['sub_goal'] != "":
+                    conclusion += f"  • Sub-goal: {step['sub_goal']}\n"
                 
                 conclusion += "\n"
             
