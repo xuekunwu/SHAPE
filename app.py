@@ -25,7 +25,7 @@ import psutil  # For memory usage
 from llm_evaluation_scripts.hf_model_configs import HF_MODEL_CONFIGS
 from datetime import datetime
 from octotools.models.utils import make_json_serializable, VisualizationConfig, normalize_tool_name
-from octotools.models.task_state import ConversationState, ActiveTask
+from octotools.models.task_state import ConversationState, ActiveTask, TaskType
 from dataclasses import dataclass, field
 
 # Add the project root to the Python path
@@ -1111,9 +1111,16 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
     )
 
     # Apply planning delta against any active task to preserve continuity
-    plan_delta = planner.plan_task(user_query, state.active_task)
+    prior_task_id = state.active_task.task_id if state.active_task else None
+    plan_delta = planner.plan_task(
+        user_query,
+        state.active_task,
+        default_task_type=state.active_task.task_type if state.active_task else TaskType.ANALYSIS
+    )
+    print(f"[Task] prior_task={prior_task_id}, intent={plan_delta.intent}")
     state.active_task = executor.apply_plan_delta(state.active_task, plan_delta, default_goal=user_query)
     active_step = executor.next_pending_step(state.active_task)
+    print(f"[Task] active_task_id={state.active_task.task_id if state.active_task else None}, active_step={active_step.id if active_step else None}")
     if active_step:
         executor.mark_step_in_progress(state.active_task, active_step.id)
     else:
@@ -1222,6 +1229,11 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
                 print(f"⚠️ Skipping cleanup for safety. Path was: {query_cache_dir}")
         except Exception as e:
             print(f"❌ Error cleaning up cache directory {query_cache_dir}: {e}")
+
+    # Emit final state so the latest active_task (and statuses) persist into the next turn
+    state.conversation = messages
+    final_progress = last_progress_md or "**Progress**: Completed"
+    yield messages, last_text_output, last_gallery_output, final_progress, state
 
 
 def main(args):
