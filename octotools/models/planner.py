@@ -533,7 +533,7 @@ Example (do not copy, use only as reference):
             tool_name="Generalist_Solution_Generator_Tool" if "Generalist_Solution_Generator_Tool" in self.available_tools else self.available_tools[0] if self.available_tools else "No tool available"
         )
 
-    def verificate_memory(self, question: str, image: str, query_analysis: str, memory: Memory, bytes_mode: bool = False) -> MemoryVerification:
+    def verificate_memory(self, question: str, image: str, query_analysis: str, memory: Memory, bytes_mode: bool = False, conversation_history: str = "", **kwargs) -> MemoryVerification:
         if bytes_mode:
             image_info = self.get_image_info_bytes(image)
         else:
