@@ -1086,10 +1086,11 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
     print(f"Debug - final enabled_tools: {enabled_tools}")
     
     # Save the query data (use first image path if available)
+    first_image_path = named_inputs[0]["path"] if named_inputs else None
     save_query_data(
         query_id=query_id,
         query=user_query,
-        image_path=primary_image_path
+        image_path=first_image_path
     )
 
     # Build named inputs from UI (files + editable table)
@@ -1120,7 +1121,12 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
         }
         if not state.analysis_session.active_input:
             state.analysis_session.active_input = named_inputs[0]["name"]
-    primary_image_path = named_inputs[0]["path"] if named_inputs else None
+    # Reject empty inputs early
+    if not named_inputs:
+        error_msg = "No images provided. Please upload and name at least one image."
+        messages.append(ChatMessage(role="assistant", content=error_msg))
+        state.conversation = messages
+        return messages, "", [], "**Progress**: Error", state
 
     # Instantiate Initializer
     try:
