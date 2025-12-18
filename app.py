@@ -968,7 +968,7 @@ def build_image_table(files):
         return rows
     for f in files:
         path = getattr(f, "name", None) or getattr(f, "path", None) or str(f)
-        rows.append(["", path])
+        rows.append([Path(path).stem])
     return rows
 
 
@@ -991,22 +991,38 @@ def solve_problem_gradio(user_query, user_images, image_table, max_steps=10, max
     # Normalize inputs into a single list of named inputs (works for single or multi-image)
     named_inputs: List[Dict[str, str]] = []
     uploaded_files = user_images or []
+    # Collect names from the table (single "name" column)
+    table_names: List[str] = []
     if image_table:
         for row in image_table:
-            if not row or len(row) < 2:
+            if not row:
                 continue
             name = str(row[0]).strip() if row[0] else ""
-            path = row[1]
-            if not path:
-                continue
-            if not name:
-                name = Path(path).stem
-            named_inputs.append({"name": name, "type": "image", "path": path})
-    if not named_inputs and uploaded_files:
+            if name:
+                table_names.append(name)
+
+    if uploaded_files:
+        file_paths = []
         for f in uploaded_files:
             path = getattr(f, "name", None) or getattr(f, "path", None) or str(f)
-            name = Path(path).stem
-            named_inputs.append({"name": name, "type": "image", "path": path})
+            file_paths.append(path)
+
+        # If no names provided in table, auto-fill from filenames; otherwise enforce 1:1
+        if not table_names:
+            table_names = [Path(p).stem for p in file_paths]
+        if len(table_names) != len(file_paths):
+            error_msg = f"Number of names ({len(table_names)}) does not match number of uploaded images ({len(file_paths)})."
+            messages.append(ChatMessage(role="assistant", content=error_msg))
+            state.conversation = messages
+            return messages, "", [], "**Progress**: Error", state
+
+        for name, path in zip(table_names, file_paths):
+            if not name.strip():
+                error_msg = "Each uploaded image must have a non-empty name."
+                messages.append(ChatMessage(role="assistant", content=error_msg))
+                state.conversation = messages
+                return messages, "", [], "**Progress**: Error", state
+            named_inputs.append({"name": name.strip(), "type": "image", "path": path})
 
     # Initialize or reuse persistent agent state
     state: AgentState = conversation_history if isinstance(conversation_history, AgentState) else AgentState()
@@ -1413,11 +1429,11 @@ def main(args):
                             height=200
                         )
                         image_table = gr.Dataframe(
-                            headers=["name", "image_path"],
-                            datatype=["str", "str"],
+                            headers=["name"],
+                            datatype=["str"],
                             row_count=(1, "dynamic"),
-                            col_count=2,
-                            label="Name your images (e.g., control, treated)",
+                            col_count=1,
+                            label="Name your images (order matches uploads)",
                             interactive=True
                         )
                         user_images.change(
