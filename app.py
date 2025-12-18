@@ -162,7 +162,7 @@ def save_feedback(query_id: str, feedback_type: str, feedback_text: str = None) 
         json.dump(feedback_data, f, indent=4)
 
 
-def save_steps_data(query_id: str, memory: Memory) -> None:
+def save_steps_data(query_id: str, memory) -> None:
     """Save steps data to Huggingface dataset"""
     steps_file = DATASET_DIR / query_id / "all_steps.json"
 
