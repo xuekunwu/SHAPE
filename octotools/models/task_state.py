@@ -69,3 +69,19 @@ class ConversationState:
     conversation: List[Any] = field(default_factory=list)
     active_task: Optional[ActiveTask] = None
     analysis_session: Optional[AnalysisSession] = None
+
+
+@dataclass
+class BatchImage:
+    group: str
+    image_id: str
+    image_path: str
+
+
+@dataclass
+class CellCrop:
+    crop_id: str
+    group: str
+    image_id: str
+    cell_id: str
+    image: Any

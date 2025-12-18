@@ -25,9 +25,10 @@ import psutil  # For memory usage
 from llm_evaluation_scripts.hf_model_configs import HF_MODEL_CONFIGS
 from datetime import datetime
 from octotools.models.utils import make_json_serializable, VisualizationConfig, normalize_tool_name
-from octotools.models.task_state import ConversationState, ActiveTask, TaskType, AnalysisSession, AnalysisInput
+from octotools.models.task_state import ConversationState, ActiveTask, TaskType, AnalysisSession, AnalysisInput, BatchImage, CellCrop
 from dataclasses import dataclass, field
 import uuid
+import importlib
 
 # Add the project root to the Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -35,9 +36,6 @@ project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_dir)))
 sys.path.insert(0, project_root)
 
 from octotools.models.initializer import Initializer
-from octotools.models.planner import Planner
-from octotools.models.memory import Memory
-from octotools.models.executor import Executor
 
 # Custom JSON encoder to handle ToolCommand objects
 class CustomEncoder(json.JSONEncoder):
@@ -1000,6 +998,146 @@ def normalize_image_for_llm(image_path: str, cache_dir: str) -> str:
         return image_path
 
 
+class BatchPipelineRunner:
+    """Deterministic, group-aware batch pipeline (preprocess→segment→crop→feature→aggregate)."""
+
+    def __init__(self, initializer: Initializer, api_key: str, cache_dir: str):
+        self.initializer = initializer
+        self.api_key = api_key
+        self.cache_dir = cache_dir
+
+    def _load_tool(self, tool_name: str):
+        try:
+            tool_dir = self.initializer.class_name_to_dir(tool_name)
+            module = importlib.import_module(f"octotools.tools.{tool_dir}.tool")
+            tool_class = getattr(module, tool_name)
+            inputs = {}
+            if getattr(tool_class, "require_llm_engine", False):
+                inputs["model_string"] = self.initializer.model_string
+            if getattr(tool_class, "require_api_key", False):
+                inputs["api_key"] = self.api_key
+            tool = tool_class(**inputs)
+            if hasattr(tool, "set_custom_output_dir"):
+                tool.set_custom_output_dir(os.path.join(self.cache_dir, "tool_cache"))
+            return tool
+        except Exception as e:
+            print(f"Warning: failed to load tool {tool_name}: {e}")
+            return None
+
+    def preprocess_batch(self, batch_images: List[BatchImage]) -> Dict[str, str]:
+        tool = self._load_tool("Image_Preprocessor_Tool")
+        processed = {}
+        for img in batch_images:
+            out_path = img.image_path
+            if tool:
+                try:
+                    res = tool.execute(image=img.image_path)
+                    out_path = res.get("processed_image_path", out_path) if isinstance(res, dict) else out_path
+                except Exception as e:
+                    print(f"Preprocess failed for {img.image_path}: {e}")
+            processed[img.image_id] = out_path
+        return processed
+
+    def segment_batch(self, batch_images: List[BatchImage], preprocessed: Dict[str, str]) -> Dict[str, Dict[str, Any]]:
+        tool = self._load_tool("Nuclei_Segmenter_Tool")
+        results = {}
+        for img in batch_images:
+            img_path = preprocessed.get(img.image_id, img.image_path)
+            seg_res = {}
+            if tool:
+                try:
+                    seg_res = tool.execute(image=img_path)
+                except Exception as e:
+                    print(f"Segmentation failed for {img_path}: {e}")
+            results[img.image_id] = seg_res
+        return results
+
+    def crop_batch(self, batch_images: List[BatchImage], preprocessed: Dict[str, str], seg_results: Dict[str, Dict[str, Any]]) -> List[CellCrop]:
+        tool = self._load_tool("Single_Cell_Cropper_Tool")
+        crops: List[CellCrop] = []
+        if not tool:
+            return crops
+        for img in batch_images:
+            img_path = preprocessed.get(img.image_id, img.image_path)
+            seg_res = seg_results.get(img.image_id, {})
+            mask_path = None
+            if isinstance(seg_res, dict):
+                vis = seg_res.get("visual_outputs") or []
+                for p in vis:
+                    if p.lower().endswith(".png") and "mask" in os.path.basename(p).lower():
+                        mask_path = p
+                        break
+            try:
+                res = tool.execute(original_image=img_path, nuclei_mask=mask_path) if mask_path else tool.execute(original_image=img_path)
+                crop_paths = res.get("cell_crops") or res.get("cropped_cells") or []
+                for idx, cp in enumerate(crop_paths):
+                    try:
+                        with Image.open(cp) as cimg:
+                            crop_arr = np.array(cimg)
+                        crops.append(CellCrop(
+                            crop_id=str(uuid.uuid4()),
+                            group=img.group,
+                            image_id=img.image_id,
+                            cell_id=f"cell_{idx}",
+                            image=crop_arr
+                        ))
+                    except Exception as e:
+                        print(f"Failed to load crop {cp}: {e}")
+            except Exception as e:
+                print(f"Cropping failed for {img_path}: {e}")
+        return crops
+
+    def feature_batch(self, crops: List[CellCrop]) -> List[Dict[str, Any]]:
+        features = []
+        for crop in crops:
+            arr = crop.image
+            area = int(arr.size) if hasattr(arr, "size") else 0
+            features.append({
+                "group": crop.group,
+                "image_id": crop.image_id,
+                "cell_id": crop.cell_id,
+                "crop_id": crop.crop_id,
+                "area": area
+            })
+        return features
+
+    def aggregate(self, features: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        grouped: Dict[str, List[Dict[str, Any]]] = {}
+        for feat in features:
+            grouped.setdefault(feat["group"], []).append(feat)
+        summary = []
+        for group, feats in grouped.items():
+            cell_count = len(feats)
+            mean_area = np.mean([f["area"] for f in feats]) if feats else 0
+            summary.append({
+                "group": group,
+                "cell_count": int(cell_count),
+                "mean_area": float(mean_area)
+            })
+        return summary
+
+    def run(self, grouped_inputs: Dict[str, List[str]]) -> Dict[str, Any]:
+        batch_images: List[BatchImage] = []
+        for group, paths in grouped_inputs.items():
+            for p in paths:
+                batch_images.append(BatchImage(group=group, image_id=str(uuid.uuid4()), image_path=p))
+
+        preprocessed = self.preprocess_batch(batch_images)
+        segmented = self.segment_batch(batch_images, preprocessed)
+        crops = self.crop_batch(batch_images, preprocessed, segmented)
+        features = self.feature_batch(crops)
+        aggregated = self.aggregate(features)
+        summary_lines = ["### Group-level summary"]
+        for row in aggregated:
+            summary_lines.append(f"- {row['group']}: cells={row['cell_count']}, mean_area={row['mean_area']:.1f}")
+        return {
+            "crops": crops,
+            "features": features,
+            "aggregated": aggregated,
+            "summary_md": "\n".join(summary_lines)
+        }
+
+
 def solve_problem_gradio(user_query, user_images, image_table, max_steps=10, max_time=60, llm_model_engine=None, enabled_fibroblast_tools=None, enabled_general_tools=None, clear_previous_viz=False, conversation_history=None):
     """
     Solve a problem using the Gradio interface with optional visualization clearing.
@@ -1178,7 +1316,7 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
         state.conversation = messages
         return messages, "", [], "**Progress**: Error", state
 
-    # Instantiate Initializer
+    # Instantiate Initializer for deterministic batch pipeline
     try:
         initializer = Initializer(
             enabled_tools=enabled_tools,
@@ -1192,162 +1330,28 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
         state.conversation = new_history
         return new_history, "", [], "**Progress**: Error occurred", state
 
-    # Instantiate Planner
+    # Deterministic batch pipeline execution
+    runner = BatchPipelineRunner(initializer=initializer, api_key=api_key, cache_dir=query_cache_dir)
+    grouped_inputs: Dict[str, List[str]] = {}
+    for item in named_inputs:
+        grouped_inputs.setdefault(item["name"], []).append(item["path"])
+
     try:
-        planner = Planner(
-            llm_engine_name=model_name_for_octotools,
-            toolbox_metadata=initializer.toolbox_metadata,
-            available_tools=initializer.available_tools,
-            api_key=api_key
-        )
-        print(f"Debug - Planner created successfully")
-    except Exception as e:
-        print(f"Error creating Planner: {e}")
-        new_history = messages + [gr.ChatMessage(role="assistant", content=f"⚠️ Error: Failed to initialize planner. {str(e)}")]
-        state.conversation = new_history
-        return new_history, "", [], "**Progress**: Error occurred", state
+        messages.append(ChatMessage(role="assistant", content="### 📝 Received Query\nDeterministic batch pipeline starting..."))
+        yield messages, "", [], "**Progress**: Starting batch analysis", state
 
-    # Instantiate Memory
-    memory = Memory()
+        pipeline_result = runner.run(grouped_inputs)
+        summary_md = pipeline_result["summary_md"]
 
-    # Instantiate Executor
-    executor = Executor(
-        llm_engine_name=model_name_for_octotools,
-        query_cache_dir=query_cache_dir, # NOTE
-        enable_signal=False,
-        api_key=api_key,
-        initializer=initializer
-    )
-
-    # Apply planning/input deltas against any active task to preserve continuity
-    prior_task_id = state.active_task.task_id if state.active_task else None
-    plan_delta, input_delta = planner.plan_task(
-        user_query,
-        state.active_task,
-        state.analysis_session,
-        default_task_type=state.active_task.task_type if state.active_task else TaskType.ANALYSIS
-    )
-    print(f"[Task] prior_task={prior_task_id}, intent={plan_delta.intent}, compare={input_delta.compare_requested}")
-    state.active_task = executor.apply_plan_delta(state.active_task, plan_delta, default_goal=user_query)
-    state.analysis_session = executor.apply_input_delta(state.analysis_session, input_delta)
-    active_step = executor.next_pending_step(state.active_task)
-    print(f"[Task] active_task_id={state.active_task.task_id if state.active_task else None}, active_step={active_step.id if active_step else None}")
-    if active_step:
-        executor.mark_step_in_progress(state.active_task, active_step.id)
-    else:
-        # Nothing to execute; persist state and exit early
-        info_msg = "No pending steps for the active task. Tell me what to do next or start a new task."
-        messages.append(ChatMessage(role="assistant", content=info_msg))
+        messages.append(ChatMessage(role="assistant", content=summary_md))
         state.conversation = messages
-        yield messages, "", [], "**Progress**: Idle", state
-        return
-
-    # Instantiate Solver
-    solver = Solver(
-        planner=planner,
-        memory=memory,
-        executor=executor,
-        task="minitoolbench",  # Default task
-        task_description="",   # Default empty description
-        output_types="base,final,direct",  # Default output types
-        verbose=True,          # Default verbose
-        max_steps=max_steps,
-        max_time=max_time,
-        query_cache_dir=query_cache_dir, # NOTE
-        agent_state=state,
-        analysis_session=state.analysis_session
-    )
-
-    if solver is None:
-        new_history = messages + [gr.ChatMessage(role="assistant", content="⚠️ Error: Failed to initialize solver.")]
-        state.conversation = new_history
-        return new_history, "", [], "**Progress**: Error occurred", state
-
-    # Track execution artifacts for the active plan step
-    active_step_id = active_step.id if active_step else None
-    last_text_output = ""
-    last_gallery_output: List[Any] = []
-    last_progress_md = ""
-
-    task_successful = False
-
-    try:
-        # Stream the solution
-        for messages, text_output, gallery_output, visual_desc, progress_md in solver.stream_solve_user_problem(user_query, named_inputs, api_key, messages):
-            # Save steps data
-            save_steps_data(query_id, memory)
-            last_text_output = text_output
-            last_gallery_output = gallery_output
-            last_progress_md = progress_md
-            
-            # Return the current state
-            state.conversation = messages
-            state.last_visual_description = visual_desc
-            state.active_task = state.active_task
-            yield messages, text_output, gallery_output, progress_md, state
-        task_successful = True
-            
+        state.analysis_session = state.analysis_session or AnalysisSession()
+        yield messages, summary_md, [], "**Progress**: Completed", state
     except Exception as e:
-        print(f"Error in solve_problem_gradio: {e}")
-        import traceback
-        error_traceback = traceback.format_exc()
-        print(f"Full traceback: {error_traceback}")
-        
-        # Create error message for UI
-        error_message = f"⚠️ Error occurred during analysis:\n\n**Error Type:** {type(e).__name__}\n**Error Message:** {str(e)}\n\nPlease check your input and try again."
-        
-        # Return error message in the expected format
-        error_messages = messages + [gr.ChatMessage(role="assistant", content=error_message)]
-        state.conversation = error_messages
-        yield error_messages, "", [], "**Progress**: Error occurred", state
-    finally:
-        if active_step_id:
-            if task_successful:
-                executor.mark_step_completed(
-                    state.active_task,
-                    active_step_id,
-                    artifacts={
-                        "last_text_output": last_text_output,
-                        "last_progress": last_progress_md,
-                        "last_gallery_count": len(last_gallery_output),
-                    },
-                )
-            else:
-                # If execution failed, leave the step pending for a retry
-                for step in state.active_task.plan_steps:
-                    if step.id == active_step_id:
-                        step.status = "pending"
-                        break
-        state.active_task = state.active_task
-        state.analysis_session = solver.analysis_session
-        print(f"Task completed for query_id: {query_id}. Preparing to clean up cache directory: {query_cache_dir}")
-        try:
-            # Add a check to prevent deleting the root solver_cache
-            if query_cache_dir != DATASET_DIR.name and DATASET_DIR.name in query_cache_dir:
-                # Preserve output_visualizations directory - DO NOT CLEAR IT
-                # This allows users to keep all generated charts until they start a new analysis
-                output_viz_dir = os.path.join(os.getcwd(), 'output_visualizations')
-                if os.path.exists(output_viz_dir):
-                    print(f"📁 Preserving output_visualizations directory: {output_viz_dir}")
-                    print(f"💡 All generated charts are preserved for review")
-                
-                # Add a small delay to ensure files are written
-                time.sleep(1)
-                
-                # Clean up the cache directory (but preserve visualizations)
-                shutil.rmtree(query_cache_dir)
-                print(f"✅ Successfully cleaned up cache directory: {query_cache_dir}")
-                print(f"💡 Note: All visualization files are preserved in output_visualizations/ directory")
-            else:
-                print(f"⚠️ Skipping cleanup for safety. Path was: {query_cache_dir}")
-        except Exception as e:
-            print(f"❌ Error cleaning up cache directory {query_cache_dir}: {e}")
-
-    # Emit final state so the latest active_task and analysis_session persist into the next turn
-    state.conversation = messages
-    final_progress = last_progress_md or "**Progress**: Completed"
-    state.analysis_session = state.analysis_session or AnalysisSession()
-    yield messages, last_text_output, last_gallery_output, final_progress, state
+        error_message = f"⚠️ Error during batch analysis: {e}"
+        messages.append(ChatMessage(role="assistant", content=error_message))
+        state.conversation = messages
+        yield messages, "", [], "**Progress**: Error occurred", state
 
 
 def main(args):
