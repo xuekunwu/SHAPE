@@ -1354,8 +1354,9 @@ def solve_problem_gradio(user_query, user_images, image_table, max_steps=10, max
     interpretation_lines.append("- Planned outputs: preprocessing visuals, segmentation overlays/masks")
     interpretation_lines.append("- Cell-level analysis: attempted if masks yield cells; skipped otherwise")
     interpretation_md = "\n".join(interpretation_lines)
+    report_lines: List[str] = [interpretation_md]
     messages.append(ChatMessage(role="assistant", content=interpretation_md))
-    yield messages, interpretation_md, [], "**Progress**: Interpretation ready", state
+    yield messages, "\n\n".join(report_lines), [], "**Progress**: Interpretation ready", state
     
     # Find the model config by model_id
     selected_model_config = None
@@ -1492,7 +1493,8 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
 
     try:
         messages.append(ChatMessage(role="assistant", content="### 📝 Received Query\nDeterministic batch pipeline starting..."))
-        yield messages, "", [], "**Progress**: Starting batch analysis", state
+        report_lines.append("### Execution Plan\n- Run preprocessing → segmentation → (optional) cropping/feature/aggregation\n- Visualize per-image outputs at each stage")
+        yield messages, "\n\n".join(report_lines), [], "**Progress**: Starting batch analysis", state
 
         # Build batch images with provenance
         batch_images: List[BatchImage] = []
@@ -1511,60 +1513,92 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
                 print(f"Gallery load failed for {img_path}: {e}")
 
         # Stage: preprocess
+        messages.append(ChatMessage(role="assistant", content="🔍 Preprocessing intent: normalize/denoise images for consistent segmentation"))
+        report_lines.append("🔍 Preprocessing: normalizing inputs for consistent segmentation.")
         preprocessed = runner.preprocess_batch(batch_images)
         messages.append(ChatMessage(role="assistant", content="✅ Preprocessing complete"))
+        report_lines.append("✅ Preprocessing complete for all images.")
         for img in batch_images:
             processed_path = preprocessed.get(img.image_id, img.image_path)
             add_to_gallery(processed_path, f"{img.group}/{img.image_name} (preprocessed)")
             messages.append(ChatMessage(role="assistant", content=f"Processed {img.group}/{img.image_name}"))
-            yield messages, "", gallery_output, f"**Progress**: Preprocessed {img.image_name}", state
+            yield messages, "\n\n".join(report_lines), gallery_output, f"**Progress**: Preprocessed {img.image_name}", state
 
         # Stage: segmentation
+        messages.append(ChatMessage(role="assistant", content="🔍 Segmentation intent: detect nuclei masks for each image"))
+        report_lines.append("🔍 Segmentation: detecting nuclei masks for each image.")
         segmented = runner.segment_batch(batch_images, preprocessed)
         messages.append(ChatMessage(role="assistant", content="✅ Segmentation complete (image-level outputs saved)"))
+        report_lines.append("✅ Segmentation complete; masks/overlays saved per image.")
+        mask_available: Dict[str, bool] = {}
         for img in batch_images:
             seg_res = segmented.get(img.image_id, {})
             vis = seg_res.get("visual_outputs") if isinstance(seg_res, dict) else []
+            has_mask = False
             for p in vis:
+                if "mask" in os.path.basename(p).lower():
+                    has_mask = True
                 add_to_gallery(p, f"{img.group}/{img.image_name} (seg)")
+            mask_available[img.image_id] = has_mask
             messages.append(ChatMessage(role="assistant", content=f"Segmented {img.group}/{img.image_name}"))
-            yield messages, "", gallery_output, f"**Progress**: Segmented {img.image_name}", state
+            yield messages, "\n\n".join(report_lines), gallery_output, f"**Progress**: Segmented {img.image_name}", state
 
         # Stage: cropping (optional)
+        messages.append(ChatMessage(role="assistant", content="🔍 Cropping intent: extract cells using segmentation masks"))
+        report_lines.append("🔍 Cropping: attempting cell extraction from segmentation masks.")
         crops = runner.crop_batch(batch_images, preprocessed, segmented)
         if not crops:
-            messages.append(ChatMessage(role="assistant", content="⚠️ No crops generated; skipping feature extraction and aggregation."))
+            # Explain reason based on mask availability
+            no_mask_groups = []
+            for img in batch_images:
+                if not mask_available.get(img.image_id, False):
+                    no_mask_groups.append(f"{img.group}/{img.image_name}")
+            explanation = "No crops generated."
+            if no_mask_groups:
+                explanation += " Segmentation provided nuclei-only or no usable masks for: " + ", ".join(no_mask_groups)
+                explanation += ". Cropping skipped to avoid invalid cell extraction."
+            messages.append(ChatMessage(role="assistant", content=f"⚠️ {explanation}"))
+            report_lines.append(f"⚠️ Cropping skipped: {explanation}")
             state.conversation = messages
-            yield messages, "", gallery_output, "**Progress**: Cropping produced 0 crops", state
+            yield messages, "\n\n".join(report_lines), gallery_output, "**Progress**: Cropping produced 0 crops", state
             return
         messages.append(ChatMessage(role="assistant", content=f"✅ Cropping complete ({len(crops)} crops)"))
+        report_lines.append(f"✅ Cropping complete; extracted {len(crops)} crops.")
         # Show up to a few crops per image to avoid overload
         crops_shown = 0
         for crop in crops:
             if crop.path and crops_shown < 12:
                 add_to_gallery(crop.path, f"{crop.group}/{crop.image_id} {crop.cell_id}")
                 crops_shown += 1
-        yield messages, "", gallery_output, "**Progress**: Cropping complete", state
+        yield messages, "\n\n".join(report_lines), gallery_output, "**Progress**: Cropping complete", state
 
         # Stage: feature extraction
+        messages.append(ChatMessage(role="assistant", content="🔍 Feature intent: compute basic per-cell metrics (area)"))
+        report_lines.append("🔍 Feature extraction: computing per-cell metrics (area).")
         features = runner.feature_batch(crops)
         if not features:
             messages.append(ChatMessage(role="assistant", content="⚠️ No features extracted; skipping aggregation and LLM summary."))
             state.conversation = messages
-            yield messages, "", gallery_output, "**Progress**: No features extracted", state
+            report_lines.append("⚠️ No features extracted; aggregation/LLM skipped.")
+            yield messages, "\n\n".join(report_lines), gallery_output, "**Progress**: No features extracted", state
             return
         messages.append(ChatMessage(role="assistant", content=f"✅ Feature extraction complete ({len(features)} feature rows)"))
-        yield messages, "", gallery_output, "**Progress**: Feature extraction complete", state
+        report_lines.append(f"✅ Feature extraction complete; {len(features)} rows.")
+        yield messages, "\n\n".join(report_lines), gallery_output, "**Progress**: Feature extraction complete", state
 
         # Stage: aggregation
+        messages.append(ChatMessage(role="assistant", content="🔍 Aggregation intent: summarize per group"))
+        report_lines.append("🔍 Aggregation: summarizing per group.")
         aggregated = runner.aggregate(features)
         if not aggregated:
             messages.append(ChatMessage(role="assistant", content="⚠️ No aggregated data; skipping LLM summary."))
             state.conversation = messages
-            yield messages, "", gallery_output, "**Progress**: No aggregated data", state
+            report_lines.append("⚠️ No aggregated data; LLM summary skipped.")
+            yield messages, "\n\n".join(report_lines), gallery_output, "**Progress**: No aggregated data", state
             return
         messages.append(ChatMessage(role="assistant", content=f"✅ Aggregation complete ({len(aggregated)} groups)"))
-        yield messages, "", gallery_output, "**Progress**: Aggregation complete", state
+        report_lines.append(f"✅ Aggregation complete for {len(aggregated)} groups.")
+        yield messages, "\n\n".join(report_lines), gallery_output, "**Progress**: Aggregation complete", state
 
         # Summary and optional LLM interpretation
         summary_lines = ["### Group-level summary"]
@@ -1575,10 +1609,15 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
         llm_summary = runner.summarize_groups(aggregated) if aggregated else ""
         final_md = summary_md + ("\n\n### LLM Summary\n" + str(llm_summary) if llm_summary else "")
 
+        report_lines.append(summary_md)
+        if llm_summary:
+            report_lines.append("### LLM Summary")
+            report_lines.append(str(llm_summary))
+
         messages.append(ChatMessage(role="assistant", content=final_md))
         state.conversation = messages
         state.analysis_session = state.analysis_session or AnalysisSession()
-        yield messages, final_md, gallery_output, "**Progress**: Completed", state
+        yield messages, "\n\n".join(report_lines), gallery_output, "**Progress**: Completed", state
     except Exception as e:
         error_message = f"⚠️ Error during batch analysis: {e}"
         messages.append(ChatMessage(role="assistant", content=error_message))
