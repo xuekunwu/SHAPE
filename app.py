@@ -348,6 +348,7 @@ class Solver:
         print(f"DEBUG: user_image type: {type(user_image)}")
         print(f"DEBUG: user_image is None: {user_image is None}")
         
+        # Accept pre-parsed string path for primary image; keep compatibility with legacy inputs
         if user_image:
             print(f"DEBUG: user_image exists, processing...")
             # Handle different image input formats from Gradio
@@ -385,7 +386,7 @@ class Solver:
         if self.analysis_session is None:
             self.analysis_session = AnalysisSession()
         input_name = self.analysis_session.active_input or "input_1"
-        if img_path:
+        if img_path and input_name not in self.analysis_session.inputs:
             self.analysis_session.inputs[input_name] = AnalysisInput(name=input_name, path=img_path, input_type="image")
             if self.analysis_session.active_input is None:
                 self.analysis_session.active_input = input_name
@@ -976,13 +977,24 @@ def parse_arguments():
     return parser.parse_args()
 
 
-def solve_problem_gradio(user_query, user_image, max_steps=10, max_time=60, llm_model_engine=None, enabled_fibroblast_tools=None, enabled_general_tools=None, clear_previous_viz=False, conversation_history=None):
+def build_image_table(files):
+    rows = []
+    if not files:
+        return rows
+    for f in files:
+        path = getattr(f, "name", None) or getattr(f, "path", None) or str(f)
+        rows.append(["", path])
+    return rows
+
+
+def solve_problem_gradio(user_query, user_images, image_table, max_steps=10, max_time=60, llm_model_engine=None, enabled_fibroblast_tools=None, enabled_general_tools=None, clear_previous_viz=False, conversation_history=None):
     """
     Solve a problem using the Gradio interface with optional visualization clearing.
     
     Args:
         user_query: The user's query
-        user_image: The user's image
+        user_images: List of uploaded images (Gradio Files)
+        image_table: Dataframe of user-provided names and image paths
         max_steps: Maximum number of reasoning steps
         max_time: Maximum analysis time in seconds
         llm_model_engine: Language model engine (model_id from dropdown)
@@ -1094,6 +1106,37 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
         query=user_query,
         image_path=os.path.join(query_cache_dir, 'query_image.jpg') if user_image else None
     )
+
+    # Build named inputs from UI (files + editable table)
+    uploaded_files = user_images or []
+    named_inputs = []
+    if image_table:
+        for row in image_table:
+            if not row or len(row) < 2:
+                continue
+            name = str(row[0]).strip() if row[0] else ""
+            path = row[1]
+            if not path:
+                continue
+            if not name:
+                name = Path(path).stem
+            named_inputs.append({"name": name, "type": "image", "path": path})
+    if not named_inputs and uploaded_files:
+        for f in uploaded_files:
+            path = getattr(f, "name", None) or getattr(f, "path", None) or str(f)
+            name = Path(path).stem
+            named_inputs.append({"name": name, "type": "image", "path": path})
+
+    if named_inputs:
+        state.analysis_session = state.analysis_session or AnalysisSession()
+        state.analysis_session.inputs = {
+            item["name"]: AnalysisInput(name=item["name"], path=item["path"], input_type=item.get("type", "image"))
+            for item in named_inputs
+        }
+        if not state.analysis_session.active_input:
+            state.analysis_session.active_input = named_inputs[0]["name"]
+    primary_image_path = named_inputs[0]["path"] if named_inputs else None
+    user_image = primary_image_path
 
     # Instantiate Initializer
     try:
@@ -1369,18 +1412,32 @@ def main(args):
             # Main interface
             with gr.Column(scale=5):
                 # Input area
-                gr.Markdown("### 📤 Data Input")
+                gr.Markdown("### 📤 Data Input (multi-image, named conditions)")
                 with gr.Row():
                     with gr.Column(scale=1):
-                        user_image = gr.Image(
-                            label="Upload an Image", 
-                            type="pil", 
-                            height=350
+                        user_images = gr.Files(
+                            label="Upload Images (multiple)", 
+                            file_types=["image"], 
+                            file_count="multiple",
+                            height=200
+                        )
+                        image_table = gr.Dataframe(
+                            headers=["name", "image_path"],
+                            datatype=["str", "str"],
+                            row_count=(1, "dynamic"),
+                            col_count=2,
+                            label="Name your images (e.g., control, treated)",
+                            interactive=True
+                        )
+                        user_images.change(
+                            build_image_table,
+                            inputs=user_images,
+                            outputs=image_table
                         )
                     with gr.Column(scale=1):
                         user_query = gr.Textbox(
                             label="Analysis Question", 
-                            placeholder="Describe the cell features or states you want to analyze...", 
+                            placeholder="Describe the features or comparisons you want across these named images (e.g., compare control vs TGFB1)...", 
                             lines=15
                         )
                         
@@ -1458,8 +1515,8 @@ def main(args):
                         gr.Markdown("#### 🧬 Fibroblast Analysis Examples")
                         gr.Examples(
                             examples=fibroblast_examples,
-                            inputs=[gr.Textbox(label="Category", visible=False), user_image, user_query, gr.Textbox(label="Select Tools", visible=False), gr.Textbox(label="Reference Answer", visible=False)],
-                            outputs=[user_image, user_query, enabled_fibroblast_tools, enabled_general_tools],
+                            inputs=[gr.Textbox(label="Category", visible=False), user_images, user_query, gr.Textbox(label="Select Tools", visible=False), gr.Textbox(label="Reference Answer", visible=False)],
+                            outputs=[user_images, user_query, enabled_fibroblast_tools, enabled_general_tools],
                             fn=distribute_tools,
                             cache_examples=False
                         )
@@ -1467,8 +1524,8 @@ def main(args):
                         gr.Markdown("#### 🧩 General Purpose Examples")
                         gr.Examples(
                             examples=general_examples,
-                            inputs=[gr.Textbox(label="Category", visible=False), user_image, user_query, gr.Textbox(label="Select Tools", visible=False), gr.Textbox(label="Reference Answer", visible=False)],
-                            outputs=[user_image, user_query, enabled_fibroblast_tools, enabled_general_tools],
+                            inputs=[gr.Textbox(label="Category", visible=False), user_images, user_query, gr.Textbox(label="Select Tools", visible=False), gr.Textbox(label="Reference Answer", visible=False)],
+                            outputs=[user_images, user_query, enabled_fibroblast_tools, enabled_general_tools],
                             fn=distribute_tools,
                             cache_examples=False
                         )
@@ -1476,7 +1533,7 @@ def main(args):
         # Button click event
         run_button.click(
             solve_problem_gradio,
-            [user_query, user_image, max_steps, max_time, language_model, enabled_fibroblast_tools, enabled_general_tools, clear_previous_viz, conversation_state],
+            [user_query, user_images, image_table, max_steps, max_time, language_model, enabled_fibroblast_tools, enabled_general_tools, clear_previous_viz, conversation_state],
             [chatbot_output, text_output, gallery_output, progress_md, conversation_state]
         )
 
