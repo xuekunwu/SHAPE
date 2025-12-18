@@ -235,7 +235,8 @@ Please present your analysis in a clear, structured format.
             print(f"Error in extract_context_subgoal_and_tool: {e}")
             return "", "", "Error extracting tool name"
     
-    def generate_next_step(self, question: str, image: str, query_analysis: str, memory: Memory, step_count: int, max_step_count: int, bytes_mode: bool = False) -> NextStep:
+    def generate_next_step(self, question: str, image: str, query_analysis: str, memory: Memory, step_count: int, max_step_count: int, bytes_mode: bool = False，, conversation_text: str
+          = "", **kwargs) -> NextStep:
         # --- Enforce strict tool dependency chain ---
         TOOL_CHAIN = [
             "Image_Preprocessor_Tool",
