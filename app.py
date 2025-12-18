@@ -266,8 +266,6 @@ class Solver:
         self.model_config = self._get_model_config(planner.llm_engine_name)
         self.default_cost_per_token = self._get_default_cost_per_token()
 
-<<<<<<< HEAD
-=======
     def _format_conversation_history(self) -> str:
         """Render conversation history into a plain-text transcript for prompts."""
         history = self.agent_state.conversation or []
@@ -279,7 +277,6 @@ class Solver:
             lines.append(f"{role}: {content}")
         return "\n".join(lines)
 
->>>>>>> Update SHAPE agent logic and OctoTools planner/executor
     def _get_model_config(self, model_id: str) -> dict:
         """Return the pricing config for the current model (cached on init)."""
         for config in OPENAI_MODEL_CONFIGS.values():
