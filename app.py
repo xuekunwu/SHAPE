@@ -1271,6 +1271,7 @@ def solve_problem_gradio(user_query, user_images, image_table, max_steps=10, max
         conversation_history: Persistent chat history to keep context across runs
     """
     # Normalize inputs into a single list of named inputs (works for single or multi-image)
+    messages: List[ChatMessage] = []
     named_inputs: List[Dict[str, str]] = []
     uploaded_files = user_images or []
     # Collect names from the table (single "name" column)
