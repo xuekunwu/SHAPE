@@ -251,6 +251,65 @@ class Solver:
         
         # Add step information tracking
         self.step_info = []  # Store detailed information for each step
+        self.model_config = self._get_model_config(planner.llm_engine_name)
+        self.default_cost_per_token = self._get_default_cost_per_token()
+
+    def _get_model_config(self, model_id: str) -> dict:
+        """Return the pricing config for the current model (cached on init)."""
+        for config in OPENAI_MODEL_CONFIGS.values():
+            if config.get("model_id") == model_id:
+                return config
+        return None
+
+    def _get_default_cost_per_token(self) -> float:
+        """Fallback pricing when model-specific costs are unavailable."""
+        if self.model_config and 'expected_cost_per_1k_tokens' in self.model_config:
+            return self.model_config['expected_cost_per_1k_tokens'] / 1000
+        return 0.00001
+
+    def _calculate_cost(self, input_tokens: int, output_tokens: int) -> float:
+        """Calculate token cost using input/output pricing when available."""
+        if self.model_config and 'input_cost_per_1k_tokens' in self.model_config and 'output_cost_per_1k_tokens' in self.model_config:
+            input_cost = (input_tokens / 1000) * self.model_config['input_cost_per_1k_tokens']
+            output_cost = (output_tokens / 1000) * self.model_config['output_cost_per_1k_tokens']
+            return input_cost + output_cost
+        total_tokens = input_tokens + output_tokens
+        return total_tokens * self.default_cost_per_token
+
+    def _collect_usage_and_cost(self, planner_usage=None, result=None):
+        """
+        Normalize usage stats from planner and executor outputs into input/output tokens
+        plus a unified cost calculation.
+        """
+        planner_usage = planner_usage or {}
+        input_tokens = planner_usage.get('prompt_tokens', 0)
+        output_tokens = planner_usage.get('completion_tokens', 0)
+        total_tokens = planner_usage.get('total_tokens', 0)
+
+        if total_tokens and not (input_tokens or output_tokens):
+            input_tokens = int(total_tokens * 0.7)
+            output_tokens = total_tokens - input_tokens
+
+        result_input = result_output = result_total = 0
+        if isinstance(result, dict):
+            if 'usage' in result:
+                result_input = result['usage'].get('prompt_tokens', 0)
+                result_output = result['usage'].get('completion_tokens', 0)
+                result_total = result['usage'].get('total_tokens', result_input + result_output)
+            elif 'token_usage' in result:
+                result_total = result['token_usage']
+                result_input = int(result_total * 0.7)
+                result_output = result_total - result_input
+
+        input_tokens += result_input
+        output_tokens += result_output
+        if input_tokens or output_tokens:
+            total_tokens = input_tokens + output_tokens
+        else:
+            total_tokens += result_total
+
+        cost = self._calculate_cost(input_tokens, output_tokens)
+        return input_tokens, output_tokens, total_tokens, cost
 
     def stream_solve_user_problem(self, user_query: str, user_image, api_key: str, messages: List[ChatMessage]) -> Iterator:
         import time
@@ -330,41 +389,14 @@ class Solver:
             print(f"Debug - Query analysis completed: {len(query_analysis)} characters")
             
             # Track tokens for query analysis step
-            query_analysis_tokens = 0
-            if hasattr(self.planner, 'last_usage') and self.planner.last_usage:
-                query_analysis_tokens = self.planner.last_usage.get('total_tokens', 0)
-                print(f"Query analysis tokens used: {query_analysis_tokens}")
-                print(f"Query analysis full usage: {self.planner.last_usage}")
-                self.step_tokens.append(query_analysis_tokens)
-                
-                # Calculate cost for query analysis
-                model_config = None
-                for config in OPENAI_MODEL_CONFIGS.values():
-                    if config.get("model_id") == self.planner.llm_engine_name:
-                        model_config = config
-                        break
-                
-                # Calculate cost based on input and output tokens separately
-                query_analysis_cost = 0.0
-                if model_config and 'input_cost_per_1k_tokens' in model_config and 'output_cost_per_1k_tokens' in model_config:
-                    input_tokens = self.planner.last_usage.get('prompt_tokens', 0)
-                    output_tokens = self.planner.last_usage.get('completion_tokens', 0)
-                    
-                    input_cost = (input_tokens / 1000) * model_config['input_cost_per_1k_tokens']
-                    output_cost = (output_tokens / 1000) * model_config['output_cost_per_1k_tokens']
-                    query_analysis_cost = input_cost + output_cost
-                    
-                    print(f"Query analysis - Input tokens: {input_tokens}, Output tokens: {output_tokens}")
-                    print(f"Query analysis - Input cost: ${input_cost:.6f}, Output cost: ${output_cost:.6f}")
-                else:
-                    # Fallback to old calculation method
-                    cost_per_token = 0.00001  # Default cost
-                    if model_config and 'expected_cost_per_1k_tokens' in model_config:
-                        cost_per_token = model_config['expected_cost_per_1k_tokens'] / 1000
-                    query_analysis_cost = query_analysis_tokens * cost_per_token
-                
-                self.step_costs.append(query_analysis_cost)
-                self.total_cost += query_analysis_cost
+            planner_usage = self.planner.last_usage if hasattr(self.planner, 'last_usage') else None
+            qa_input_tokens, qa_output_tokens, query_analysis_tokens, query_analysis_cost = self._collect_usage_and_cost(planner_usage)
+            self.step_tokens.append(query_analysis_tokens)
+            self.step_costs.append(query_analysis_cost)
+            self.total_cost += query_analysis_cost
+
+            if query_analysis_tokens:
+                print(f"Query analysis - Input tokens: {qa_input_tokens}, Output tokens: {qa_output_tokens}")
                 print(f"Query analysis cost: ${query_analysis_cost:.6f}")
             
             # Track time for query analysis step
@@ -388,8 +420,8 @@ class Solver:
                 "tokens": query_analysis_tokens,
                 "cost": query_analysis_cost,
                 "memory": mem_after_query_analysis,
-                "input_tokens": self.planner.last_usage.get('prompt_tokens', 0) if hasattr(self.planner, 'last_usage') and self.planner.last_usage else 0,
-                "output_tokens": self.planner.last_usage.get('completion_tokens', 0) if hasattr(self.planner, 'last_usage') and self.planner.last_usage else 0
+                "input_tokens": qa_input_tokens,
+                "output_tokens": qa_output_tokens
             }
             self.step_info.append(step_info)
             
@@ -589,77 +621,14 @@ class Solver:
             yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Context verified"
 
             # After tool execution, estimate tokens and cost
-            # Try to get token usage from result if available, else estimate
-            tokens_used = 0
-            cost = 0.0
-            
-            # Get token usage from planner's last operation
-            if hasattr(self.planner, 'last_usage') and self.planner.last_usage:
-                planner_tokens = self.planner.last_usage.get('total_tokens', 0)
-                tokens_used += planner_tokens
-                print(f"Planner tokens used: {planner_tokens}")
-                print(f"Planner full usage: {self.planner.last_usage}")
-            else:
-                print(f"Planner last_usage not available or empty: {getattr(self.planner, 'last_usage', 'Not set')}")
-            
-            # Get token usage from executor's last operation (if available)
-            if isinstance(result, dict):
-                if 'usage' in result and 'total_tokens' in result['usage']:
-                    executor_tokens = result['usage']['total_tokens']
-                    tokens_used += executor_tokens
-                    print(f"Executor tokens used: {executor_tokens}")
-                elif 'token_usage' in result:
-                    executor_tokens = result['token_usage']
-                    tokens_used += executor_tokens
-                    print(f"Executor tokens used: {executor_tokens}")
-            
-            # Cost estimation based on model type
-            # Get the current model config to determine cost per token
-            model_config = None
-            for config in OPENAI_MODEL_CONFIGS.values():
-                if config.get("model_id") == self.planner.llm_engine_name:
-                    model_config = config
-                    break
-            
-            # Calculate cost based on input and output tokens separately
-            if model_config and 'input_cost_per_1k_tokens' in model_config and 'output_cost_per_1k_tokens' in model_config:
-                # Get input and output tokens from usage info
-                input_tokens = 0
-                output_tokens = 0
-                
-                # Get tokens from planner's last operation
-                if hasattr(self.planner, 'last_usage') and self.planner.last_usage:
-                    input_tokens += self.planner.last_usage.get('prompt_tokens', 0)
-                    output_tokens += self.planner.last_usage.get('completion_tokens', 0)
-                
-                # Get tokens from executor's last operation (if available)
-                if isinstance(result, dict):
-                    if 'usage' in result:
-                        input_tokens += result['usage'].get('prompt_tokens', 0)
-                        output_tokens += result['usage'].get('completion_tokens', 0)
-                    elif 'token_usage' in result:
-                        # If only total tokens available, estimate split (roughly 70% input, 30% output)
-                        total_tokens = result['token_usage']
-                        input_tokens += int(total_tokens * 0.7)
-                        output_tokens += int(total_tokens * 0.3)
-                
-                # Calculate cost using separate input/output rates
-                input_cost = (input_tokens / 1000) * model_config['input_cost_per_1k_tokens']
-                output_cost = (output_tokens / 1000) * model_config['output_cost_per_1k_tokens']
-                cost = input_cost + output_cost
-                
-                print(f"Step {step_count} - Input tokens: {input_tokens}, Output tokens: {output_tokens}")
-                print(f"Step {step_count} - Input cost: ${input_cost:.6f}, Output cost: ${output_cost:.6f}")
-            else:
-                # Fallback to old calculation method
-                cost_per_token = 0.00001  # Default cost
-                if model_config and 'expected_cost_per_1k_tokens' in model_config:
-                    cost_per_token = model_config['expected_cost_per_1k_tokens'] / 1000
-                cost = tokens_used * cost_per_token
-            
+            planner_usage = self.planner.last_usage if hasattr(self.planner, 'last_usage') else None
+            input_tokens, output_tokens, tokens_used, cost = self._collect_usage_and_cost(planner_usage, result)
+
+            print(f"Step {step_count} - Input tokens: {input_tokens}, Output tokens: {output_tokens}")
             print(f"Step {step_count} - Total tokens: {tokens_used}, Cost: ${cost:.6f}")
             
             self.step_tokens.append(tokens_used)
+            self.step_costs.append(cost)
             self.total_cost += cost
             mem_after = process.memory_info().rss / 1024 / 1024  # MB
             self.step_memory.append(mem_after)
@@ -678,8 +647,8 @@ class Solver:
                 "tokens": tokens_used,
                 "cost": cost,
                 "memory": mem_after,
-                "input_tokens": input_tokens if 'input_tokens' in locals() else 0,
-                "output_tokens": output_tokens if 'output_tokens' in locals() else 0,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
                 "context": context[:200] + "..." if len(context) > 200 else context,
                 "sub_goal": sub_goal[:200] + "..." if len(sub_goal) > 200 else sub_goal
             }
@@ -700,41 +669,14 @@ class Solver:
             final_output_time = final_output_end - final_output_start
             
             # Track tokens for final output generation
-            final_output_tokens = 0
-            if hasattr(self.planner, 'last_usage') and self.planner.last_usage:
-                final_output_tokens = self.planner.last_usage.get('total_tokens', 0)
-                print(f"Final output tokens used: {final_output_tokens}")
-                self.step_tokens.append(final_output_tokens)
-                self.total_cost += final_output_tokens * cost_per_token
-                
-                # Calculate cost for final output
-                model_config = None
-                for config in OPENAI_MODEL_CONFIGS.values():
-                    if config.get("model_id") == self.planner.llm_engine_name:
-                        model_config = config
-                        break
-                
-                # Calculate cost based on input and output tokens separately
-                final_output_cost = 0.0
-                if model_config and 'input_cost_per_1k_tokens' in model_config and 'output_cost_per_1k_tokens' in model_config:
-                    input_tokens = self.planner.last_usage.get('prompt_tokens', 0)
-                    output_tokens = self.planner.last_usage.get('completion_tokens', 0)
-                    
-                    input_cost = (input_tokens / 1000) * model_config['input_cost_per_1k_tokens']
-                    output_cost = (output_tokens / 1000) * model_config['output_cost_per_1k_tokens']
-                    final_output_cost = input_cost + output_cost
-                    
-                    print(f"Final output - Input tokens: {input_tokens}, Output tokens: {output_tokens}")
-                    print(f"Final output - Input cost: ${input_cost:.6f}, Output cost: ${output_cost:.6f}")
-                else:
-                    # Fallback to old calculation method
-                    cost_per_token = 0.00001  # Default cost
-                    if model_config and 'expected_cost_per_1k_tokens' in model_config:
-                        cost_per_token = model_config['expected_cost_per_1k_tokens'] / 1000
-                    final_output_cost = final_output_tokens * cost_per_token
-                
-                self.step_costs.append(final_output_cost)
-                self.total_cost += final_output_cost
+            planner_usage = self.planner.last_usage if hasattr(self.planner, 'last_usage') else None
+            direct_input_tokens, direct_output_tokens, final_output_tokens, final_output_cost = self._collect_usage_and_cost(planner_usage)
+            self.step_tokens.append(final_output_tokens)
+            self.step_costs.append(final_output_cost)
+            self.total_cost += final_output_cost
+
+            if final_output_tokens:
+                print(f"Final output - Input tokens: {direct_input_tokens}, Output tokens: {direct_output_tokens}")
                 print(f"Final output cost: ${final_output_cost:.6f}")
             
             # Track time for final output generation
@@ -756,10 +698,10 @@ class Solver:
                 "description": "Generate final comprehensive answer based on all previous steps",
                 "time": final_output_time,
                 "tokens": final_output_tokens,
-                "cost": final_output_cost if 'final_output_cost' in locals() else 0.0,
+                "cost": final_output_cost,
                 "memory": mem_after_final_output,
-                "input_tokens": self.planner.last_usage.get('prompt_tokens', 0) if hasattr(self.planner, 'last_usage') and self.planner.last_usage else 0,
-                "output_tokens": self.planner.last_usage.get('completion_tokens', 0) if hasattr(self.planner, 'last_usage') and self.planner.last_usage else 0
+                "input_tokens": direct_input_tokens,
+                "output_tokens": direct_output_tokens
             }
             self.step_info.append(final_step_info)
             
@@ -792,21 +734,23 @@ class Solver:
                 # Add context and sub-goal for tool execution steps
                 if step['step_type'] == "Tool Execution" and 'context' in step:
                     conclusion += f"  • Context: {step['context']}\n"
-                    conclusion += f"  • Sub-goal: {step['sub_goal']}\n"
+                conclusion += f"  • Sub-goal: {step['sub_goal']}\n"
                 
                 conclusion += "\n"
             
             # Summary statistics
+            total_tokens_used = sum(self.step_tokens)
             conclusion += f"**📈 Summary Statistics:**\n"
             conclusion += f"  • Total Steps: {len(self.step_times)}\n"
             conclusion += f"  • Total Time: {self.end_time - self.start_time:.2f}s\n"
-            conclusion += f"  • Total Tokens: {self.step_tokens[-1]}\n"
+            conclusion += f"  • Total Tokens: {total_tokens_used}\n"
             conclusion += f"  • Total Cost: ${self.total_cost:.6f}\n"
             conclusion += f"  • Peak Memory: {self.max_memory:.2f} MB\n"
-            conclusion += f"  • Average Time per Step: {(self.end_time - self.start_time) / len(self.step_times):.2f}s\n"
-            if self.step_tokens[-1] > 0:
-                conclusion += f"  • Average Tokens per Step: {self.step_tokens[-1] / len(self.step_tokens):.1f}\n"
-                conclusion += f"  • Cost per Token: ${self.total_cost / self.step_tokens[-1]:.8f}\n"
+            avg_time_per_step = (self.end_time - self.start_time) / len(self.step_times) if self.step_times else 0
+            conclusion += f"  • Average Time per Step: {avg_time_per_step:.2f}s\n"
+            if total_tokens_used > 0:
+                conclusion += f"  • Average Tokens per Step: {total_tokens_used / len(self.step_tokens):.1f}\n"
+                conclusion += f"  • Cost per Token: ${self.total_cost / total_tokens_used:.8f}\n"
             
             # Raw data for reference
             conclusion += f"\n**📋 Raw Data (for reference):**\n"
@@ -847,48 +791,37 @@ class Solver:
             # messages.append(ChatMessage(role="assistant", content=f"🎯 Final Output:\n{final_output}"))
             # yield messages
 
-            # Track tokens for final output generation (if not already tracked above)
-            if 'direct' not in self.output_types:
-                final_output_tokens = 0
-                if hasattr(self.planner, 'last_usage') and self.planner.last_usage:
-                    final_output_tokens = self.planner.last_usage.get('total_tokens', 0)
-                    print(f"Final output tokens used: {final_output_tokens}")
-                    self.step_tokens.append(final_output_tokens)
-                    self.total_cost += final_output_tokens * cost_per_token
-                    
-                    # Calculate cost for final output
-                    model_config = None
-                    for config in OPENAI_MODEL_CONFIGS.values():
-                        if config.get("model_id") == self.planner.llm_engine_name:
-                            model_config = config
-                            break
-                    
-                    # Calculate cost based on input and output tokens separately
-                    final_output_cost = 0.0
-                    if model_config and 'input_cost_per_1k_tokens' in model_config and 'output_cost_per_1k_tokens' in model_config:
-                        input_tokens = self.planner.last_usage.get('prompt_tokens', 0)
-                        output_tokens = self.planner.last_usage.get('completion_tokens', 0)
-                        
-                        input_cost = (input_tokens / 1000) * model_config['input_cost_per_1k_tokens']
-                        output_cost = (output_tokens / 1000) * model_config['output_cost_per_1k_tokens']
-                        final_output_cost = input_cost + output_cost
-                        
-                        print(f"Final output - Input tokens: {input_tokens}, Output tokens: {output_tokens}")
-                        print(f"Final output - Input cost: ${input_cost:.6f}, Output cost: ${output_cost:.6f}")
-                    else:
-                        # Fallback to old calculation method
-                        cost_per_token = 0.00001  # Default cost
-                        if model_config and 'expected_cost_per_1k_tokens' in model_config:
-                            cost_per_token = model_config['expected_cost_per_1k_tokens'] / 1000
-                        final_output_cost = final_output_tokens * cost_per_token
-                    
-                    self.step_costs.append(final_output_cost)
-                    self.total_cost += final_output_cost
-                    print(f"Final output cost: ${final_output_cost:.6f}")
-                
-                # Track time for final output generation
-                self.step_times.append(final_output_time)
-                print(f"Final output time: {final_output_time:.2f}s")
+            planner_usage = self.planner.last_usage if hasattr(self.planner, 'last_usage') else None
+            final_input_tokens, final_output_tokens, final_total_tokens, final_output_cost = self._collect_usage_and_cost(planner_usage)
+            self.step_tokens.append(final_total_tokens)
+            self.step_costs.append(final_output_cost)
+            self.total_cost += final_output_cost
+
+            if final_total_tokens:
+                print(f"Final output - Input tokens: {final_input_tokens}, Output tokens: {final_output_tokens}")
+                print(f"Final output cost: ${final_output_cost:.6f}")
+
+            # Track time for final output generation
+            self.step_times.append(final_output_time)
+            print(f"Final output time: {final_output_time:.2f}s")
+            mem_after_final_generation = process.memory_info().rss / 1024 / 1024  # MB
+            self.step_memory.append(mem_after_final_generation)
+            if mem_after_final_generation > self.max_memory:
+                self.max_memory = mem_after_final_generation
+
+            final_step_info = {
+                "step_number": len(self.step_info),
+                "step_type": "Final Output Generation",
+                "tool_name": "Final Output Generator",
+                "description": "Generate final follow-up answer",
+                "time": final_output_time,
+                "tokens": final_total_tokens,
+                "cost": final_output_cost,
+                "memory": mem_after_final_generation,
+                "input_tokens": final_input_tokens,
+                "output_tokens": final_output_tokens
+            }
+            self.step_info.append(final_step_info)
 
             # Save the final output data
             final_output_data = {
@@ -911,27 +844,45 @@ class Solver:
         if not visual_outputs:
             return "*Ready to display analysis results and processed images.*"
         
-        # Count different types of images
-        processed_count = sum(1 for _, label in visual_outputs if "processed" in label.lower())
-        corrected_count = sum(1 for _, label in visual_outputs if "corrected" in label.lower())
-        segmented_count = sum(1 for _, label in visual_outputs if "segmented" in label.lower())
-        detected_count = sum(1 for _, label in visual_outputs if "detected" in label.lower())
-        zoomed_count = sum(1 for _, label in visual_outputs if "zoomed" in label.lower())
-        cropped_count = sum(1 for _, label in visual_outputs if "crop" in label.lower())
-        analyzed_count = sum(1 for _, label in visual_outputs if "analysis" in label.lower() or "distribution" in label.lower())
+        # Count different types of images with a single pass
+        counts = {
+            "processed": 0,
+            "corrected": 0,
+            "segmented": 0,
+            "detected": 0,
+            "zoomed": 0,
+            "cropped": 0,
+            "analyzed": 0
+        }
+        for _, label in visual_outputs:
+            lower_label = str(label).lower()
+            if "processed" in lower_label:
+                counts["processed"] += 1
+            if "corrected" in lower_label:
+                counts["corrected"] += 1
+            if "segmented" in lower_label:
+                counts["segmented"] += 1
+            if "detected" in lower_label:
+                counts["detected"] += 1
+            if "zoomed" in lower_label:
+                counts["zoomed"] += 1
+            if "crop" in lower_label:
+                counts["cropped"] += 1
+            if "analysis" in lower_label or "distribution" in lower_label:
+                counts["analyzed"] += 1
         
         # Generate tool-specific descriptions
         tool_descriptions = {
-            "Image_Preprocessor_Tool": f"*Displaying {processed_count} processed image(s) from illumination correction and brightness adjustment.*",
-            "Object_Detector_Tool": f"*Showing {detected_count} detection result(s) with identified objects and regions of interest.*",
+            "Image_Preprocessor_Tool": f"*Displaying {counts['processed']} processed image(s) from illumination correction and brightness adjustment.*",
+            "Object_Detector_Tool": f"*Showing {counts['detected']} detection result(s) with identified objects and regions of interest.*",
             "Image_Captioner_Tool": "*Displaying image analysis results with detailed morphological descriptions.*",
-            "Relevant_Patch_Zoomer_Tool": f"*Showing {zoomed_count} zoomed region(s) highlighting key areas of interest.*",
-            "Advanced_Object_Detector_Tool": f"*Displaying {detected_count} advanced detection result(s) with enhanced object identification.*",
-            "Nuclei_Segmenter_Tool": f"*Showing {segmented_count} segmentation result(s) with identified nuclei regions.*",
-            "Single_Cell_Cropper_Tool": f"*Displaying {cropped_count} single-cell crop(s) generated from nuclei segmentation results.*",
+            "Relevant_Patch_Zoomer_Tool": f"*Showing {counts['zoomed']} zoomed region(s) highlighting key areas of interest.*",
+            "Advanced_Object_Detector_Tool": f"*Displaying {counts['detected']} advanced detection result(s) with enhanced object identification.*",
+            "Nuclei_Segmenter_Tool": f"*Showing {counts['segmented']} segmentation result(s) with identified nuclei regions.*",
+            "Single_Cell_Cropper_Tool": f"*Displaying {counts['cropped']} single-cell crop(s) generated from nuclei segmentation results.*",
             "Cell_Morphology_Analyzer_Tool": "*Displaying cell morphology analysis results with detailed structural insights.*",
             "Fibroblast_Activation_Detector_Tool": "*Showing fibroblast activation state analysis with morphological indicators.*",
-            "Fibroblast_State_Analyzer_Tool": f"*Displaying {analyzed_count} fibroblast state analysis result(s) with cell state distributions and statistics.*"
+            "Fibroblast_State_Analyzer_Tool": f"*Displaying {counts['analyzed']} fibroblast state analysis result(s) with cell state distributions and statistics.*"
         }
         
         # Return tool-specific description or generic one
@@ -964,7 +915,7 @@ def parse_arguments():
     return parser.parse_args()
 
 
-def solve_problem_gradio(user_query, user_image, max_steps=10, max_time=60, llm_model_engine=None, enabled_fibroblast_tools=None, enabled_general_tools=None, clear_previous_viz=False):
+def solve_problem_gradio(user_query, user_image, max_steps=10, max_time=60, llm_model_engine=None, enabled_fibroblast_tools=None, enabled_general_tools=None, clear_previous_viz=False, conversation_history=None):
     """
     Solve a problem using the Gradio interface with optional visualization clearing.
     
@@ -977,7 +928,14 @@ def solve_problem_gradio(user_query, user_image, max_steps=10, max_time=60, llm_
         enabled_fibroblast_tools: List of enabled fibroblast tools
         enabled_general_tools: List of enabled general tools
         clear_previous_viz: Whether to clear previous visualizations
+        conversation_history: Persistent chat history to keep context across runs
     """
+    conversation_history = conversation_history or []
+    # Start with prior conversation so the session feels continuous
+    messages: List[ChatMessage] = list(conversation_history)
+    if user_query:
+        messages.append(ChatMessage(role="user", content=str(user_query)))
+    
     # Find the model config by model_id
     selected_model_config = None
     for model_key, config in OPENAI_MODEL_CONFIGS.items():
@@ -1025,7 +983,7 @@ def solve_problem_gradio(user_query, user_image, max_steps=10, max_time=60, llm_
     os.makedirs(query_cache_dir, exist_ok=True)
 
     if api_key is None or api_key.strip() == "":
-        return [[gr.ChatMessage(role="assistant", content="""⚠️ **API Key Configuration Required**
+        new_history = messages + [gr.ChatMessage(role="assistant", content="""⚠️ **API Key Configuration Required**
 
 To use this application, you need to set up your OpenAI API key as an environment variable:
 
@@ -1038,7 +996,8 @@ export OPENAI_API_KEY="your-api-key-here"
 For Hugging Face Spaces, add this as a secret in your Space settings.
 
 For more information about obtaining an OpenAI API key, visit: https://platform.openai.com/api-keys
-""")]], "", [], "**Progress**: Ready"
+""")]
+        return new_history, "", [], "**Progress**: Ready", new_history
     
     # Debug: Print enabled_tools
     print(f"Debug - enabled_tools: {enabled_tools}")
@@ -1081,7 +1040,8 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
         print(f"Debug - Initializer created successfully with {len(initializer.available_tools)} tools")
     except Exception as e:
         print(f"Error creating Initializer: {e}")
-        return [[gr.ChatMessage(role="assistant", content=f"⚠️ Error: Failed to initialize tools. {str(e)}")]], "", []
+        new_history = messages + [gr.ChatMessage(role="assistant", content=f"⚠️ Error: Failed to initialize tools. {str(e)}")]
+        return new_history, "", [], "**Progress**: Error occurred", new_history
 
     # Instantiate Planner
     try:
@@ -1094,7 +1054,8 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
         print(f"Debug - Planner created successfully")
     except Exception as e:
         print(f"Error creating Planner: {e}")
-        return [[gr.ChatMessage(role="assistant", content=f"⚠️ Error: Failed to initialize planner. {str(e)}")]], "", []
+        new_history = messages + [gr.ChatMessage(role="assistant", content=f"⚠️ Error: Failed to initialize planner. {str(e)}")]
+        return new_history, "", [], "**Progress**: Error occurred", new_history
 
     # Instantiate Memory
     memory = Memory()
@@ -1123,11 +1084,9 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
     )
 
     if solver is None:
-        return [[gr.ChatMessage(role="assistant", content="⚠️ Error: Failed to initialize solver.")]], "", []
+        new_history = messages + [gr.ChatMessage(role="assistant", content="⚠️ Error: Failed to initialize solver.")]
+        return new_history, "", [], "**Progress**: Error occurred", new_history
 
-    # Initialize messages list
-    messages = []
-    
     try:
         # Stream the solution
         for messages, text_output, gallery_output, visual_desc, progress_md in solver.stream_solve_user_problem(user_query, user_image, api_key, messages):
@@ -1135,7 +1094,7 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
             save_steps_data(query_id, memory)
             
             # Return the current state
-            yield messages, text_output, gallery_output, progress_md
+            yield messages, text_output, gallery_output, progress_md, messages
             
     except Exception as e:
         print(f"Error in solve_problem_gradio: {e}")
@@ -1147,8 +1106,8 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
         error_message = f"⚠️ Error occurred during analysis:\n\n**Error Type:** {type(e).__name__}\n**Error Message:** {str(e)}\n\nPlease check your input and try again."
         
         # Return error message in the expected format
-        error_messages = [gr.ChatMessage(role="assistant", content=error_message)]
-        yield error_messages, "", [], "**Progress**: Error occurred"
+        error_messages = messages + [gr.ChatMessage(role="assistant", content=error_message)]
+        yield error_messages, "", [], "**Progress**: Error occurred", error_messages
     finally:
         print(f"Task completed for query_id: {query_id}. Preparing to clean up cache directory: {query_cache_dir}")
         try:
@@ -1296,6 +1255,7 @@ def main(args):
                     with gr.Column(scale=6):
                         run_button = gr.Button("🚀 Start Analysis", variant="primary", size="lg")
                         progress_md = gr.Markdown("**Progress**: Ready")
+                        conversation_state = gr.State([])
 
                 # Output area - two columns instead of three
                 gr.Markdown("### 📊 Analysis Results")
@@ -1382,8 +1342,8 @@ def main(args):
         # Button click event
         run_button.click(
             solve_problem_gradio,
-            [user_query, user_image, max_steps, max_time, language_model, enabled_fibroblast_tools, enabled_general_tools, clear_previous_viz],
-            [chatbot_output, text_output, gallery_output, progress_md]
+            [user_query, user_image, max_steps, max_time, language_model, enabled_fibroblast_tools, enabled_general_tools, clear_previous_viz, conversation_state],
+            [chatbot_output, text_output, gallery_output, progress_md, conversation_state]
         )
 
     #################### Gradio Interface ####################
@@ -1453,4 +1413,3 @@ if __name__ == "__main__":
     print("==============================\n")
     
     main(args)
-
