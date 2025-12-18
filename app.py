@@ -993,8 +993,13 @@ def solve_problem_gradio(user_query, user_images, image_table, max_steps=10, max
     uploaded_files = user_images or []
     # Collect names from the table (single "name" column)
     table_names: List[str] = []
-    if image_table:
-        for row in image_table:
+    if image_table is not None:
+        # Gradio Dataframe returns a list-like or pandas.DataFrame; handle both
+        try:
+            iter_rows = image_table.values.tolist() if hasattr(image_table, "values") else image_table
+        except Exception:
+            iter_rows = image_table
+        for row in iter_rows:
             if not row:
                 continue
             name = str(row[0]).strip() if row[0] else ""
