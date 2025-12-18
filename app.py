@@ -1291,7 +1291,7 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
                         step.status = "pending"
                         break
         state.active_task = state.active_task
-        state.analysis_session = self.analysis_session
+        state.analysis_session = solver.analysis_session
         print(f"Task completed for query_id: {query_id}. Preparing to clean up cache directory: {query_cache_dir}")
         try:
             # Add a check to prevent deleting the root solver_cache
