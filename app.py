@@ -988,6 +988,26 @@ def solve_problem_gradio(user_query, user_images, image_table, max_steps=10, max
         clear_previous_viz: Whether to clear previous visualizations
         conversation_history: Persistent chat history to keep context across runs
     """
+    # Normalize inputs into a single list of named inputs (works for single or multi-image)
+    named_inputs: List[Dict[str, str]] = []
+    uploaded_files = user_images or []
+    if image_table:
+        for row in image_table:
+            if not row or len(row) < 2:
+                continue
+            name = str(row[0]).strip() if row[0] else ""
+            path = row[1]
+            if not path:
+                continue
+            if not name:
+                name = Path(path).stem
+            named_inputs.append({"name": name, "type": "image", "path": path})
+    if not named_inputs and uploaded_files:
+        for f in uploaded_files:
+            path = getattr(f, "name", None) or getattr(f, "path", None) or str(f)
+            name = Path(path).stem
+            named_inputs.append({"name": name, "type": "image", "path": path})
+
     # Initialize or reuse persistent agent state
     state: AgentState = conversation_history if isinstance(conversation_history, AgentState) else AgentState()
     state.conversation = list(state.conversation)
@@ -1094,25 +1114,6 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
     )
 
     # Build named inputs from UI (files + editable table)
-    uploaded_files = user_images or []
-    named_inputs = []
-    if image_table:
-        for row in image_table:
-            if not row or len(row) < 2:
-                continue
-            name = str(row[0]).strip() if row[0] else ""
-            path = row[1]
-            if not path:
-                continue
-            if not name:
-                name = Path(path).stem
-            named_inputs.append({"name": name, "type": "image", "path": path})
-    if not named_inputs and uploaded_files:
-        for f in uploaded_files:
-            path = getattr(f, "name", None) or getattr(f, "path", None) or str(f)
-            name = Path(path).stem
-            named_inputs.append({"name": name, "type": "image", "path": path})
-
     if named_inputs:
         state.analysis_session = state.analysis_session or AnalysisSession()
         state.analysis_session.inputs = {
