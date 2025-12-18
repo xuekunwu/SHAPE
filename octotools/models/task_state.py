@@ -86,3 +86,4 @@ class CellCrop:
     image_id: str
     cell_id: str
     image: Any
+    path: Optional[str] = None
