@@ -27,6 +27,7 @@ from datetime import datetime
 from octotools.models.utils import make_json_serializable, VisualizationConfig, normalize_tool_name
 from octotools.models.task_state import ConversationState, ActiveTask, TaskType, AnalysisSession, AnalysisInput
 from dataclasses import dataclass, field
+import uuid
 
 # Add the project root to the Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -378,6 +379,7 @@ class Solver:
 
         active_input_name = self.analysis_session.active_input or list(self.analysis_session.inputs.keys())[0]
         img_path = self.analysis_session.inputs[active_input_name].path
+        llm_img_path = normalize_image_for_llm(img_path, self.query_cache_dir)
 
         print(f"DEBUG: active_input={active_input_name}, img_path={img_path}")
         print(f"=== DEBUG: Image processing completed ===")
@@ -400,11 +402,11 @@ class Solver:
 
         # [Step 4] Query Analysis - This is the key step that should happen first
         print(f"Debug - Starting query analysis for: {user_query}")
-        print(f"Debug - img_path for query analysis: {img_path}")
+        print(f"Debug - img_path for query analysis: {img_path} (LLM path: {llm_img_path})")
         query_analysis_start = time.time()
         try:
             conversation_text = self._format_conversation_history()
-            query_analysis = self.planner.analyze_query(user_query, img_path, conversation_text)
+            query_analysis = self.planner.analyze_query(user_query, llm_img_path, conversation_text)
             query_analysis_end = time.time()
             query_analysis_time = query_analysis_end - query_analysis_start
             print(f"Debug - Query analysis completed: {len(query_analysis)} characters")
@@ -480,7 +482,7 @@ class Solver:
 
             # [Step 5] Generate the next step
             conversation_text = self._format_conversation_history()
-            next_step = self.planner.generate_next_step(user_query, img_path, query_analysis, self.memory, step_count, self.max_steps, conversation_context=conversation_text)
+            next_step = self.planner.generate_next_step(user_query, llm_img_path, query_analysis, self.memory, step_count, self.max_steps, conversation_context=conversation_text)
             context, sub_goal, tool_name = self.planner.extract_context_subgoal_and_tool(next_step)
             context = context or self.agent_state.last_context or ""
             sub_goal = sub_goal or self.agent_state.last_sub_goal or ""
@@ -641,7 +643,7 @@ class Solver:
             # [Step 8] Memory update and stopping condition
             self.memory.add_action(step_count, tool_name, sub_goal, tool_command, result)
             conversation_text = self._format_conversation_history()
-            stop_verification = self.planner.verificate_memory(user_query, img_path, query_analysis, self.memory, conversation_context=conversation_text)
+            stop_verification = self.planner.verificate_memory(user_query, llm_img_path, query_analysis, self.memory, conversation_context=conversation_text)
             context_verification, conclusion = self.planner.extract_conclusion(stop_verification)
 
             # Save the context verification data
@@ -709,7 +711,7 @@ class Solver:
             messages.append(ChatMessage(role="assistant", content="<br>"))
             final_output_start = time.time()
             conversation_text = self._format_conversation_history()
-            direct_output = self.planner.generate_direct_output(user_query, img_path, self.memory, conversation_context=conversation_text)
+            direct_output = self.planner.generate_direct_output(user_query, llm_img_path, self.memory, conversation_context=conversation_text)
             final_output_end = time.time()
             final_output_time = final_output_end - final_output_start
             
@@ -970,6 +972,32 @@ def build_image_table(files):
         path = getattr(f, "name", None) or getattr(f, "path", None) or str(f)
         rows.append([Path(path).stem])
     return rows
+
+
+def normalize_image_for_llm(image_path: str, cache_dir: str) -> str:
+    """
+    Convert TIFF/TIF images to PNG for LLM compatibility while keeping
+    the original path for downstream analysis.
+    """
+    if not image_path:
+        return image_path
+    ext = Path(image_path).suffix.lower()
+    if ext not in [".tif", ".tiff"]:
+        return image_path
+
+    try:
+        os.makedirs(cache_dir, exist_ok=True)
+        with Image.open(image_path) as img:
+            # Always convert to RGB to avoid mode issues
+            converted = img.convert("RGB")
+            out_path = os.path.join(cache_dir, f"llm_normalized_{uuid.uuid4().hex}.png")
+            converted.save(out_path, format="PNG")
+            print(f"Normalized TIFF for LLM: {image_path} -> {out_path}")
+            return out_path
+    except Exception as e:
+        print(f"Warning: failed to normalize TIFF for LLM ({image_path}): {e}")
+        # Fall back to original; downstream may fail but avoid crash
+        return image_path
 
 
 def solve_problem_gradio(user_query, user_images, image_table, max_steps=10, max_time=60, llm_model_engine=None, enabled_fibroblast_tools=None, enabled_general_tools=None, clear_previous_viz=False, conversation_history=None):
