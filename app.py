@@ -997,6 +997,16 @@ def normalize_image_for_llm(image_path: str, cache_dir: str) -> str:
         return image_path
 
 
+def make_batch_image(image_path: str, group: str) -> BatchImage:
+    """Create a BatchImage with provenance fields populated."""
+    return BatchImage(
+        group=group,
+        image_id=str(uuid.uuid4()),
+        image_path=image_path,
+        image_name=os.path.basename(image_path)
+    )
+
+
 class BatchPipelineRunner:
     """Deterministic, group-aware batch pipeline (preprocess→segment→crop→feature→aggregate)."""
 
@@ -1199,7 +1209,7 @@ class BatchPipelineRunner:
         batch_images: List[BatchImage] = []
         for group, paths in grouped_inputs.items():
             for p in paths:
-                batch_images.append(BatchImage(group=group, image_id=str(uuid.uuid4()), image_path=p, image_name=os.path.basename(p)))
+                batch_images.append(make_batch_image(p, group))
 
         print(f"[Batch] Starting preprocess for {len(batch_images)} images across {len(grouped_inputs)} groups", flush=True)
         preprocessed = self.preprocess_batch(batch_images)
@@ -1320,6 +1330,25 @@ def solve_problem_gradio(user_query, user_images, image_table, max_steps=10, max
     messages: List[ChatMessage] = list(state.conversation)
     if user_query:
         messages.append(ChatMessage(role="user", content=str(user_query)))
+
+    # Prepare grouped summary for interpretation
+    grouped_preview: Dict[str, List[str]] = {}
+    for item in named_inputs:
+        grouped_preview.setdefault(item["name"], []).append(item["path"])
+
+    # Query interpretation (lightweight, deterministic)
+    interpretation_lines = [
+        "### 🧭 Query Interpretation",
+        f"- Task type: Batch image analysis",
+        f"- Groups: {len(grouped_preview)}",
+    ]
+    for group, paths in grouped_preview.items():
+        interpretation_lines.append(f"  - {group}: {len(paths)} image(s)")
+    interpretation_lines.append("- Planned outputs: preprocessing visuals, segmentation overlays/masks")
+    interpretation_lines.append("- Cell-level analysis: attempted if masks yield cells; skipped otherwise")
+    interpretation_md = "\n".join(interpretation_lines)
+    messages.append(ChatMessage(role="assistant", content=interpretation_md))
+    yield messages, interpretation_md, [], "**Progress**: Interpretation ready", state
     
     # Find the model config by model_id
     selected_model_config = None
@@ -1433,6 +1462,7 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
         state.conversation = messages
         return messages, "", [], "**Progress**: Error", state
 
+
     # Instantiate Initializer for deterministic batch pipeline
     try:
         initializer = Initializer(
@@ -1460,7 +1490,7 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
         # Build batch images with provenance
         batch_images: List[BatchImage] = []
         for item in named_inputs:
-            batch_images.append(BatchImage(group=item["name"], image_id=str(uuid.uuid4()), image_path=item["path"]))
+            batch_images.append(make_batch_image(item["path"], item["name"]))
 
         gallery_output: List[Any] = []
 
