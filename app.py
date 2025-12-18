@@ -25,6 +25,7 @@ import psutil  # For memory usage
 from llm_evaluation_scripts.hf_model_configs import HF_MODEL_CONFIGS
 from datetime import datetime
 from octotools.models.utils import make_json_serializable, VisualizationConfig, normalize_tool_name
+from octotools.models.task_state import ConversationState, ActiveTask
 from dataclasses import dataclass, field
 
 # Add the project root to the Python path
@@ -201,9 +202,8 @@ def save_module_data(query_id: str, key: str, value: Any) -> None:
 
 
 @dataclass
-class AgentState:
+class AgentState(ConversationState):
     """Persistent session state to survive across turns."""
-    conversation: List[ChatMessage] = field(default_factory=list)
     last_context: str = ""
     last_sub_goal: str = ""
     last_visual_description: str = "*Ready to display analysis results and processed images.*"
@@ -1110,6 +1110,20 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
         initializer=initializer
     )
 
+    # Apply planning delta against any active task to preserve continuity
+    plan_delta = planner.plan_task(user_query, state.active_task)
+    state.active_task = executor.apply_plan_delta(state.active_task, plan_delta, default_goal=user_query)
+    active_step = executor.next_pending_step(state.active_task)
+    if active_step:
+        executor.mark_step_in_progress(state.active_task, active_step.id)
+    else:
+        # Nothing to execute; persist state and exit early
+        info_msg = "No pending steps for the active task. Tell me what to do next or start a new task."
+        messages.append(ChatMessage(role="assistant", content=info_msg))
+        state.conversation = messages
+        yield messages, "", [], "**Progress**: Idle", state
+        return
+
     # Instantiate Solver
     solver = Solver(
         planner=planner,
@@ -1130,16 +1144,29 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
         state.conversation = new_history
         return new_history, "", [], "**Progress**: Error occurred", state
 
+    # Track execution artifacts for the active plan step
+    active_step_id = active_step.id if active_step else None
+    last_text_output = ""
+    last_gallery_output: List[Any] = []
+    last_progress_md = ""
+
+    task_successful = False
+
     try:
         # Stream the solution
         for messages, text_output, gallery_output, visual_desc, progress_md in solver.stream_solve_user_problem(user_query, user_image, api_key, messages):
             # Save steps data
             save_steps_data(query_id, memory)
+            last_text_output = text_output
+            last_gallery_output = gallery_output
+            last_progress_md = progress_md
             
             # Return the current state
             state.conversation = messages
             state.last_visual_description = visual_desc
+            state.active_task = state.active_task
             yield messages, text_output, gallery_output, progress_md, state
+        task_successful = True
             
     except Exception as e:
         print(f"Error in solve_problem_gradio: {e}")
@@ -1155,6 +1182,24 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
         state.conversation = error_messages
         yield error_messages, "", [], "**Progress**: Error occurred", state
     finally:
+        if active_step_id:
+            if task_successful:
+                executor.mark_step_completed(
+                    state.active_task,
+                    active_step_id,
+                    artifacts={
+                        "last_text_output": last_text_output,
+                        "last_progress": last_progress_md,
+                        "last_gallery_count": len(last_gallery_output),
+                    },
+                )
+            else:
+                # If execution failed, leave the step pending for a retry
+                for step in state.active_task.plan_steps:
+                    if step.id == active_step_id:
+                        step.status = "pending"
+                        break
+        state.active_task = state.active_task
         print(f"Task completed for query_id: {query_id}. Preparing to clean up cache directory: {query_cache_dir}")
         try:
             # Add a check to prevent deleting the root solver_cache

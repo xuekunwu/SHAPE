@@ -2,14 +2,14 @@ import os
 # import sys
 import importlib
 import re
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from datetime import datetime
 
 from octotools.engine.openai import ChatOpenAI 
 from octotools.models.formatters import ToolCommand
+from octotools.models.task_state import ActiveTask, PlanDelta, PlanStep, TaskType
 
 import signal
-from typing import Dict, Any, List, Optional
 import uuid
 from contextlib import redirect_stdout, redirect_stderr
 import traceback
@@ -31,6 +31,60 @@ class Executor:
         self.enable_signal = enable_signal
         self.api_key = api_key
         self.initializer = initializer
+
+    def apply_plan_delta(self, active_task: Optional[ActiveTask], plan_delta: PlanDelta, default_goal: str = "") -> ActiveTask:
+        """
+        Apply a PlanDelta to the current ActiveTask, creating a new one if needed.
+        """
+        if active_task is None or plan_delta.intent == "NEW_TASK":
+            goal = plan_delta.updated_goal or default_goal or (active_task.goal if active_task else "")
+            task_type = plan_delta.updated_task_type or (active_task.task_type if active_task else TaskType.ANALYSIS)
+            active_task = ActiveTask.new(goal=goal, task_type=task_type)
+        elif plan_delta.intent == "MODIFY_TASK":
+            if plan_delta.updated_goal:
+                active_task.goal = plan_delta.updated_goal
+            if plan_delta.updated_task_type:
+                active_task.task_type = plan_delta.updated_task_type
+
+        # Add new steps without regenerating the full plan
+        for step in plan_delta.added_steps:
+            active_task.plan_steps.append(step)
+
+        # Mark any completed steps
+        step_lookup = {step.id: step for step in active_task.plan_steps}
+        for step_id in plan_delta.completed_step_ids:
+            if step_id in step_lookup:
+                step_lookup[step_id].status = "completed"
+
+        active_task.completed_steps = [step.id for step in active_task.plan_steps if step.status == "completed"]
+        return active_task
+
+    def next_pending_step(self, active_task: Optional[ActiveTask]) -> Optional[PlanStep]:
+        if not active_task:
+            return None
+        for step in active_task.plan_steps:
+            if step.status != "completed":
+                return step
+        return None
+
+    def mark_step_in_progress(self, active_task: Optional[ActiveTask], step_id: str) -> None:
+        if not active_task:
+            return
+        for step in active_task.plan_steps:
+            if step.id == step_id:
+                step.status = "in_progress"
+                break
+
+    def mark_step_completed(self, active_task: Optional[ActiveTask], step_id: str, artifacts: Optional[Dict[str, Any]] = None) -> None:
+        if not active_task:
+            return
+        for step in active_task.plan_steps:
+            if step.id == step_id:
+                step.status = "completed"
+                break
+        active_task.completed_steps = [step.id for step in active_task.plan_steps if step.status == "completed"]
+        if artifacts:
+            active_task.artifacts.update(artifacts)
 
     def set_query_cache_dir(self, query_cache_dir):
         if query_cache_dir:
