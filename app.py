@@ -2072,19 +2072,10 @@ def main(args):
                             selected_fibroblast = [tool for tool in selected_tools if tool in fibroblast_tools]
                             selected_general = [tool for tool in selected_tools if tool in general_tools]
                             return img, q, selected_fibroblast, selected_general
-
-                        gr.Markdown("#### 🧬 Fibroblast Analysis Examples")
-                        gr.Examples(
-                            examples=fibroblast_examples,
-                            inputs=[gr.Textbox(label="Category", visible=False), user_images, user_query, gr.Textbox(label="Select Tools", visible=False), gr.Textbox(label="Reference Answer", visible=False)],
-                            outputs=[user_images, user_query, enabled_fibroblast_tools, enabled_general_tools],
-                            fn=distribute_tools,
-                            cache_examples=False
-                        )
                         
                         gr.Markdown("#### 🧩 General Purpose Examples")
                         gr.Examples(
-                            examples=general_examples,
+                            examples=examples,
                             inputs=[gr.Textbox(label="Category", visible=False), user_images, user_query, gr.Textbox(label="Select Tools", visible=False), gr.Textbox(label="Reference Answer", visible=False)],
                             outputs=[user_images, user_query, enabled_fibroblast_tools, enabled_general_tools],
                             fn=distribute_tools,
