@@ -1133,14 +1133,15 @@ class BatchPipelineRunner:
             os.makedirs(output_dir, exist_ok=True)
             try:
                 print(f"Single_Cell_Cropper_Tool invoked via callable interface for {img.group}/{img.image_name}", flush=True)
-                res = tool.execute(
-                    original_image=img_path,
-                    nuclei_mask=mask_path,
-                    min_area=200,
-                    margin=10,
-                    pad_to_square=True,
-                    output_dir=output_dir
-                )
+                try:
+                    res = tool.execute(
+                        original_image=img_path,
+                        nuclei_mask=mask_path,
+                        output_dir=output_dir
+                    )
+                except TypeError as te:
+                    print(f"Cropping TypeError (unsupported kwargs): {te}. Retrying with minimal args.", flush=True)
+                    res = tool.execute(original_image=img_path, nuclei_mask=mask_path, output_dir=output_dir)
                 crop_paths = res.get("cell_crops") or res.get("cropped_cells") or []
                 print(f"Cropping result for {img.group}/{img.image_name}: {len(crop_paths)} crops generated", flush=True)
                 if len(crop_paths) == 0:
@@ -1574,7 +1575,7 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
         try:
             crops = runner.crop_batch(batch_images, preprocessed, segmented)
         except Exception as e:
-            explanation = f"Cropping failed due to tool invocation error: {e}"
+            explanation = f"Cropping failed due to tool invocation error (likely unsupported argument such as pad_to_square). Retried with minimal args. Error: {e}"
             messages.append(ChatMessage(role="assistant", content=f"❌ {explanation}"))
             report_lines.append(f"❌ {explanation}")
             state.conversation = messages
