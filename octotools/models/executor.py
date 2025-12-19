@@ -2,7 +2,10 @@ import os
 # import sys
 import importlib
 import re
+import json
+import ast
 from typing import Dict, Any, List, Optional
+from octotools.models.utils import set_reproducibility
 from datetime import datetime
 
 from octotools.engine.openai import ChatOpenAI 
@@ -21,7 +24,18 @@ def timeout_handler(signum, frame):
     raise TimeoutError("Function execution timed out")
 
 class Executor:
-    def __init__(self, llm_engine_name: str, query_cache_dir: str = "solver_cache",  num_threads: int = 1, max_time: int = 120, max_output_length: int = 100000, enable_signal: bool = True, api_key: str = None, initializer=None):
+    def __init__(
+        self,
+        llm_engine_name: str,
+        query_cache_dir: str = "solver_cache",
+        num_threads: int = 1,
+        max_time: int = 120,
+        max_output_length: int = 100000,
+        enable_signal: bool = True,
+        api_key: str = None,
+        initializer=None,
+        developer_mode: bool = False,  # Issue 1: default lock-down of arbitrary execution
+    ):
         self.llm_engine_name = llm_engine_name
         self.query_cache_dir = query_cache_dir
         self.tool_cache_dir = os.path.join(query_cache_dir, "tool_cache")
@@ -31,6 +45,9 @@ class Executor:
         self.enable_signal = enable_signal
         self.api_key = api_key
         self.initializer = initializer
+        self.developer_mode = developer_mode
+        self.seed_info = set_reproducibility()
+        self.run_id = os.path.basename(os.path.abspath(self.query_cache_dir))
 
     def apply_plan_delta(self, active_task: Optional[ActiveTask], plan_delta: PlanDelta, default_goal: str = "") -> ActiveTask:
         """
@@ -126,6 +143,73 @@ class Executor:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             self.query_cache_dir = os.path.join(self.query_cache_dir, timestamp)
         os.makedirs(self.query_cache_dir, exist_ok=True)
+        self.tool_cache_dir = os.path.join(self.query_cache_dir, "tool_cache")
+        os.makedirs(self.tool_cache_dir, exist_ok=True)
+
+    def _log_invocation(
+        self,
+        tool_name: str,
+        command: str,
+        result: Any,
+        error: Optional[str] = None,
+        parameters: Optional[dict] = None,
+        input_artifacts: Optional[List[str]] = None,
+        output_artifacts: Optional[List[str]] = None,
+        tool_version: Optional[str] = None,
+    ) -> None:
+        """
+        Structured run log for traceability (Issues 3 & 4).
+        """
+        try:
+            log_path = os.path.join(self.query_cache_dir, "actions.jsonl")
+            os.makedirs(self.query_cache_dir, exist_ok=True)
+            entry = {
+                "run_id": self.run_id,
+                "tool": tool_name,
+                "tool_version": tool_version,
+                "command": command,
+                "error": error,
+                "result_keys": list(result.keys()) if isinstance(result, dict) else str(type(result)),
+                "parameters": parameters or {},
+                "input_artifacts": input_artifacts or [],
+                "output_artifacts": output_artifacts or [],
+                "seed_info": self.seed_info,
+            }
+            with open(log_path, "a") as f:
+                f.write(json.dumps(entry) + "\n")
+        except Exception as e:
+            print(f"Warning: failed to write run log: {e}")
+
+    def _check_prerequisites(self, tool_name: str, previous_outputs: dict) -> None:
+        """
+        Enforce fibroblast pipeline prerequisites (Issue 2).
+        Raises ValueError on missing artifacts.
+        """
+        cache_files = []
+        try:
+            cache_files = os.listdir(self.tool_cache_dir)
+        except Exception:
+            cache_files = []
+
+        def has_mask():
+            return any("mask" in f.lower() and f.lower().endswith(".png") for f in cache_files)
+
+        def has_crop_metadata():
+            return any(f.startswith("cell_crops_metadata_") and f.endswith(".json") for f in cache_files)
+
+        def has_h5ad():
+            return any(f.endswith(".h5ad") and "fibroblast_state_analyzed" in f for f in cache_files)
+
+        # Use both cache inspection and last outputs for robustness
+        if tool_name == "Single_Cell_Cropper_Tool":
+            if not has_mask():
+                raise ValueError("Prerequisite missing: nuclei mask not found in cache; run Nuclei_Segmenter_Tool first.")
+        elif tool_name == "Fibroblast_State_Analyzer_Tool":
+            if not has_crop_metadata():
+                raise ValueError("Prerequisite missing: cell crop metadata not found; run Single_Cell_Cropper_Tool first.")
+        elif tool_name == "Fibroblast_Activation_Scorer_Tool":
+            if not has_h5ad():
+                raise ValueError("Prerequisite missing: analyzed h5ad file not found; run Fibroblast_State_Analyzer_Tool first.")
     
     def generate_tool_command(self, question: str, image: str, context: str, sub_goal: str, tool_name: str, tool_metadata: Dict[str, Any], memory=None, bytes_mode:bool = False, conversation_context: str = "", **kwargs) -> ToolCommand:
         """
@@ -547,13 +631,77 @@ Remember: Your <command> field MUST be valid Python code including any necessary
                     return "Error parsing analysis", "Error parsing explanation", "execution = tool.execute(error='Error parsing command')"
             else:
                 print(f"Unexpected response type: {type(response)}")
-                return "Unknown analysis", "Unknown explanation", "execution = tool.execute(error='Unknown response type')"
+            return "Unknown analysis", "Unknown explanation", "execution = tool.execute(error='Unknown response type')"
                 
         except Exception as e:
             print(f"Error extracting explanation and command: {str(e)}")
             return "Error extracting analysis", "Error extracting explanation", "execution = tool.execute(error='Error extracting command')"
 
-    def execute_tool_command(self, tool_name: str, command: str) -> Any:
+    def _tool_module_path(self, tool_name: str) -> str:
+        """
+        Deterministic tool module resolver (Recommendation: stop relying on implicit sys.path).
+        """
+        base = tool_name[:-5] if tool_name.endswith("_Tool") else tool_name
+        tool_dir = "_".join([p.lower() for p in base.split("_")])
+        return f"octotools.tools.{tool_dir}.tool"
+
+    def _safe_execute_command(self, cmd: str, local_context: dict) -> tuple:
+        """
+        Strict executor that only allows a single assignment to `execution = tool.execute(...)`
+        with keyword arguments. Blocks arbitrary code (Issue 1).
+        """
+        try:
+            tree = ast.parse(cmd)
+        except SyntaxError as e:
+            raise ValueError(f"Rejected command: invalid syntax ({e})")
+
+        # Expect exactly one statement: Assign(targets=[Name('execution')], Call to tool.execute)
+        if len(tree.body) != 1 or not isinstance(tree.body[0], ast.Assign):
+            raise ValueError("Rejected command: only a single assignment to execution is allowed.")
+        assign = tree.body[0]
+        if len(assign.targets) != 1 or not isinstance(assign.targets[0], ast.Name) or assign.targets[0].id != "execution":
+            raise ValueError("Rejected command: assignment target must be `execution`.")
+
+        call = assign.value
+        if not isinstance(call, ast.Call):
+            raise ValueError("Rejected command: right-hand side must be a call.")
+        if not isinstance(call.func, ast.Attribute) or call.func.attr != "execute":
+            raise ValueError("Rejected command: only tool.execute(...) is allowed.")
+        if not isinstance(call.func.value, ast.Name) or call.func.value.id != "tool":
+            raise ValueError("Rejected command: execute must be called on `tool`.")
+        # Disallow args (positional) to reduce ambiguity; enforce keyword-only.
+        if call.args:
+            raise ValueError("Rejected command: positional arguments are not allowed; use keyword args.")
+
+        # Reconstruct safe kwargs
+        kwargs = {}
+        for kw in call.keywords:
+            if kw.arg is None:
+                raise ValueError("Rejected command: **kwargs not allowed.")
+            # Allow only simple literals and strings to avoid code execution
+            if isinstance(kw.value, (ast.Constant,)):
+                kwargs[kw.arg] = kw.value.value
+            elif isinstance(kw.value, ast.List):
+                kwargs[kw.arg] = [elt.value for elt in kw.value.elts if isinstance(elt, ast.Constant)]
+            elif isinstance(kw.value, ast.Dict):
+                safe_dict = {}
+                for k, v in zip(kw.value.keys, kw.value.values):
+                    if not isinstance(k, ast.Constant) or not isinstance(v, ast.Constant):
+                        raise ValueError("Rejected command: dict arguments must be literal.")
+                    safe_dict[k.value] = v.value
+                kwargs[kw.arg] = safe_dict
+            else:
+                raise ValueError(f"Rejected command: unsupported argument type for {kw.arg}.")
+
+        # Execute safely
+        tool_obj = local_context.get("tool")
+        if tool_obj is None:
+            raise ValueError("Rejected command: tool not available.")
+        execution = tool_obj.execute(**kwargs)
+        local_context["execution"] = execution
+        return execution, kwargs
+
+    def execute_tool_command(self, tool_name: str, command: str, previous_outputs: Optional[dict] = None) -> Any:
         def execute_with_timeout(block: str, local_context: dict) -> Optional[str]:
             output_file = f"temp_output_{uuid.uuid4()}.txt"
             with open(output_file, "w") as f, redirect_stdout(f), redirect_stderr(f):
@@ -568,9 +716,13 @@ Remember: Your <command> field MUST be valid Python code including any necessary
             return local_context.get("execution", output)
 
         # Import the tool module and instantiate it
-        module_name = f"tools.{tool_name.lower().replace('_tool', '')}.tool"
-        
+        module_name = self._tool_module_path(tool_name)
+        previous_outputs = previous_outputs or {}
+
         try:
+            # Enforce prerequisites for fibroblast chain
+            self._check_prerequisites(tool_name, previous_outputs)
+
             # Dynamically import the module
             module = importlib.import_module(module_name)
 
@@ -593,7 +745,13 @@ Remember: Your <command> field MUST be valid Python code including any necessary
             local_context = {"tool": tool}
             
             # Execute the entire command as a single block to preserve variable definitions
-            result = execute_with_timeout(command, local_context)
+            parsed_kwargs = {}
+            if self.developer_mode:
+                # Developer mode retains legacy exec path
+                result = execute_with_timeout(command, local_context)
+            else:
+                # Safe path: only allow whitelisted tool.execute kwargs
+                result, parsed_kwargs = self._safe_execute_command(command, local_context)
             
             # Special handling for Fibroblast_State_Analyzer_Tool to save h5ad file
             if tool_name == "Fibroblast_State_Analyzer_Tool" and isinstance(result, dict) and 'adata' in result:
@@ -621,13 +779,42 @@ Remember: Your <command> field MUST be valid Python code including any necessary
                     print(f"Error saving h5ad file: {e}")
                     import traceback
                     traceback.print_exc()
-                    # Don't fail the entire execution, just log the error
-                    if 'analyzed_h5ad_path' not in result:
-                        result['analyzed_h5ad_path'] = None
+                    # Make failure explicit to the caller (Issue 4)
+                    result['analyzed_h5ad_path'] = None
+                    result['analyzed_h5ad_error'] = str(e)
             
+            # Trace invocation for reproducibility (Recommendation: per-step logging)
+            def _collect_artifacts(res: Any) -> List[str]:
+                paths = []
+                if isinstance(res, dict):
+                    for v in res.values():
+                        if isinstance(v, str) and os.path.exists(v):
+                            paths.append(v)
+                        if isinstance(v, list):
+                            for item in v:
+                                if isinstance(item, str) and os.path.exists(item):
+                                    paths.append(item)
+                return paths
+
+            out_artifacts = _collect_artifacts(result)
+            in_artifacts = _collect_artifacts(previous_outputs)
+            tool_version = getattr(tool, "tool_version", None)
+
+            self._log_invocation(
+                tool_name,
+                command,
+                result,
+                error=None,
+                parameters=parsed_kwargs,
+                input_artifacts=in_artifacts,
+                output_artifacts=out_artifacts,
+                tool_version=tool_version,
+            )
             return result
 
-        except TimeoutError:
+        except TimeoutError as e:
+            self._log_invocation(tool_name, command, {}, error=str(e), parameters={}, input_artifacts=[], output_artifacts=[], tool_version=None)
             return f"Error: Tool execution timed out after {self.max_time} seconds."
         except Exception as e:
+            self._log_invocation(tool_name, command, {}, error=str(e), parameters={}, input_artifacts=[], output_artifacts=[], tool_version=None)
             return f"Error executing tool command: {e}"

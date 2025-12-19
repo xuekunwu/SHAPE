@@ -1,15 +1,15 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # Planner: QueryAnalysis
 class QueryAnalysis(BaseModel):
-    consice_summary: str
+    concise_summary: str = Field(..., alias="consice_summary")
     required_skills: str
     relevant_tools: str
     additional_considerations: str
 
     def __str__(self):
         return f"""
-Concise Summary: {self.consice_summary}
+Concise Summary: {self.concise_summary}
 
 Required Skills:
 {self.required_skills}

@@ -25,6 +25,7 @@ import psutil  # For memory usage
 from llm_evaluation_scripts.hf_model_configs import HF_MODEL_CONFIGS
 from datetime import datetime
 from octotools.models.utils import normalize_tool_name
+from octotools.models.utils import set_reproducibility
 from octotools.models.task_state import ConversationState, ActiveTask, TaskType, AnalysisSession, AnalysisInput, BatchImage, CellCrop
 from dataclasses import dataclass, field
 import importlib
@@ -68,6 +69,24 @@ def make_json_serializable(obj):
             return str(obj)
     else:
         return obj
+
+def sanitize_user_path(path: str) -> str:
+    """
+    Basic path sanitation to avoid traversal (Issue 7).
+    """
+    if not path:
+        return path
+    norm = os.path.abspath(path)
+    # Reject paths that escape workspace
+    workspace = os.path.abspath(os.getcwd())
+    if not norm.startswith(workspace):
+        raise ValueError(f"Rejected path outside workspace: {path}")
+    if not os.path.exists(norm):
+        raise ValueError(f"File not found: {path}")
+    max_size_mb = 500
+    if os.path.getsize(norm) > max_size_mb * 1024 * 1024:
+        raise ValueError(f"File too large (> {max_size_mb} MB): {path}")
+    return norm
 
 # Filter model configs to only include OpenAI models
 def get_openai_model_configs():
@@ -509,7 +528,10 @@ class Solver:
             conversation_text = self._format_conversation_history()
             tool_command = self.executor.generate_tool_command(user_query, safe_path, context, sub_goal, tool_name, self.planner.toolbox_metadata[tool_name], self.memory, conversation_context=conversation_text)
             analysis, explanation, command = self.executor.extract_explanation_and_command(tool_command)
-            result = self.executor.execute_tool_command(tool_name, command)
+            # Pass previous outputs to enforce prerequisite checks
+            last_actions = self.memory.get_actions()
+            prev_outputs = last_actions[-1].get("result") if last_actions else {}
+            result = self.executor.execute_tool_command(tool_name, command, previous_outputs=prev_outputs)
             result = make_json_serializable(result)
             print(f"Tool '{tool_name}' result:", result)
 
@@ -1412,6 +1434,8 @@ def solve_problem_gradio(user_query, user_images, image_table, max_steps=10, max
         clear_previous_viz: Whether to clear previous visualizations
         conversation_history: Persistent chat history to keep context across runs
     """
+    # Global reproducibility seeding (Issue 5)
+    seed_info = set_reproducibility()
     # Pre-initialize all locals that are referenced later to avoid UnboundLocalError
     state: AgentState = conversation_history if isinstance(conversation_history, AgentState) else AgentState()
     state.conversation = list(state.conversation)
@@ -1442,7 +1466,7 @@ def solve_problem_gradio(user_query, user_images, image_table, max_steps=10, max
         file_paths = []
         for f in uploaded_files:
             path = getattr(f, "name", None) or getattr(f, "path", None) or str(f)
-            file_paths.append(path)
+            file_paths.append(sanitize_user_path(path))
 
         # If no names provided in table, auto-fill from filenames; otherwise enforce 1:1
         if not table_names:

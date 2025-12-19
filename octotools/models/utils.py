@@ -42,11 +42,37 @@
 
 import json
 import numpy as np
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 import os
 from pathlib import Path
+import random
+import sys
+
+def set_reproducibility(seed: Optional[int] = None) -> Dict[str, Any]:
+    """
+    Set global seeds for reproducibility (Issue 5) and return environment info.
+    """
+    seed_val = seed if seed is not None else 42
+    random.seed(seed_val)
+    np.random.seed(seed_val)
+    env = {
+        "seed": seed_val,
+        "python_version": sys.version,
+        "numpy_version": np.__version__,
+    }
+    try:
+        import torch
+        torch.manual_seed(seed_val)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed_val)
+        env["torch_version"] = torch.__version__
+        env["cuda_available"] = torch.cuda.is_available()
+    except Exception:
+        env["torch_version"] = None
+        env["cuda_available"] = False
+    return env
 
 def make_json_serializable(obj):
     """Convert numpy arrays and other non-serializable objects to JSON-serializable format."""
