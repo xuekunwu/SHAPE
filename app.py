@@ -1106,6 +1106,13 @@ class BatchPipelineRunner:
             raise ImportError("Pillow and numpy are required for cropping and feature extraction")
         for img in batch_images:
             img_path = preprocessed.get(img.image_id, img.image_path)
+            # Load original image to capture shape for diagnostics
+            img_h = img_w = None
+            try:
+                with Image.open(img_path) as im:
+                    img_w, img_h = im.size
+            except Exception as e:
+                print(f"Failed to load image for shape {img.group}/{img.image_name}: {e}")
             seg_res = seg_results.get(img.image_id, {})
             mask_path = None
             if isinstance(seg_res, dict):
@@ -1116,6 +1123,10 @@ class BatchPipelineRunner:
                         break
             if not mask_path:
                 print(f"No mask found for {img.group}/{img.image_name}; skipping cropping")
+                diag.append({
+                    "image": f"{img.group}/{img.image_name}",
+                    "reason": "no_mask_found"
+                })
                 continue
             # Validate mask
             try:
@@ -1129,7 +1140,54 @@ class BatchPipelineRunner:
                     raise ValueError("Mask has no positive labels")
             except Exception as e:
                 print(f"Invalid mask for {img.group}/{img.image_name}: {e}")
+                diag.append({
+                    "image": f"{img.group}/{img.image_name}",
+                    "reason": f"invalid_mask: {e}"
+                })
                 continue
+
+            # Compare image/mask shapes
+            if img_h is not None and img_w is not None:
+                if (mask_arr.shape[1], mask_arr.shape[0]) != (img_w, img_h):
+                    reason = f"mask/image shape mismatch mask={mask_arr.shape} image={(img_h, img_w)}"
+                    print(reason)
+                    diag.append({
+                        "image": f"{img.group}/{img.image_name}",
+                        "reason": reason
+                    })
+                    continue
+
+            # Mask diagnostics
+            unique_labels = np.unique(mask_arr)
+            pos_labels = unique_labels[unique_labels > 0]
+            n_labels = len(pos_labels)
+            mask_info = {
+                "shape": mask_arr.shape,
+                "dtype": str(mask_arr.dtype),
+                "min": int(mask_arr.min()),
+                "max": int(mask_arr.max()),
+                "n_labels": int(n_labels),
+            }
+            print(f"Mask diagnostics for {img.group}/{img.image_name}: {mask_info}", flush=True)
+
+            # Candidate stats (by label)
+            min_area = 200  # default threshold
+            candidate_stats = []
+            for lbl in pos_labels:
+                coords = np.argwhere(mask_arr == lbl)
+                area = coords.shape[0]
+                y_min, x_min = coords.min(axis=0)
+                y_max, x_max = coords.max(axis=0)
+                reason = None
+                if area < min_area:
+                    reason = "below_min_area"
+                candidate_stats.append({
+                    "label": int(lbl),
+                    "area": int(area),
+                    "bbox": [int(y_min), int(x_min), int(y_max), int(x_max)],
+                    "rejected": reason is not None,
+                    "rejection_reason": reason
+                })
 
             output_dir = os.path.join(self.crops_dir, f"{img.group}_{img.image_name}_crops")
             os.makedirs(output_dir, exist_ok=True)
@@ -1196,7 +1254,9 @@ class BatchPipelineRunner:
                     "allowed": sorted(allowed),
                     "filtered_out": filtered_out,
                     "used_args": list(call_kwargs.keys()),
-                    "crops": len(crop_paths)
+                    "crops": len(crop_paths),
+                    "mask_info": mask_info,
+                    "candidates": candidate_stats
                 })
             except Exception as e:
                 print(f"Cropping failed for {img.group}/{img.image_name}: {e}")
@@ -1206,7 +1266,9 @@ class BatchPipelineRunner:
                     "filtered_out": [],
                     "used_args": [],
                     "crops": 0,
-                    "error": str(e)
+                    "error": str(e),
+                    "mask_info": mask_info if 'mask_info' in locals() else {},
+                    "candidates": candidate_stats if 'candidate_stats' in locals() else []
                 })
                 raise
         return crops, diag
@@ -1621,29 +1683,26 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
         except Exception as e:
             explanation = f"Cropping failed due to tool invocation error: {e}"
             messages.append(ChatMessage(role="assistant", content=f"❌ {explanation}"))
-            # Add diagnostic details if available
             if 'crop_diag' in locals() and crop_diag:
                 diag_lines = []
                 for d in crop_diag:
-                    diag_lines.append(f"- {d.get('image')}: allowed={d.get('allowed')}, filtered_out={d.get('filtered_out')}, used_args={d.get('used_args')}, crops={d.get('crops')}")
+                    diag_lines.append(f"- {d.get('image')}: allowed={d.get('allowed')}, filtered_out={d.get('filtered_out')}, used_args={d.get('used_args')}, crops={d.get('crops')}, mask_info={d.get('mask_info')}")
                 report_lines.append("Cropping diagnostics:\n" + "\n".join(diag_lines))
             report_lines.append(f"❌ {explanation}")
             state.conversation = messages
             yield messages, "\n\n".join(report_lines), gallery_output, "**Progress**: Cropping failed", state
             return
         if not crops:
-            no_mask_groups = []
-            for img in batch_images:
-                if not mask_available.get(img.image_id, False):
-                    no_mask_groups.append(f"{img.group}/{img.image_name}")
-            explanation = "No crops generated."
-            if no_mask_groups:
-                explanation += " Segmentation provided nuclei-only or no usable masks for: " + ", ".join(no_mask_groups)
-            explanation += " Cropping halted; downstream steps skipped."
-            # Add diagnostic details from crop_diag
+            explanation = "No crops generated; see diagnostics for reasons."
             diag_lines = []
             for d in crop_diag:
-                diag_lines.append(f"- {d.get('image')}: allowed={d.get('allowed')}, filtered_out={d.get('filtered_out')}, used_args={d.get('used_args')}, crops={d.get('crops')}")
+                diag_lines.append(f"- {d.get('image')}: allowed={d.get('allowed')}, filtered_out={d.get('filtered_out')}, used_args={d.get('used_args')}, crops={d.get('crops')}, mask_info={d.get('mask_info')}")
+                if d.get("candidates"):
+                    diag_lines.append(f"  candidates: {d.get('candidates')}")
+                if d.get("reason"):
+                    diag_lines.append(f"  reason: {d.get('reason')}")
+                if d.get("error"):
+                    diag_lines.append(f"  error: {d.get('error')}")
             if diag_lines:
                 explanation += "\nCrop diagnostics:\n" + "\n".join(diag_lines)
             messages.append(ChatMessage(role="assistant", content=f"⚠️ {explanation}"))
