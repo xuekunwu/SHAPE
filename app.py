@@ -70,6 +70,63 @@ def make_json_serializable(obj):
     else:
         return obj
 
+def render_query_analysis_legacy(query_analysis: str) -> str:
+    return f"""### Step 0: Query Analysis
+Concise Summary:
+{query_analysis}
+
+Required Skills:
+- (see analysis)
+
+Relevant Tools:
+- (see analysis)
+"""
+
+def render_action_prediction_legacy(step_count: int, context: str, sub_goal: str, tool_name: str) -> str:
+    return f"""### Step {step_count}: Action Prediction
+Context:
+{context}
+
+Sub-goal:
+{sub_goal}
+
+Tool:
+{tool_name}
+"""
+
+def render_command_generation_legacy(step_count: int, tool_name: str, analysis: str, explanation: str, command: str) -> str:
+    return f"""### Step {step_count}: Command Generation
+Analysis:
+{analysis}
+
+Explanation:
+{explanation}
+
+Command:
+```python
+{command}
+```
+"""
+
+def render_command_execution_legacy(step_count: int, tool_name: str, result: dict) -> str:
+    return f"""### Step {step_count}: Command Execution
+Tool: {tool_name}
+
+Result:
+```json
+{json.dumps(make_json_safe(result), indent=4)}
+```
+"""
+
+def render_context_verification_legacy(step_count: int, context_verification: str, conclusion: str) -> str:
+    return f"""### Step {step_count}: Context Verification
+Analysis:
+{context_verification}
+
+Conclusion:
+{conclusion}
+"""
+
 def sanitize_user_path(path: str) -> Path:
     """
     Securely ingest user file paths.
@@ -133,6 +190,7 @@ DATASET_DIR = Path("solver_cache")  # the directory to save the dataset
 DATASET_DIR.mkdir(parents=True, exist_ok=True) 
 global QUERY_ID
 QUERY_ID = None
+REASONING_MODE = os.getenv("REASONING_MODE", "legacy")
 
 # Comment out problematic CommitScheduler to avoid permission issues
 # scheduler = CommitScheduler(
@@ -492,8 +550,9 @@ class Solver:
             query_analysis = query_analysis.replace("Required Skills:", "**Required Skills:**")
             query_analysis = query_analysis.replace("Relevant Tools:", "**Relevant Tools:**")
             query_analysis = query_analysis.replace("Additional Considerations:", "**Additional Considerations:**")
+            qa_content = render_query_analysis_legacy(query_analysis) if REASONING_MODE == "legacy" else query_analysis
             messages.append(ChatMessage(role="assistant", 
-                                        content=f"{query_analysis}",
+                                        content=qa_content,
                                         metadata={"title": "### 🔍 Step 0: Query Analysis"}))
             yield messages, query_analysis, [], visual_description, "**Progress**: Query analysis completed"
 
@@ -533,9 +592,10 @@ class Solver:
                 tool_name = normalize_tool_name(tool_name, self.planner.available_tools)
 
             # Display the step information
+            ap_content = render_action_prediction_legacy(step_count, context, sub_goal, tool_name) if REASONING_MODE == "legacy" else f"**Context:** {context}\n\n**Sub-goal:** {sub_goal}\n\n**Tool:** `{tool_name}`"
             messages.append(ChatMessage(
                 role="assistant",
-                content=f"**Context:** {context}\n\n**Sub-goal:** {sub_goal}\n\n**Tool:** `{tool_name}`",
+                content=ap_content,
                 metadata={"title": f"### 🎯 Step {step_count}: Action Prediction ({tool_name})"}))
             yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Action predicted"
 
@@ -643,9 +703,10 @@ class Solver:
                             continue
 
             # Display the command generation information
+            cg_content = render_command_generation_legacy(step_count, tool_name, analysis, explanation, command) if REASONING_MODE == "legacy" else f"**Analysis:** {analysis}\n\n**Explanation:** {explanation}\n\n**Command:**\n```python\n{command}\n```"
             messages.append(ChatMessage(
                 role="assistant",
-                content=f"**Analysis:** {analysis}\n\n**Explanation:** {explanation}\n\n**Command:**\n```python\n{command}\n```",
+                content=cg_content,
                 metadata={"title": f"### 📝 Step {step_count}: Command Generation ({tool_name})"}))
             yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Command generated"
 
@@ -659,9 +720,10 @@ class Solver:
             save_module_data(QUERY_ID, f"step_{step_count}_command_generation", command_generation_data)
             
             # Display the command execution result
+            ce_content = render_command_execution_legacy(step_count, tool_name, result) if REASONING_MODE == "legacy" else f"**Result:**\n```json\n{json.dumps(make_json_serializable(result), indent=4)}\n```"
             messages.append(ChatMessage(
                 role="assistant",
-                content=f"**Result:**\n```json\n{json.dumps(make_json_serializable(result), indent=4)}\n```",
+                content=ce_content,
                 metadata={"title": f"### 🛠️ Step {step_count}: Command Execution ({tool_name})"}))
             yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Command executed"
 
@@ -698,9 +760,10 @@ class Solver:
 
             # Display the context verification result
             conclusion_emoji = "✅" if conclusion == 'STOP' else "🛑"
+            cv_content = render_context_verification_legacy(step_count, context_verification, conclusion) if REASONING_MODE == "legacy" else f"**Analysis:**\n{context_verification}\n\n**Conclusion:** `{conclusion}` {conclusion_emoji}"
             messages.append(ChatMessage(
                 role="assistant", 
-                content=f"**Analysis:**\n{context_verification}\n\n**Conclusion:** `{conclusion}` {conclusion_emoji}",
+                content=cv_content,
                 metadata={"title": f"### 🤖 Step {step_count}: Context Verification"}))
             yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Context verified"
 
