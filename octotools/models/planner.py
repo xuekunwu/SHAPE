@@ -2,14 +2,12 @@ import os
 import re
 from PIL import Image
 from io import BytesIO
-from typing import Dict, Any, List, Tuple, Optional
-import uuid
+from typing import Dict, Any, List, Tuple
 
 from octotools.engine.openai import ChatOpenAI
 from octotools.models.memory import Memory
 from octotools.models.formatters import QueryAnalysis, NextStep, MemoryVerification
 from octotools.models.utils import normalize_tool_name
-from octotools.models.task_state import ActiveTask, PlanStep, PlanDelta, TaskType, AnalysisSession, InputDelta
 
 class Planner:
     def __init__(self, llm_engine_name: str, toolbox_metadata: dict = None, available_tools: List = None, api_key: str = None):
@@ -28,61 +26,6 @@ class Planner:
         
         # Initialize token usage tracking
         self.last_usage = {}
-
-    def _default_plan_steps(self, goal: str) -> List[PlanStep]:
-        """Create a minimal set of steps for a new task."""
-        return [
-            PlanStep(id=f"understand-{uuid.uuid4().hex[:6]}", description=f"Clarify goal: {goal}"),
-            PlanStep(id=f"execute-{uuid.uuid4().hex[:6]}", description="Execute the required tools or analysis"),
-            PlanStep(id=f"summarize-{uuid.uuid4().hex[:6]}", description="Summarize results and next actions"),
-        ]
-
-    def plan_task(self, user_input: str, active_task: Optional[ActiveTask] = None, analysis_session: Optional[AnalysisSession] = None, default_task_type: TaskType = TaskType.ANALYSIS) -> Tuple[PlanDelta, InputDelta]:
-        """
-        Lightweight planner that reasons about the user's intent relative to any active task.
-        Returns only the delta instead of regenerating a full plan.
-        """
-        normalized = (user_input or "").strip().lower()
-        input_delta = InputDelta()
-
-        def is_new_intent() -> bool:
-            return any(keyword in normalized for keyword in ["new task", "start over", "fresh task", "reset"])
-
-        def is_modify_intent() -> bool:
-            return any(keyword in normalized for keyword in ["change", "modify", "update", "switch", "different goal", "instead"])
-
-        # Detect compare intent
-        if "compare" in normalized and analysis_session and len(analysis_session.inputs) > 1:
-            input_delta.compare_requested = True
-
-        if active_task is None or is_new_intent():
-            steps = self._default_plan_steps(user_input)
-            return PlanDelta(
-                intent="NEW_TASK",
-                added_steps=steps,
-                completed_step_ids=[],
-                updated_goal=user_input,
-                updated_task_type=default_task_type,
-            ), input_delta
-
-        if is_modify_intent():
-            steps = self._default_plan_steps(user_input)
-            return PlanDelta(
-                intent="MODIFY_TASK",
-                added_steps=steps,
-                completed_step_ids=[],
-                updated_goal=user_input,
-                updated_task_type=default_task_type,
-            ), input_delta
-
-        # Default to continuing the current task without a full replan
-        return PlanDelta(
-            intent="CONTINUE_TASK",
-            added_steps=[],
-            completed_step_ids=[],
-            updated_goal=None,
-            updated_task_type=None,
-        ), input_delta
 
     def get_image_info(self, image_path: str) -> Dict[str, Any]:
         image_info = {}
@@ -130,7 +73,11 @@ class Planner:
 
         return self.base_response
 
+<<<<<<< HEAD
     def analyze_query(self, question: str, image: str, bytes_mode: bool = False, conversation_context: str = "", **kwargs) -> str:
+=======
+    def analyze_query(self, question: str, image: str, bytes_mode: bool = False, conversation_context: str = "") -> str:
+>>>>>>> Unify Planner and Executor interfaces for conversation context
         image_info = self.get_image_info(image)
         print("image_info: ", image_info)
 
