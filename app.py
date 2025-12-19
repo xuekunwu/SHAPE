@@ -9,27 +9,23 @@ import torch
 import shutil
 import logging
 import tempfile
-import inspect
 from PIL import Image
 import numpy as np
 from tifffile import imwrite as tiff_write
-from typing import List, Dict, Any, Iterator, Optional
+from typing import List, Dict, Any, Iterator
 import matplotlib.pyplot as plt
 import gradio as gr
 from gradio import ChatMessage
-from huggingface_hub import CommitScheduler
 from pathlib import Path
+from huggingface_hub import CommitScheduler
+from octotools.models.formatters import ToolCommand
 import random
 import traceback
 import psutil  # For memory usage
 from llm_evaluation_scripts.hf_model_configs import HF_MODEL_CONFIGS
 from datetime import datetime
-from octotools.models.utils import normalize_tool_name
-from octotools.models.utils import set_reproducibility, make_json_safe
-from octotools.models.task_state import ConversationState, ActiveTask, TaskType, AnalysisSession, AnalysisInput, BatchImage, CellCrop
+from octotools.models.utils import make_json_serializable, VisualizationConfig, normalize_tool_name
 from dataclasses import dataclass, field
-import importlib
-from octotools.engine.openai import ChatOpenAI
 
 # Add the project root to the Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -37,10 +33,15 @@ project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_dir)))
 sys.path.insert(0, project_root)
 
 from octotools.models.initializer import Initializer
+from octotools.models.planner import Planner
+from octotools.models.memory import Memory
+from octotools.models.executor import Executor
 
 # Custom JSON encoder to handle ToolCommand objects
 class CustomEncoder(json.JSONEncoder):
     def default(self, obj):
+        if isinstance(obj, ToolCommand):
+            return str(obj)  # Convert ToolCommand to its string representation
         return super().default(obj)
 
 def make_json_serializable(obj):
@@ -70,105 +71,6 @@ def make_json_serializable(obj):
     else:
         return obj
 
-def render_query_analysis_legacy(query_analysis: str) -> str:
-    return f"""### Step 0: Query Analysis
-Concise Summary:
-{query_analysis}
-
-Required Skills:
-- (see analysis)
-
-Relevant Tools:
-- (see analysis)
-"""
-
-def render_action_prediction_legacy(step_count: int, context: str, sub_goal: str, tool_name: str) -> str:
-    return f"""### Step {step_count}: Action Prediction
-Context:
-{context}
-
-Sub-goal:
-{sub_goal}
-
-Tool:
-{tool_name}
-"""
-
-def render_command_generation_legacy(step_count: int, tool_name: str, analysis: str, explanation: str, command: str) -> str:
-    return f"""### Step {step_count}: Command Generation
-Analysis:
-{analysis}
-
-Explanation:
-{explanation}
-
-Command:
-```python
-{command}
-```
-"""
-
-def render_command_execution_legacy(step_count: int, tool_name: str, result: dict) -> str:
-    return f"""### Step {step_count}: Command Execution
-Tool: {tool_name}
-
-Result:
-```json
-{json.dumps(make_json_safe(result), indent=4)}
-```
-"""
-
-def render_context_verification_legacy(step_count: int, context_verification: str, conclusion: str) -> str:
-    return f"""### Step {step_count}: Context Verification
-Analysis:
-{context_verification}
-
-Conclusion:
-{conclusion}
-"""
-
-def sanitize_user_path(path: str) -> Path:
-    """
-    Securely ingest user file paths.
-    - Accept workspace-local paths.
-    - For Gradio temp uploads (/tmp/gradio/**), copy into workspace/uploads and return the new Path.
-    - Reject all other locations. (Security hardening)
-    """
-    if not path:
-        return Path(path)
-
-    workspace = Path(os.getcwd()).resolve()
-    uploads_dir = workspace / "workspace" / "uploads"
-    uploads_dir.mkdir(parents=True, exist_ok=True)
-
-    norm = Path(path).resolve()
-    if not norm.exists():
-        raise ValueError(f"File not found: {path}")
-
-    max_size_mb = 500
-    if norm.stat().st_size > max_size_mb * 1024 * 1024:
-        raise ValueError(f"File too large (> {max_size_mb} MB): {path}")
-
-    allowed_ext = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".gif"}
-
-    if norm.is_file() and norm.suffix.lower() not in allowed_ext:
-        raise ValueError(f"Unsupported file type: {norm.suffix}")
-
-    # Already inside workspace -> accept
-    if str(norm).startswith(str(workspace)):
-        return norm
-
-    # Gradio staging area -> copy into workspace/uploads
-    gradio_tmp = Path("/tmp/gradio").resolve()
-    if str(norm).startswith(str(gradio_tmp)):
-        dest = uploads_dir / f"{uuid.uuid4().hex}_{norm.name}"
-        shutil.copy2(norm, dest)
-        print(f"Ingested upload from {norm} -> {dest}")
-        return dest.resolve()
-
-    # Everything else rejected
-    raise ValueError(f"Rejected path outside workspace: {path}")
-
 # Filter model configs to only include OpenAI models
 def get_openai_model_configs():
     from llm_evaluation_scripts.hf_model_configs import HF_MODEL_CONFIGS
@@ -190,7 +92,6 @@ DATASET_DIR = Path("solver_cache")  # the directory to save the dataset
 DATASET_DIR.mkdir(parents=True, exist_ok=True) 
 global QUERY_ID
 QUERY_ID = None
-REASONING_MODE = os.getenv("REASONING_MODE", "legacy")
 
 # Comment out problematic CommitScheduler to avoid permission issues
 # scheduler = CommitScheduler(
@@ -217,7 +118,7 @@ def save_query_data(query_id: str, query: str, image_path: str) -> None:
     
     print(f"Saving query metadata to {query_file}")
     with query_file.open("w") as f:
-        json.dump(make_json_safe(query_metadata), f, indent=4)
+        json.dump(query_metadata, f, indent=4)
     
     # # NOTE: As we are using the same name for the query cache directory as the dataset directory,
     # # NOTE: we don't need to copy the content from the query cache directory to the query directory.
@@ -262,10 +163,10 @@ def save_feedback(query_id: str, feedback_type: str, feedback_text: str = None) 
     
     # Write feedback data
     with feedback_file.open("w") as f:
-        json.dump(make_json_safe(feedback_data), f, indent=4)
+        json.dump(feedback_data, f, indent=4)
 
 
-def save_steps_data(query_id: str, memory) -> None:
+def save_steps_data(query_id: str, memory: Memory) -> None:
     """Save steps data to Huggingface dataset"""
     steps_file = DATASET_DIR / query_id / "all_steps.json"
 
@@ -274,7 +175,7 @@ def save_steps_data(query_id: str, memory) -> None:
     print("Memory actions: ", memory_actions)
 
     with steps_file.open("w") as f:
-        json.dump(make_json_safe(memory_actions), f, indent=4, cls=CustomEncoder)
+        json.dump(memory_actions, f, indent=4, cls=CustomEncoder)
 
     
 def save_module_data(query_id: str, key: str, value: Any) -> None:
@@ -282,7 +183,7 @@ def save_module_data(query_id: str, key: str, value: Any) -> None:
     try:
         key = key.replace(" ", "_").lower()
         module_file = DATASET_DIR / query_id / f"{key}.json"
-        value = make_json_safe(make_json_serializable(value))  # NOTE: make the value serializable
+        value = make_json_serializable(value)  # NOTE: make the value serializable
         with module_file.open("a") as f:
             json.dump(value, f, indent=4, cls=CustomEncoder)
     except Exception as e:
@@ -300,8 +201,9 @@ def save_module_data(query_id: str, key: str, value: Any) -> None:
 
 
 @dataclass
-class AgentState(ConversationState):
+class AgentState:
     """Persistent session state to survive across turns."""
+    conversation: List[ChatMessage] = field(default_factory=list)
     last_context: str = ""
     last_sub_goal: str = ""
     last_visual_description: str = "*Ready to display analysis results and processed images.*"
@@ -329,8 +231,7 @@ class Solver:
         max_steps: int = 10,
         max_time: int = 60,
         query_cache_dir: str = "solver_cache",
-        agent_state: AgentState = None,
-        analysis_session: AnalysisSession = None
+        agent_state: AgentState = None
     ):
         self.planner = planner
         self.memory = memory
@@ -344,7 +245,6 @@ class Solver:
         self.max_time = max_time
         self.query_cache_dir = query_cache_dir
         self.agent_state = agent_state or AgentState()
-        self.analysis_session = analysis_session
         self.start_time = time.time()
         self.step_tokens = []
         # Initialize visual_outputs_for_gradio as instance variable to accumulate all visual outputs
@@ -434,205 +334,544 @@ class Solver:
         cost = self._calculate_cost(input_tokens, output_tokens)
         return input_tokens, output_tokens, total_tokens, cost
 
-    def push_reasoning_step(messages, step_id, phase, content, role="assistant"):
-        messages.append(ChatMessage(
-            role=role,
-            content=content.strip(),
-            metadata={
-                "title": f"### Step {step_id} · {phase}"
-            }
-        ))
-
-    def stream_solve_user_problem(
-        self,
-        user_query: str,
-        user_image,
-        api_key: str,
-        messages: list
-    ):
-        import os, time, json
-        from PIL import Image
-    
+    def stream_solve_user_problem(self, user_query: str, user_image, api_key: str, messages: List[ChatMessage]) -> Iterator:
+        import time
+        import os
         self.start_time = time.time()
-        self.visual_outputs_for_gradio = []
-    
-        # ==================================================
-        # Handle image input
-        # ==================================================
-        img_path = None
+        process = psutil.Process(os.getpid())
+        visual_description = "*Ready to display analysis results and processed images.*"
+        
+        # Handle image input - simplified logic based on original OctoTools
+        print(f"=== DEBUG: Image processing started ===")
+        print(f"DEBUG: user_image type: {type(user_image)}")
+        print(f"DEBUG: user_image is None: {user_image is None}")
+        
         if user_image:
-            if isinstance(user_image, dict) and "path" in user_image:
-                img_path = user_image["path"]
-            elif hasattr(user_image, "save"):
-                img_path = os.path.join(self.query_cache_dir, "query_image.jpg")
-                user_image.save(img_path)
-    
-        tool_cache_dir = os.path.join(self.query_cache_dir, "tool_cache")
-        self.executor.set_query_cache_dir(tool_cache_dir)
-    
-        # ==================================================
-        # Step 0 · Query Analysis
-        # ==================================================
-        messages.append(ChatMessage(
-            role="assistant",
-            content=f"### 📝 Query\n{user_query}"
-        ))
-        yield messages, "", [], "**Progress**: Query received"
-    
-        query_analysis = self.planner.analyze_query(user_query, img_path)
-    
-        push_reasoning_step(
-            messages,
-            0,
-            "Query Analysis",
-            query_analysis
-        )
-        yield messages, "", [], "**Progress**: Query analyzed"
-    
-        # ==================================================
-        # Main agent loop
-        # ==================================================
-        step_id = 0
-    
-        while step_id < self.max_steps and (time.time() - self.start_time) < self.max_time:
-            step_id += 1
-    
-            # ----------------------------------------------
-            # 1. Intent & Tool
-            # ----------------------------------------------
-            next_step = self.planner.generate_next_step(
-                user_query,
-                img_path,
-                query_analysis,
-                self.memory,
-                step_id,
-                self.max_steps
-            )
-    
-            context, sub_goal, tool_name = \
-                self.planner.extract_context_subgoal_and_tool(next_step)
-    
-            if hasattr(self.planner, "available_tools"):
-                tool_name = normalize_tool_name(
-                    tool_name,
-                    self.planner.available_tools
-                )
-    
-            push_reasoning_step(
-                messages,
-                step_id,
-                "Intent & Tool",
-                f"""
-    **Sub-goal**
-    {sub_goal}
-    
-    **Tool**
-    `{tool_name}`
-    """
-            )
-            yield messages, "", self.visual_outputs_for_gradio, f"**Progress**: Step {step_id} planned"
-    
+            print(f"DEBUG: user_image exists, processing...")
+            # Handle different image input formats from Gradio
+            if isinstance(user_image, dict) and 'path' in user_image:
+                img_path = user_image['path']
+                print(f"DEBUG: extracted path from dict: {img_path}")
+            elif isinstance(user_image, str) and os.path.exists(user_image):
+                img_path = user_image
+                print(f"DEBUG: user_image is valid string path: {img_path}")
+            elif hasattr(user_image, 'save'):
+                print(f"DEBUG: user_image is a PIL Image, saving...")
+                # It's a PIL Image object - save it like in original version
+                img_path = os.path.join(self.query_cache_dir, 'query_image.jpg')
+                print(f"DEBUG: saving to path: {img_path}")
+                print(f"DEBUG: query_cache_dir exists: {os.path.exists(self.query_cache_dir)}")
+                try:
+                    user_image.save(img_path)
+                    print(f"DEBUG: Image saved successfully to: {img_path}")
+                    print(f"DEBUG: file exists after save: {os.path.exists(img_path)}")
+                except Exception as e:
+                    print(f"DEBUG: Error saving image: {e}")
+                    import traceback
+                    print(f"DEBUG: Full traceback: {traceback.format_exc()}")
+                    img_path = None
+            else:
+                print(f"DEBUG: user_image is not a recognized format: {type(user_image)}")
+                if user_image:
+                    print(f"DEBUG: user_image attributes: {dir(user_image)}")
+                img_path = None
+        else:
+            print(f"DEBUG: no user_image provided")
+            img_path = None
+
+        print(f"DEBUG: final img_path: {img_path}")
+        print(f"=== DEBUG: Image processing completed ===")
+
+        # Set tool cache directory
+        _tool_cache_dir = os.path.join(self.query_cache_dir, "tool_cache") # NOTE: This is the directory for tool cache
+        self.executor.set_query_cache_dir(_tool_cache_dir) # NOTE: set query cache directory
+        
+        # Step 1: Display the received inputs
+        if user_image:
+            messages.append(ChatMessage(role="assistant", content=f"### 📝 Received Query:\n{user_query}\n### 🖼️ Image Uploaded"))
+        else:
+            messages.append(ChatMessage(role="assistant", content=f"### 📝 Received Query:\n{user_query}"))
+        yield messages, "", [], visual_description, "**Progress**: Input received"
+
+        # [Step 3] Initialize problem-solving state
+        step_count = 0
+        json_data = {"query": user_query, "image": "Image received as bytes"}
+
+        messages.append(ChatMessage(role="assistant", content="<br>"))
+        messages.append(ChatMessage(role="assistant", content="### 🐙 Deep Thinking:"))
+        yield messages, "", [], visual_description, "**Progress**: Starting analysis"
+
+        # [Step 4] Query Analysis - This is the key step that should happen first
+        print(f"Debug - Starting query analysis for: {user_query}")
+        print(f"Debug - img_path for query analysis: {img_path}")
+        query_analysis_start = time.time()
+        try:
+            conversation_text = self._format_conversation_history()
+            query_analysis = self.planner.analyze_query(user_query, img_path, conversation_text)
+            query_analysis_end = time.time()
+            query_analysis_time = query_analysis_end - query_analysis_start
+            print(f"Debug - Query analysis completed: {len(query_analysis)} characters")
+            
+            # Track tokens for query analysis step
+            planner_usage = self.planner.last_usage if hasattr(self.planner, 'last_usage') else None
+            qa_input_tokens, qa_output_tokens, query_analysis_tokens, query_analysis_cost = self._collect_usage_and_cost(planner_usage)
+            self.step_tokens.append(query_analysis_tokens)
+            self.step_costs.append(query_analysis_cost)
+            self.total_cost += query_analysis_cost
+
+            if query_analysis_tokens:
+                print(f"Query analysis - Input tokens: {qa_input_tokens}, Output tokens: {qa_output_tokens}")
+                print(f"Query analysis cost: ${query_analysis_cost:.6f}")
+            
+            # Track time for query analysis step
+            self.step_times.append(query_analysis_time)
+            print(f"Query analysis time: {query_analysis_time:.2f}s")
+            
+            # Track memory for query analysis step
+            mem_after_query_analysis = process.memory_info().rss / 1024 / 1024  # MB
+            self.step_memory.append(mem_after_query_analysis)
+            if mem_after_query_analysis > self.max_memory:
+                self.max_memory = mem_after_query_analysis
+            print(f"Query analysis memory usage: {mem_after_query_analysis:.2f} MB")
+            
+            # Record step information for query analysis
+            step_info = {
+                "step_number": 0,
+                "step_type": "Query Analysis",
+                "tool_name": "Query Analyzer",
+                "description": "Analyze user query and determine required skills and tools",
+                "time": query_analysis_time,
+                "tokens": query_analysis_tokens,
+                "cost": query_analysis_cost,
+                "memory": mem_after_query_analysis,
+                "input_tokens": qa_input_tokens,
+                "output_tokens": qa_output_tokens
+            }
+            self.step_info.append(step_info)
+            
+            json_data["query_analysis"] = query_analysis
+            query_analysis = query_analysis.replace("Concise Summary:", "**Concise Summary:**\n")
+            query_analysis = query_analysis.replace("Required Skills:", "**Required Skills:**")
+            query_analysis = query_analysis.replace("Relevant Tools:", "**Relevant Tools:**")
+            query_analysis = query_analysis.replace("Additional Considerations:", "**Additional Considerations:**")
+            messages.append(ChatMessage(role="assistant", 
+                                        content=f"{query_analysis}",
+                                        metadata={"title": "### 🔍 Step 0: Query Analysis"}))
+            yield messages, query_analysis, [], visual_description, "**Progress**: Query analysis completed"
+
+            # Save the query analysis data
+            query_analysis_data = {"query_analysis": query_analysis, "time": round(time.time() - self.start_time, 5)}
+            save_module_data(QUERY_ID, "step_0_query_analysis", query_analysis_data)
+        except Exception as e:
+            print(f"Error in query analysis: {e}")
+            error_msg = f"⚠️ Error during query analysis: {str(e)}"
+            messages.append(ChatMessage(role="assistant", 
+                                        content=error_msg,
+                                        metadata={"title": "### 🔍 Step 0: Query Analysis (Error)"}))
+            yield messages, error_msg, [], visual_description, "**Progress**: Error in query analysis"
+            return
+
+        # Execution loop (similar to your step-by-step solver)
+        while step_count < self.max_steps and (time.time() - self.start_time) < self.max_time:
+            step_count += 1
+            step_start = time.time()
+            mem_before = process.memory_info().rss / 1024 / 1024  # MB
+            messages.append(ChatMessage(role="OctoTools", 
+                                        content=f"Generating the {step_count}-th step...",
+                                        metadata={"title": f"🔄 Step {step_count}"}))
+            yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count}"
+
+            # [Step 5] Generate the next step
+            conversation_text = self._format_conversation_history()
+            next_step = self.planner.generate_next_step(user_query, img_path, query_analysis, self.memory, step_count, self.max_steps, conversation_context=conversation_text)
+            context, sub_goal, tool_name = self.planner.extract_context_subgoal_and_tool(next_step)
+            context = context or self.agent_state.last_context or ""
+            sub_goal = sub_goal or self.agent_state.last_sub_goal or ""
+            step_data = {"step_count": step_count, "context": context, "sub_goal": sub_goal, "tool_name": tool_name, "time": round(time.time() - self.start_time, 5)}
+            save_module_data(QUERY_ID, f"step_{step_count}_action_prediction", step_data)
+
+            # Always normalize tool_name before use
+            if hasattr(self.planner, 'available_tools'):
+                tool_name = normalize_tool_name(tool_name, self.planner.available_tools)
+
+            # Display the step information
+            messages.append(ChatMessage(
+                role="assistant",
+                content=f"**Context:** {context}\n\n**Sub-goal:** {sub_goal}\n\n**Tool:** `{tool_name}`",
+                metadata={"title": f"### 🎯 Step {step_count}: Action Prediction ({tool_name})"}))
+            yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Action predicted"
+
+            # Handle tool execution or errors
             if tool_name not in self.planner.available_tools:
-                push_reasoning_step(
-                    messages,
-                    step_id,
-                    "Decision",
-                    f"❌ Tool `{tool_name}` not available"
-                )
+                messages.append(ChatMessage(
+                    role="assistant", 
+                    content=f"⚠️ Error: Tool '{tool_name}' is not available."))
+                yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Tool not available"
                 continue
-    
-            # ----------------------------------------------
-            # 2. Command
-            # ----------------------------------------------
-            tool_command = self.executor.generate_tool_command(
-                user_query,
-                img_path,
-                context,
-                sub_goal,
-                tool_name,
-                self.planner.toolbox_metadata[tool_name],
-                self.memory
-            )
-    
-            _, _, command = self.executor.extract_explanation_and_command(tool_command)
-    
-            push_reasoning_step(
-                messages,
-                step_id,
-                "Command",
-                f"```python\n{command}\n```"
-            )
-            yield messages, "", self.visual_outputs_for_gradio, f"**Progress**: Step {step_id} command generated"
-    
-            # ----------------------------------------------
-            # 3. Execute tool
-            # ----------------------------------------------
+
+            # [Step 6-7] Generate and execute the tool command
+            safe_path = img_path.replace("\\", "\\\\") if img_path else None
+            conversation_text = self._format_conversation_history()
+            tool_command = self.executor.generate_tool_command(user_query, safe_path, context, sub_goal, tool_name, self.planner.toolbox_metadata[tool_name], self.memory, conversation_context=conversation_text)
+            analysis, explanation, command = self.executor.extract_explanation_and_command(tool_command)
             result = self.executor.execute_tool_command(tool_name, command)
             result = make_json_serializable(result)
-    
-            # Collect visual outputs (if any)
-            if isinstance(result, dict) and "visual_outputs" in result:
-                for fp in result["visual_outputs"]:
-                    try:
-                        if os.path.exists(fp):
-                            img = Image.open(fp).convert("RGB")
-                            self.visual_outputs_for_gradio.append(
-                                (img, os.path.basename(fp))
-                            )
-                    except Exception:
-                        pass
-    
-            result_preview = json.dumps(result, indent=2)[:2000]
-    
-            push_reasoning_step(
-                messages,
-                step_id,
-                "Result",
-                f"```json\n{result_preview}\n```"
-            )
-            yield messages, "", self.visual_outputs_for_gradio, f"**Progress**: Step {step_id} executed"
-    
-            # ----------------------------------------------
-            # 4. Decision
-            # ----------------------------------------------
-            self.memory.add_action(
-                step_id,
-                tool_name,
-                sub_goal,
-                tool_command,
-                result
-            )
-    
-            stop_check = self.planner.verificate_memory(
-                user_query,
-                img_path,
-                query_analysis,
-                self.memory
-            )
-            _, conclusion = self.planner.extract_conclusion(stop_check)
-    
-            push_reasoning_step(
-                messages,
-                step_id,
-                "Decision",
-                f"**Conclusion**: `{conclusion}`"
-            )
-            yield messages, "", self.visual_outputs_for_gradio, f"**Progress**: Step {step_id} decided"
-    
-            if conclusion == "STOP":
-                break
-    
-        # ==================================================
-        # Final answer (RIGHT PANEL ONLY)
-        # ==================================================
-        final_answer = self.planner.generate_direct_output(
-            user_query,
-            img_path,
-            self.memory
-        )
-    
-        yield messages, final_answer, self.visual_outputs_for_gradio, "**Progress**: Completed"
+            print(f"Tool '{tool_name}' result:", result)
+            
+            # Generate dynamic visual description based on tool and results
+            visual_description = self.generate_visual_description(tool_name, result, self.visual_outputs_for_gradio)
+            
+            if isinstance(result, dict):
+                if "visual_outputs" in result:
+                    visual_output_files = result["visual_outputs"]
+                    # Append new visual outputs instead of reinitializing
+                    for file_path in visual_output_files:
+                        try:
+                            # Skip comparison plots and non-image files
+                            if "comparison" in os.path.basename(file_path).lower():
+                                continue
+                            if not file_path.lower().endswith(('.png', '.jpg', '.jpeg', '.tif', '.tiff')):
+                                continue
+                                
+                            # Check if file exists and is readable
+                            if not os.path.exists(file_path):
+                                print(f"Warning: Image file not found: {file_path}")
+                                continue
+                            
+                            # Check file size
+                            if os.path.getsize(file_path) == 0:
+                                print(f"Warning: Image file is empty: {file_path}")
+                                continue
+                                
+                            # Use (image, label) tuple format to preserve filename for download
+                            image = Image.open(file_path)
+                            
+                            # Validate image data
+                            if image.size[0] == 0 or image.size[1] == 0:
+                                print(f"Warning: Invalid image size: {file_path}")
+                                continue
+                            
+                            # Convert to RGB if necessary for Gradio compatibility
+                            if image.mode not in ['RGB', 'L', 'RGBA']:
+                                try:
+                                    image = image.convert('RGB')
+                                except Exception as e:
+                                    print(f"Warning: Failed to convert image {file_path} to RGB: {e}")
+                                    continue
+                            
+                            # Additional validation for image data
+                            try:
+                                # Test if image can be converted to array
+                                img_array = np.array(image)
+                                if img_array.size == 0 or np.isnan(img_array).any():
+                                    print(f"Warning: Invalid image data in {file_path}")
+                                    continue
+                            except Exception as e:
+                                print(f"Warning: Failed to validate image data for {file_path}: {e}")
+                                continue
+                            
+                            filename = os.path.basename(file_path)
+                            
+                            # Create descriptive label based on filename
+                            if "processed" in filename.lower():
+                                label = f"Processed Image: {filename}"
+                            elif "corrected" in filename.lower():
+                                label = f"Illumination Corrected: {filename}"
+                            elif "segmented" in filename.lower():
+                                label = f"Segmented Result: {filename}"
+                            elif "detected" in filename.lower():
+                                label = f"Detection Result: {filename}"
+                            elif "zoomed" in filename.lower():
+                                label = f"Zoomed Region: {filename}"
+                            elif "crop" in filename.lower():
+                                label = f"Single Cell Crop: {filename}"
+                            else:
+                                label = f"Analysis Result: {filename}"
+                            
+                            self.visual_outputs_for_gradio.append((image, label))
+                            print(f"Successfully loaded image for Gradio: {filename}")
+                            
+                        except Exception as e:
+                            print(f"Warning: Failed to load image {file_path} for Gradio. Error: {e}")
+                            import traceback
+                            print(f"Full traceback: {traceback.format_exc()}")
+                            continue
 
+            # Display the command generation information
+            messages.append(ChatMessage(
+                role="assistant",
+                content=f"**Analysis:** {analysis}\n\n**Explanation:** {explanation}\n\n**Command:**\n```python\n{command}\n```",
+                metadata={"title": f"### 📝 Step {step_count}: Command Generation ({tool_name})"}))
+            yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Command generated"
+
+            # Save the command generation data
+            command_generation_data = {
+                "analysis": analysis,
+                "explanation": explanation,
+                "command": command,
+                "time": round(time.time() - self.start_time, 5)
+            }
+            save_module_data(QUERY_ID, f"step_{step_count}_command_generation", command_generation_data)
+            
+            # Display the command execution result
+            messages.append(ChatMessage(
+                role="assistant",
+                content=f"**Result:**\n```json\n{json.dumps(make_json_serializable(result), indent=4)}\n```",
+                metadata={"title": f"### 🛠️ Step {step_count}: Command Execution ({tool_name})"}))
+            yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Command executed"
+
+            # Save the command execution data
+            command_execution_data = {
+                "result": result,
+                "time": round(time.time() - self.start_time, 5)
+            }
+            save_module_data(QUERY_ID, f"step_{step_count}_command_execution", command_execution_data)
+
+            # [Step 8] Memory update and stopping condition
+            self.memory.add_action(step_count, tool_name, sub_goal, tool_command, result)
+            conversation_text = self._format_conversation_history()
+            stop_verification = self.planner.verificate_memory(user_query, img_path, query_analysis, self.memory, conversation_context=conversation_text)
+            context_verification, conclusion = self.planner.extract_conclusion(stop_verification)
+
+            # Save the context verification data
+            context_verification_data = {
+                "stop_verification": context_verification,
+                "conclusion": conclusion,
+                "time": round(time.time() - self.start_time, 5)
+            }
+            save_module_data(QUERY_ID, f"step_{step_count}_context_verification", context_verification_data)    
+
+            # Display the context verification result
+            conclusion_emoji = "✅" if conclusion == 'STOP' else "🛑"
+            messages.append(ChatMessage(
+                role="assistant", 
+                content=f"**Analysis:**\n{context_verification}\n\n**Conclusion:** `{conclusion}` {conclusion_emoji}",
+                metadata={"title": f"### 🤖 Step {step_count}: Context Verification"}))
+            yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Context verified"
+
+            # After tool execution, estimate tokens and cost
+            planner_usage = self.planner.last_usage if hasattr(self.planner, 'last_usage') else None
+            input_tokens, output_tokens, tokens_used, cost = self._collect_usage_and_cost(planner_usage, result)
+
+            print(f"Step {step_count} - Input tokens: {input_tokens}, Output tokens: {output_tokens}")
+            print(f"Step {step_count} - Total tokens: {tokens_used}, Cost: ${cost:.6f}")
+            
+            self.step_tokens.append(tokens_used)
+            self.step_costs.append(cost)
+            self.total_cost += cost
+            mem_after = process.memory_info().rss / 1024 / 1024  # MB
+            self.step_memory.append(mem_after)
+            if mem_after > self.max_memory:
+                self.max_memory = mem_after
+            step_end = time.time()
+            self.step_times.append(step_end - step_start)
+
+            # Record step information for tool execution
+            context_text = context or self.agent_state.last_context or ""
+            sub_goal_text = sub_goal or self.agent_state.last_sub_goal or ""
+            self.agent_state.last_context = context_text
+            self.agent_state.last_sub_goal = sub_goal_text
+            step_info = {
+                "step_number": step_count,
+                "step_type": "Tool Execution",
+                "tool_name": tool_name,
+                "description": f"Execute {tool_name} with sub-goal: {sub_goal_text[:100]}...",
+                "time": step_end - step_start,
+                "tokens": tokens_used,
+                "cost": cost,
+                "memory": mem_after,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "context": context_text[:200] + "..." if len(context_text) > 200 else context_text,
+                "sub_goal": sub_goal_text[:200] + "..." if len(sub_goal_text) > 200 else sub_goal_text
+            }
+            self.step_info.append(step_info)
+
+            if conclusion == 'STOP':
+                break
+
+        self.end_time = time.time()
+
+        # Step 7: Generate Final Output (if needed)
+        final_answer = ""
+        if 'direct' in self.output_types:
+            messages.append(ChatMessage(role="assistant", content="<br>"))
+            final_output_start = time.time()
+            conversation_text = self._format_conversation_history()
+            direct_output = self.planner.generate_direct_output(user_query, img_path, self.memory, conversation_context=conversation_text)
+            final_output_end = time.time()
+            final_output_time = final_output_end - final_output_start
+            
+            # Track tokens for final output generation
+            planner_usage = self.planner.last_usage if hasattr(self.planner, 'last_usage') else None
+            direct_input_tokens, direct_output_tokens, final_output_tokens, final_output_cost = self._collect_usage_and_cost(planner_usage)
+            self.step_tokens.append(final_output_tokens)
+            self.step_costs.append(final_output_cost)
+            self.total_cost += final_output_cost
+
+            if final_output_tokens:
+                print(f"Final output - Input tokens: {direct_input_tokens}, Output tokens: {direct_output_tokens}")
+                print(f"Final output cost: ${final_output_cost:.6f}")
+            
+            # Track time for final output generation
+            self.step_times.append(final_output_time)
+            print(f"Final output time: {final_output_time:.2f}s")
+            
+            # Track memory for final output generation
+            mem_after_final_output = process.memory_info().rss / 1024 / 1024  # MB
+            self.step_memory.append(mem_after_final_output)
+            if mem_after_final_output > self.max_memory:
+                self.max_memory = mem_after_final_output
+            print(f"Final output memory usage: {mem_after_final_output:.2f} MB")
+            
+            # Record step information for final output generation
+            final_step_info = {
+                "step_number": len(self.step_info),
+                "step_type": "Final Output Generation",
+                "tool_name": "Direct Output Generator",
+                "description": "Generate final comprehensive answer based on all previous steps",
+                "time": final_output_time,
+                "tokens": final_output_tokens,
+                "cost": final_output_cost,
+                "memory": mem_after_final_output,
+                "input_tokens": direct_input_tokens,
+                "output_tokens": direct_output_tokens
+            }
+            self.step_info.append(final_step_info)
+            
+            # Extract conclusion from the final answer
+            if isinstance(direct_output, str):
+                conclusion_text = direct_output.strip()
+            elif isinstance(direct_output, dict):
+                # 你可以自定义错误信息或提取dict中的message
+                conclusion_text = str(direct_output)
+            else:
+                conclusion_text = str(direct_output)
+            
+            # Step-by-step breakdown
+            conclusion = f"🐙 **Conclusion:**\n{conclusion_text}\n\n---\n"
+            conclusion += f"**📊 Detailed Performance Statistics**\n\n"
+            
+            # Step-by-step breakdown
+            conclusion += f"**Step-by-Step Analysis:**\n"
+            
+            # Display detailed step information
+            for i, step in enumerate(self.step_info):
+                conclusion += f"**Step {step['step_number']}: {step['step_type']}**\n"
+                conclusion += f"  • Tool: {step['tool_name']}\n"
+                conclusion += f"  • Description: {step['description']}\n"
+                conclusion += f"  • Time: {step['time']:.2f}s\n"
+                conclusion += f"  • Tokens: {step['tokens']} (Input: {step['input_tokens']}, Output: {step['output_tokens']})\n"
+                conclusion += f"  • Cost: ${step['cost']:.6f}\n"
+                conclusion += f"  • Memory: {step['memory']:.2f} MB\n"
+                
+                # Add context and sub-goal for tool execution steps
+                if step['step_type'] == "Tool Execution" and 'context' in step:
+                    conclusion += f"  • Context: {step['context']}\n"
+                    if 'sub_goal' in step and step['sub_goal'] != "":
+                        conclusion += f"  • Sub-goal: {step['sub_goal']}\n"
+                
+                conclusion += "\n"
+            
+            # Summary statistics
+            total_tokens_used = sum(self.step_tokens)
+            conclusion += f"**📈 Summary Statistics:**\n"
+            conclusion += f"  • Total Steps: {len(self.step_times)}\n"
+            conclusion += f"  • Total Time: {self.end_time - self.start_time:.2f}s\n"
+            conclusion += f"  • Total Tokens: {total_tokens_used}\n"
+            conclusion += f"  • Total Cost: ${self.total_cost:.6f}\n"
+            conclusion += f"  • Peak Memory: {self.max_memory:.2f} MB\n"
+            avg_time_per_step = (self.end_time - self.start_time) / len(self.step_times) if self.step_times else 0
+            conclusion += f"  • Average Time per Step: {avg_time_per_step:.2f}s\n"
+            if total_tokens_used > 0:
+                conclusion += f"  • Average Tokens per Step: {total_tokens_used / len(self.step_tokens):.1f}\n"
+                conclusion += f"  • Cost per Token: ${self.total_cost / total_tokens_used:.8f}\n"
+            
+            # Raw data for reference
+            conclusion += f"\n**📋 Raw Data (for reference):**\n"
+            conclusion += f"  • Step Times: {[f'{t:.2f}s' for t in self.step_times]}\n"
+            conclusion += f"  • Step Tokens: {self.step_tokens}\n"
+            conclusion += f"  • Step Costs: {[f'${c:.6f}' for c in self.step_costs]}\n"
+            conclusion += f"  • Step Memory: {[f'{m:.2f}MB' for m in self.step_memory]}\n"
+            
+            # Add model-specific pricing information
+            model_config = None
+            for config in OPENAI_MODEL_CONFIGS.values():
+                if config.get("model_id") == self.planner.llm_engine_name:
+                    model_config = config
+                    break
+            
+            if model_config and 'input_cost_per_1k_tokens' in model_config:
+                conclusion += f"\n**🔧 Model Configuration:**\n"
+                conclusion += f"  • Model: {self.planner.llm_engine_name}\n"
+                conclusion += f"  • Input Cost: ${model_config['input_cost_per_1k_tokens']:.6f} per 1K tokens\n"
+                conclusion += f"  • Output Cost: ${model_config['output_cost_per_1k_tokens']:.6f} per 1K tokens\n"
+                conclusion += f"  • Pricing Source: OpenAI Official Pricing (2024)\n"
+            
+            final_answer = f"{conclusion}"
+            yield messages, final_answer, self.visual_outputs_for_gradio, visual_description, "**Progress**: Completed!"
+
+            # Save the direct output data
+            direct_output_data = {
+                "direct_output": direct_output,
+                "time": round(time.time() - self.start_time, 5)
+            }
+            save_module_data(QUERY_ID, "direct_output", direct_output_data)
+
+        if 'final' in self.output_types:
+            final_output_start = time.time()
+            conversation_text = self._format_conversation_history()
+            final_output = self.planner.generate_final_output(user_query, img_path, self.memory, conversation_context=conversation_text) # Disabled visibility for now
+            final_output_end = time.time()
+            final_output_time = final_output_end - final_output_start
+            # messages.append(ChatMessage(role="assistant", content=f"🎯 Final Output:\n{final_output}"))
+            # yield messages
+
+            planner_usage = self.planner.last_usage if hasattr(self.planner, 'last_usage') else None
+            final_input_tokens, final_output_tokens, final_total_tokens, final_output_cost = self._collect_usage_and_cost(planner_usage)
+            self.step_tokens.append(final_total_tokens)
+            self.step_costs.append(final_output_cost)
+            self.total_cost += final_output_cost
+
+            if final_total_tokens:
+                print(f"Final output - Input tokens: {final_input_tokens}, Output tokens: {final_output_tokens}")
+                print(f"Final output cost: ${final_output_cost:.6f}")
+
+            # Track time for final output generation
+            self.step_times.append(final_output_time)
+            print(f"Final output time: {final_output_time:.2f}s")
+            mem_after_final_generation = process.memory_info().rss / 1024 / 1024  # MB
+            self.step_memory.append(mem_after_final_generation)
+            if mem_after_final_generation > self.max_memory:
+                self.max_memory = mem_after_final_generation
+
+            final_step_info = {
+                "step_number": len(self.step_info),
+                "step_type": "Final Output Generation",
+                "tool_name": "Final Output Generator",
+                "description": "Generate final follow-up answer",
+                "time": final_output_time,
+                "tokens": final_total_tokens,
+                "cost": final_output_cost,
+                "memory": mem_after_final_generation,
+                "input_tokens": final_input_tokens,
+                "output_tokens": final_output_tokens
+            }
+            self.step_info.append(final_step_info)
+
+            # Save the final output data
+            final_output_data = {
+                "final_output": final_output,
+                "time": round(time.time() - self.start_time, 5)
+            }
+            save_module_data(QUERY_ID, "final_output", final_output_data)
+
+        # Step 8: Completion Message
+        messages.append(ChatMessage(role="assistant", content="<br>"))
+        messages.append(ChatMessage(role="assistant", content="### ✅ Query Solved!"))
+        # Use the final answer if available, otherwise use a default message
+        completion_text = final_answer if final_answer else "Analysis completed successfully"
+        yield messages, completion_text, self.visual_outputs_for_gradio, visual_description, "**Progress**: Analysis completed!"
 
     def generate_visual_description(self, tool_name: str, result: dict, visual_outputs: list) -> str:
         """
@@ -712,450 +951,13 @@ def parse_arguments():
     return parser.parse_args()
 
 
-def build_image_table(files):
-    rows = []
-    if not files:
-        return rows
-    for f in files:
-        path = getattr(f, "name", None) or getattr(f, "path", None) or str(f)
-        rows.append([Path(path).stem])
-    return rows
-
-
-def normalize_image_for_llm(image_path: str, cache_dir: str) -> str:
-    """
-    Convert TIFF/TIF images to PNG for LLM compatibility while keeping
-    the original path for downstream analysis.
-    """
-    if not image_path:
-        return image_path
-    ext = Path(image_path).suffix.lower()
-    if ext not in [".tif", ".tiff"]:
-        return image_path
-
-    try:
-        if Image is None:
-            raise ImportError("Pillow (PIL) is required for TIFF normalization")
-        os.makedirs(cache_dir, exist_ok=True)
-        with Image.open(image_path) as img:
-            # Always convert to RGB to avoid mode issues
-            converted = img.convert("RGB")
-            out_path = os.path.join(cache_dir, f"llm_normalized_{uuid.uuid4().hex}.png")
-            converted.save(out_path, format="PNG")
-            print(f"Normalized TIFF for LLM: {image_path} -> {out_path}")
-            return out_path
-    except Exception as e:
-        print(f"Warning: failed to normalize TIFF for LLM ({image_path}): {e}")
-        # Fall back to original; downstream may fail but avoid crash
-        return image_path
-
-
-def make_batch_image(image_path: str, group: str) -> BatchImage:
-    """Create a BatchImage with provenance fields populated."""
-    return BatchImage(
-        group=group,
-        image_id=str(uuid.uuid4()),
-        image_path=image_path,
-        image_name=os.path.basename(image_path)
-    )
-
-
-class BatchPipelineRunner:
-    """Deterministic, group-aware batch pipeline (preprocess→segment→crop→feature→aggregate)."""
-
-    def __init__(self, initializer: Initializer, api_key: str, cache_dir: str):
-        self.initializer = initializer
-        self.api_key = api_key
-        self.cache_dir = cache_dir
-        self.raw_dir = os.path.join(cache_dir, "raw_images")
-        self.preprocess_dir = os.path.join(cache_dir, "preprocess")
-        self.segment_dir = os.path.join(cache_dir, "segment")
-        self.crops_dir = os.path.join(cache_dir, "crops")
-        os.makedirs(self.raw_dir, exist_ok=True)
-        os.makedirs(self.preprocess_dir, exist_ok=True)
-        os.makedirs(self.segment_dir, exist_ok=True)
-        os.makedirs(self.crops_dir, exist_ok=True)
-
-    def _load_tool(self, tool_name: str):
-        try:
-            tool_dir = self.initializer.class_name_to_dir(tool_name)
-            module = importlib.import_module(f"octotools.tools.{tool_dir}.tool")
-            tool_class = getattr(module, tool_name)
-            inputs = {}
-            if getattr(tool_class, "require_llm_engine", False):
-                inputs["model_string"] = self.initializer.model_string
-            if getattr(tool_class, "require_api_key", False):
-                inputs["api_key"] = self.api_key
-            tool = tool_class(**inputs)
-            if hasattr(tool, "set_custom_output_dir"):
-                tool.set_custom_output_dir(os.path.join(self.cache_dir, "tool_cache"))
-            return tool
-        except Exception as e:
-            print(f"Warning: failed to load tool {tool_name}: {e}")
-            return None
-
-    def preprocess_batch(self, batch_images: List[BatchImage]) -> Dict[str, str]:
-        tool = self._load_tool("Image_Preprocessor_Tool")
-        processed = {}
-        for img in batch_images:
-            out_path = img.image_path
-            # Save original with provenance
-            try:
-                raw_target = os.path.join(self.raw_dir, f"{img.group}_{img.image_name}")
-                shutil.copyfile(img.image_path, raw_target)
-            except Exception as e:
-                print(f"Raw copy failed for {img.image_path}: {e}")
-            if tool:
-                try:
-                    res = tool.execute(image=img.image_path)
-                    out_path = res.get("processed_image_path", out_path) if isinstance(res, dict) else out_path
-                except Exception as e:
-                    print(f"Preprocess failed for {img.image_path}: {e}")
-            # Preserve provenance in filename
-            try:
-                ext = Path(out_path).suffix or ".png"
-                target = os.path.join(self.preprocess_dir, f"{img.group}_{img.image_name}_processed{ext}")
-                shutil.copyfile(out_path, target)
-                out_path = target
-            except Exception as e:
-                print(f"Preprocess copy failed for {out_path}: {e}")
-            processed[img.image_id] = out_path
-        return processed
-
-    def segment_batch(self, batch_images: List[BatchImage], preprocessed: Dict[str, str]) -> Dict[str, Dict[str, Any]]:
-        tool = self._load_tool("Nuclei_Segmenter_Tool")
-        results = {}
-        for img in batch_images:
-            img_path = preprocessed.get(img.image_id, img.image_path)
-            seg_res = {}
-            if tool:
-                try:
-                    seg_res = tool.execute(image=img_path)
-                except Exception as e:
-                    print(f"Segmentation failed for {img_path}: {e}")
-            # Copy visual outputs with provenance
-            vis = seg_res.get("visual_outputs") if isinstance(seg_res, dict) else None
-            if isinstance(vis, list):
-                new_vis = []
-                for p in vis:
-                    try:
-                        target = os.path.join(self.segment_dir, f"{img.group}_{img.image_name}_{os.path.basename(p)}")
-                        shutil.copyfile(p, target)
-                        new_vis.append(target)
-                    except Exception as e:
-                        print(f"Failed to copy segmentation output {p}: {e}")
-                seg_res["visual_outputs"] = new_vis
-            results[img.image_id] = seg_res
-        return results
-
-    def crop_batch(self, batch_images: List[BatchImage], preprocessed: Dict[str, str], seg_results: Dict[str, Dict[str, Any]]) -> tuple[List[CellCrop], List[Dict[str, Any]]]:
-        tool = self._load_tool("Single_Cell_Cropper_Tool")
-        crops: List[CellCrop] = []
-        diag: List[Dict[str, Any]] = []
-        if not tool:
-            return crops, diag
-        if Image is None or np is None:
-            raise ImportError("Pillow and numpy are required for cropping and feature extraction")
-        for img in batch_images:
-            img_path = preprocessed.get(img.image_id, img.image_path)
-            # Load original image to capture shape for diagnostics
-            img_h = img_w = None
-            try:
-                with Image.open(img_path) as im:
-                    img_w, img_h = im.size
-            except Exception as e:
-                print(f"Failed to load image for shape {img.group}/{img.image_name}: {e}")
-            seg_res = seg_results.get(img.image_id, {})
-            mask_path = None
-            if isinstance(seg_res, dict):
-                vis = seg_res.get("visual_outputs") or []
-                for p in vis:
-                    if p.lower().endswith(".png") and "mask" in os.path.basename(p).lower():
-                        mask_path = p
-                        break
-            if not mask_path:
-                print(f"No mask found for {img.group}/{img.image_name}; skipping cropping")
-                diag.append({
-                    "image": f"{img.group}/{img.image_name}",
-                    "reason": "no_mask_found"
-                })
-                continue
-            # Validate mask
-            try:
-                with Image.open(mask_path) as mimg:
-                    mask_arr = np.array(mimg)
-                if mask_arr.ndim != 2:
-                    raise ValueError("Mask must be 2D")
-                if not np.issubdtype(mask_arr.dtype, np.integer):
-                    raise ValueError("Mask must be integer-labeled")
-                if mask_arr.max() <= 0:
-                    raise ValueError("Mask has no positive labels")
-            except Exception as e:
-                print(f"Invalid mask for {img.group}/{img.image_name}: {e}")
-                diag.append({
-                    "image": f"{img.group}/{img.image_name}",
-                    "reason": f"invalid_mask: {e}"
-                })
-                continue
-
-            # Compare image/mask shapes
-            if img_h is not None and img_w is not None:
-                if (mask_arr.shape[1], mask_arr.shape[0]) != (img_w, img_h):
-                    reason = f"mask/image shape mismatch mask={mask_arr.shape} image={(img_h, img_w)}"
-                    print(reason)
-                    diag.append({
-                        "image": f"{img.group}/{img.image_name}",
-                        "reason": reason
-                    })
-                    continue
-
-            # Mask diagnostics
-            unique_labels = np.unique(mask_arr)
-            pos_labels = unique_labels[unique_labels > 0]
-            n_labels = len(pos_labels)
-            mask_info = {
-                "shape": mask_arr.shape,
-                "dtype": str(mask_arr.dtype),
-                "min": int(mask_arr.min()),
-                "max": int(mask_arr.max()),
-                "n_labels": int(n_labels),
-            }
-            print(f"Mask diagnostics for {img.group}/{img.image_name}: {mask_info}", flush=True)
-
-            # Candidate stats (by label)
-            min_area = 200  # default threshold
-            candidate_stats = []
-            for lbl in pos_labels:
-                coords = np.argwhere(mask_arr == lbl)
-                area = coords.shape[0]
-                y_min, x_min = coords.min(axis=0)
-                y_max, x_max = coords.max(axis=0)
-                reason = None
-                if area < min_area:
-                    reason = "below_min_area"
-                candidate_stats.append({
-                    "label": int(lbl),
-                    "area": int(area),
-                    "bbox": [int(y_min), int(x_min), int(y_max), int(x_max)],
-                    "rejected": reason is not None,
-                    "rejection_reason": reason
-                })
-
-            output_dir = os.path.join(self.crops_dir, f"{img.group}_{img.image_name}_crops")
-            os.makedirs(output_dir, exist_ok=True)
-            try:
-                sig = inspect.signature(tool.execute)
-                allowed = set(sig.parameters.keys())
-                print(f"Detected cropper execute() signature for {img.group}/{img.image_name}: {sorted(allowed)}", flush=True)
-
-                # Build candidate kwargs based on allowed keys
-                call_kwargs = {}
-                filtered_out = []
-                if "original_image" in allowed:
-                    call_kwargs["original_image"] = img_path
-                elif "image" in allowed:
-                    call_kwargs["image"] = img_path
-                else:
-                    raise ValueError("Cropper execute() missing image parameter")
-
-                if "nuclei_mask" in allowed:
-                    call_kwargs["nuclei_mask"] = mask_path
-                elif "mask" in allowed:
-                    call_kwargs["mask"] = mask_path
-                elif "mask_path" in allowed:
-                    call_kwargs["mask_path"] = mask_path
-                else:
-                    filtered_out.append("mask_path")
-
-                if "output_dir" in allowed:
-                    call_kwargs["output_dir"] = output_dir
-                else:
-                    filtered_out.append("output_dir")
-
-                for opt_key, opt_val in [("min_area", 200), ("margin", 10), ("pad_to_square", True)]:
-                    if opt_key in allowed:
-                        call_kwargs[opt_key] = opt_val
-                    else:
-                        filtered_out.append(opt_key)
-
-                print(f"Filtered unsupported arguments for {img.group}/{img.image_name}: {filtered_out}", flush=True)
-                print(f"Invoking Single_Cell_Cropper_Tool with args {list(call_kwargs.keys())}", flush=True)
-                res = tool.execute(**call_kwargs)
-                crop_paths = res.get("cell_crops") or res.get("cropped_cells") or []
-                print(f"Cropping result for {img.group}/{img.image_name}: {len(crop_paths)} crops generated", flush=True)
-                if len(crop_paths) == 0:
-                    raise ValueError("Cropping produced 0 crops")
-                for idx, cp in enumerate(crop_paths):
-                    try:
-                        with Image.open(cp) as cimg:
-                            crop_arr = np.array(cimg)
-                        cell_id = f"{img.image_id}_cell_{idx}"
-                        crop_id = f"{img.image_id}_crop_{idx}"
-                        crops.append(CellCrop(
-                            crop_id=crop_id,
-                            group=img.group,
-                            image_id=img.image_id,
-                            cell_id=cell_id,
-                            image=crop_arr,
-                            path=cp
-                        ))
-                    except Exception as e:
-                        print(f"Failed to load crop {cp}: {e}")
-                diag.append({
-                    "image": f"{img.group}/{img.image_name}",
-                    "allowed": sorted(allowed),
-                    "filtered_out": filtered_out,
-                    "used_args": list(call_kwargs.keys()),
-                    "crops": len(crop_paths),
-                    "mask_info": mask_info,
-                    "candidates": candidate_stats
-                })
-            except Exception as e:
-                print(f"Cropping failed for {img.group}/{img.image_name}: {e}")
-                diag.append({
-                    "image": f"{img.group}/{img.image_name}",
-                    "allowed": [],
-                    "filtered_out": [],
-                    "used_args": [],
-                    "crops": 0,
-                    "error": str(e),
-                    "mask_info": mask_info if 'mask_info' in locals() else {},
-                    "candidates": candidate_stats if 'candidate_stats' in locals() else []
-                })
-                raise
-        return crops, diag
-
-    def feature_batch(self, crops: List[CellCrop]) -> List[Dict[str, Any]]:
-        if np is None:
-            raise ImportError("numpy is required for feature extraction")
-        features = []
-        for crop in crops:
-            arr = crop.image
-            area = int(arr.size) if hasattr(arr, "size") else 0
-            features.append({
-                "group": crop.group,
-                "image_id": crop.image_id,
-                "cell_id": crop.cell_id,
-                "crop_id": crop.crop_id,
-                "area": area
-            })
-        return features
-
-    def aggregate(self, features: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        if np is None:
-            raise ImportError("numpy is required for aggregation")
-        grouped: Dict[str, List[Dict[str, Any]]] = {}
-        for feat in features:
-            grouped.setdefault(feat["group"], []).append(feat)
-        summary = []
-        for group, feats in grouped.items():
-            areas = [f["area"] for f in feats] if feats else []
-            cell_count = len(areas)
-            mean_area = float(np.mean(areas)) if areas else 0.0
-            std_area = float(np.std(areas)) if areas else 0.0
-            summary.append({
-                "group": group,
-                "cell_count": int(cell_count),
-                "mean_area": mean_area,
-                "std_area": std_area
-            })
-        return summary
-
-    def summarize_groups(self, aggregated: List[Dict[str, Any]]) -> str:
-        llm_input = {
-            "groups": [
-                {
-                    "group": row["group"],
-                    "cell_count": row["cell_count"],
-                    "mean_area": row["mean_area"],
-                    "std_area": row["std_area"],
-                }
-                for row in aggregated
-            ]
-        }
-        llm_input_text = json.dumps(llm_input, indent=2)
-        print(f"[Batch] LLM summarization input length: {len(llm_input_text)} chars", flush=True)
-        llm_summary = ""
-        try:
-            print("[Batch] LLM request started", flush=True)
-            llm = ChatOpenAI(model_string=self.initializer.model_string, is_multimodal=False, api_key=self.api_key)
-            prompt = f"Summarize key differences between groups based on cell counts and mean/std area.\nData:\n{llm_input_text}"
-            llm_summary = llm.generate(prompt)
-            print("[Batch] LLM request finished", flush=True)
-        except Exception as e:
-            llm_summary = f"(LLM summarization failed: {e})"
-            print(f"[Batch] LLM request failed: {e}", flush=True)
-        return llm_summary
-
-    def run(self, grouped_inputs: Dict[str, List[str]]) -> Dict[str, Any]:
-        if np is None:
-            raise ImportError("numpy is required for batch pipeline execution")
-        batch_images: List[BatchImage] = []
-        for group, paths in grouped_inputs.items():
-            for p in paths:
-                batch_images.append(make_batch_image(p, group))
-
-        print(f"[Batch] Starting preprocess for {len(batch_images)} images across {len(grouped_inputs)} groups", flush=True)
-        preprocessed = self.preprocess_batch(batch_images)
-        print(f"[Batch] Preprocess complete", flush=True)
-        print(f"[Batch] Starting segmentation", flush=True)
-        segmented = self.segment_batch(batch_images, preprocessed)
-        print(f"[Batch] Segmentation complete", flush=True)
-        print(f"[Batch] Starting cropping", flush=True)
-        crops = self.crop_batch(batch_images, preprocessed, segmented)
-        print(f"[Batch] Cropping complete; total crops: {len(crops)}", flush=True)
-        print(f"[Batch] Starting feature extraction", flush=True)
-        features = self.feature_batch(crops)
-        print(f"[Batch] Feature extraction complete; total feature rows: {len(features)}", flush=True)
-        print(f"[Batch] Starting aggregation", flush=True)
-        aggregated = self.aggregate(features)
-        print(f"[Batch] Aggregation complete; groups summarized: {len(aggregated)}", flush=True)
-
-        summary_lines = ["### Group-level summary"]
-        for row in aggregated:
-            summary_lines.append(f"- {row['group']}: cells={row['cell_count']}, mean_area={row['mean_area']:.1f}, std_area={row['std_area']:.1f}")
-
-        llm_input = {
-            "groups": [
-                {
-                    "group": row["group"],
-                    "cell_count": row["cell_count"],
-                    "mean_area": row["mean_area"],
-                    "std_area": row["std_area"],
-                }
-                for row in aggregated
-            ]
-        }
-        llm_input_text = json.dumps(llm_input, indent=2)
-        print(f"[Batch] LLM summarization input length: {len(llm_input_text)} chars", flush=True)
-        llm_summary = ""
-        try:
-            print("[Batch] LLM request started", flush=True)
-            llm = ChatOpenAI(model_string=self.initializer.model_string, is_multimodal=False, api_key=self.api_key)
-            prompt = f"Summarize key differences between groups based on cell counts and mean/std area.\nData:\n{llm_input_text}"
-            llm_summary = llm.generate(prompt)
-            print("[Batch] LLM request finished", flush=True)
-        except Exception as e:
-            llm_summary = f"(LLM summarization failed: {e})"
-            print(f"[Batch] LLM request failed: {e}", flush=True)
-
-        final_md = "\n".join(summary_lines) + "\n\n### LLM Summary\n" + str(llm_summary)
-        return {
-            "crops": crops,
-            "features": features,
-            "aggregated": aggregated,
-            "summary_md": final_md
-        }
-
-
-def solve_problem_gradio(user_query, user_images, image_table, max_steps=10, max_time=60, llm_model_engine=None, enabled_fibroblast_tools=None, enabled_general_tools=None, clear_previous_viz=False, conversation_history=None):
+def solve_problem_gradio(user_query, user_image, max_steps=10, max_time=60, llm_model_engine=None, enabled_fibroblast_tools=None, enabled_general_tools=None, clear_previous_viz=False, conversation_history=None):
     """
     Solve a problem using the Gradio interface with optional visualization clearing.
     
     Args:
         user_query: The user's query
-        user_images: List of uploaded images (Gradio Files)
-        image_table: Dataframe of user-provided names and image paths
+        user_image: The user's image
         max_steps: Maximum number of reasoning steps
         max_time: Maximum analysis time in seconds
         llm_model_engine: Language model engine (model_id from dropdown)
@@ -1164,85 +966,13 @@ def solve_problem_gradio(user_query, user_images, image_table, max_steps=10, max
         clear_previous_viz: Whether to clear previous visualizations
         conversation_history: Persistent chat history to keep context across runs
     """
-    # Global reproducibility seeding (Issue 5)
-    seed_info = set_reproducibility()
-    # Pre-initialize all locals that are referenced later to avoid UnboundLocalError
-    state: AgentState = conversation_history if isinstance(conversation_history, AgentState) else AgentState()
-    state.conversation = list(state.conversation)
-    state.analysis_session = state.analysis_session or AnalysisSession()
-    messages: List[ChatMessage] = list(state.conversation)
-    gallery_output: List[Any] = []
-    grouped_preview: Dict[str, List[str]] = {}
-    named_inputs: List[Dict[str, str]] = []
-
-    # Normalize inputs into a single list of named inputs (works for single or multi-image)
-    uploaded_files = user_images or []
-    # Collect names from the table (single "name" column)
-    table_names: List[str] = []
-    if image_table is not None:
-        # Gradio Dataframe returns a list-like or pandas.DataFrame; handle both
-        try:
-            iter_rows = image_table.values.tolist() if hasattr(image_table, "values") else image_table
-        except Exception:
-            iter_rows = image_table
-        for row in iter_rows:
-            if not row:
-                continue
-            name = str(row[0]).strip() if row[0] else ""
-            if name:
-                table_names.append(name)
-
-    if uploaded_files:
-        file_paths = []
-        for f in uploaded_files:
-            path = getattr(f, "name", None) or getattr(f, "path", None) or str(f)
-            file_paths.append(sanitize_user_path(path))
-
-        # If no names provided in table, auto-fill from filenames; otherwise enforce 1:1
-        if not table_names:
-            table_names = [Path(p).stem for p in file_paths]
-        if len(table_names) != len(file_paths):
-            error_msg = f"Number of names ({len(table_names)}) does not match number of uploaded images ({len(file_paths)})."
-            messages.append(ChatMessage(role="assistant", content=error_msg))
-            state.conversation = messages
-            return messages, "", [], "**Progress**: Error", state
-
-        for name, path in zip(table_names, file_paths):
-            if not name.strip():
-                error_msg = "Each uploaded image must have a non-empty name."
-                messages.append(ChatMessage(role="assistant", content=error_msg))
-                state.conversation = messages
-                return messages, "", [], "**Progress**: Error", state
-            named_inputs.append({"name": name.strip(), "type": "image", "path": path})
-
     # Initialize or reuse persistent agent state
     state: AgentState = conversation_history if isinstance(conversation_history, AgentState) else AgentState()
     state.conversation = list(state.conversation)
-    state.analysis_session = state.analysis_session or AnalysisSession()
     # Start with prior conversation so the session feels continuous
     messages: List[ChatMessage] = list(state.conversation)
     if user_query:
         messages.append(ChatMessage(role="user", content=str(user_query)))
-
-    # Prepare grouped summary for interpretation
-    grouped_preview: Dict[str, List[str]] = {}
-    for item in named_inputs:
-        grouped_preview.setdefault(item["name"], []).append(item["path"])
-
-    # Query interpretation (lightweight, deterministic)
-    interpretation_lines = [
-        "### 🧭 Query Interpretation",
-        f"- Task type: Batch image analysis",
-        f"- Groups: {len(grouped_preview)}",
-    ]
-    for group, paths in grouped_preview.items():
-        interpretation_lines.append(f"  - {group}: {len(paths)} image(s)")
-    interpretation_lines.append("- Planned outputs: preprocessing visuals, segmentation overlays/masks")
-    interpretation_lines.append("- Cell-level analysis: attempted if masks yield cells; skipped otherwise")
-    interpretation_md = "\n".join(interpretation_lines)
-    report_lines: List[str] = [interpretation_md]
-    messages.append(ChatMessage(role="assistant", content=interpretation_md))
-    yield messages, "\n\n".join(report_lines), [], "**Progress**: Interpretation ready", state
     
     # Find the model config by model_id
     selected_model_config = None
@@ -1332,32 +1062,14 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
 
     print(f"Debug - final enabled_tools: {enabled_tools}")
     
-    # Save the query data (use first image path if available)
-    first_image_path = named_inputs[0]["path"] if named_inputs else None
+    # Save the query data
     save_query_data(
         query_id=query_id,
         query=user_query,
-        image_path=first_image_path
+        image_path=os.path.join(query_cache_dir, 'query_image.jpg') if user_image else None
     )
 
-    # Build named inputs from UI (files + editable table)
-    if named_inputs:
-        state.analysis_session = state.analysis_session or AnalysisSession()
-        state.analysis_session.inputs = {
-            item["name"]: AnalysisInput(name=item["name"], path=item["path"], input_type=item.get("type", "image"))
-            for item in named_inputs
-        }
-        if not state.analysis_session.active_input:
-            state.analysis_session.active_input = named_inputs[0]["name"]
-    # Reject empty inputs early
-    if not named_inputs:
-        error_msg = "No images provided. Please upload and name at least one image."
-        messages.append(ChatMessage(role="assistant", content=error_msg))
-        state.conversation = messages
-        return messages, "", [], "**Progress**: Error", state
-
-
-    # Instantiate Initializer for deterministic batch pipeline
+    # Instantiate Initializer
     try:
         initializer = Initializer(
             enabled_tools=enabled_tools,
@@ -1371,160 +1083,100 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
         state.conversation = new_history
         return new_history, "", [], "**Progress**: Error occurred", state
 
-    # Deterministic batch pipeline execution
-    runner = BatchPipelineRunner(initializer=initializer, api_key=api_key, cache_dir=query_cache_dir)
-    grouped_inputs: Dict[str, List[str]] = {}
-    for item in named_inputs:
-        grouped_inputs.setdefault(item["name"], []).append(item["path"])
+    # Instantiate Planner
+    try:
+        planner = Planner(
+            llm_engine_name=model_name_for_octotools,
+            toolbox_metadata=initializer.toolbox_metadata,
+            available_tools=initializer.available_tools,
+            api_key=api_key
+        )
+        print(f"Debug - Planner created successfully")
+    except Exception as e:
+        print(f"Error creating Planner: {e}")
+        new_history = messages + [gr.ChatMessage(role="assistant", content=f"⚠️ Error: Failed to initialize planner. {str(e)}")]
+        state.conversation = new_history
+        return new_history, "", [], "**Progress**: Error occurred", state
+
+    # Instantiate Memory
+    memory = Memory()
+
+    # Instantiate Executor
+    executor = Executor(
+        llm_engine_name=model_name_for_octotools,
+        query_cache_dir=query_cache_dir, # NOTE
+        enable_signal=False,
+        api_key=api_key,
+        initializer=initializer
+    )
+
+    # Instantiate Solver
+    solver = Solver(
+        planner=planner,
+        memory=memory,
+        executor=executor,
+        task="minitoolbench",  # Default task
+        task_description="",   # Default empty description
+        output_types="base,final,direct",  # Default output types
+        verbose=True,          # Default verbose
+        max_steps=max_steps,
+        max_time=max_time,
+        query_cache_dir=query_cache_dir, # NOTE
+        agent_state=state
+    )
+
+    if solver is None:
+        new_history = messages + [gr.ChatMessage(role="assistant", content="⚠️ Error: Failed to initialize solver.")]
+        state.conversation = new_history
+        return new_history, "", [], "**Progress**: Error occurred", state
 
     try:
-        messages.append(ChatMessage(role="assistant", content="### 📝 Received Query\nDeterministic batch pipeline starting..."))
-        report_lines.append("### Execution Plan\n- Run preprocessing → segmentation → (optional) cropping/feature/aggregation\n- Visualize per-image outputs at each stage")
-        yield messages, "\n\n".join(report_lines), [], "**Progress**: Starting batch analysis", state
-
-        # Build batch images with provenance
-        batch_images: List[BatchImage] = []
-        for item in named_inputs:
-            batch_images.append(make_batch_image(item["path"], item["name"]))
-
-        gallery_output: List[Any] = []
-
-        def add_to_gallery(img_path: str, label: str):
-            try:
-                if not os.path.exists(img_path):
-                    return
-                with Image.open(img_path) as im:
-                    gallery_output.append((im.copy(), label))
-            except Exception as e:
-                print(f"Gallery load failed for {img_path}: {e}")
-
-        # Stage: preprocess
-        messages.append(ChatMessage(role="assistant", content="🔍 Preprocessing intent: normalize/denoise images for consistent segmentation"))
-        report_lines.append("🔍 Preprocessing: normalizing inputs for consistent segmentation.")
-        preprocessed = runner.preprocess_batch(batch_images)
-        messages.append(ChatMessage(role="assistant", content="✅ Preprocessing complete"))
-        report_lines.append("✅ Preprocessing complete for all images.")
-        for img in batch_images:
-            processed_path = preprocessed.get(img.image_id, img.image_path)
-            add_to_gallery(processed_path, f"{img.group}/{img.image_name} (preprocessed)")
-            messages.append(ChatMessage(role="assistant", content=f"Processed {img.group}/{img.image_name}"))
-            yield messages, "\n\n".join(report_lines), gallery_output, f"**Progress**: Preprocessed {img.image_name}", state
-
-        # Stage: segmentation
-        messages.append(ChatMessage(role="assistant", content="🔍 Segmentation intent: detect nuclei masks for each image"))
-        report_lines.append("🔍 Segmentation: detecting nuclei masks for each image.")
-        segmented = runner.segment_batch(batch_images, preprocessed)
-        messages.append(ChatMessage(role="assistant", content="✅ Segmentation complete (image-level outputs saved)"))
-        report_lines.append("✅ Segmentation complete; masks/overlays saved per image.")
-        mask_available: Dict[str, bool] = {}
-        for img in batch_images:
-            seg_res = segmented.get(img.image_id, {})
-            vis = seg_res.get("visual_outputs") if isinstance(seg_res, dict) else []
-            has_mask = False
-            for p in vis:
-                if "mask" in os.path.basename(p).lower():
-                    has_mask = True
-                add_to_gallery(p, f"{img.group}/{img.image_name} (seg)")
-            mask_available[img.image_id] = has_mask
-            messages.append(ChatMessage(role="assistant", content=f"Segmented {img.group}/{img.image_name}"))
-            yield messages, "\n\n".join(report_lines), gallery_output, f"**Progress**: Segmented {img.image_name}", state
-
-        # Stage: cropping (optional)
-        messages.append(ChatMessage(role="assistant", content="🔍 Cropping intent: extract cells using segmentation masks"))
-        report_lines.append("🔍 Cropping: attempting cell extraction from segmentation masks.")
-        try:
-            crops, crop_diag = runner.crop_batch(batch_images, preprocessed, segmented)
-        except Exception as e:
-            explanation = f"Cropping failed due to tool invocation error: {e}"
-            messages.append(ChatMessage(role="assistant", content=f"❌ {explanation}"))
-            if 'crop_diag' in locals() and crop_diag:
-                diag_lines = []
-                for d in crop_diag:
-                    diag_lines.append(f"- {d.get('image')}: allowed={d.get('allowed')}, filtered_out={d.get('filtered_out')}, used_args={d.get('used_args')}, crops={d.get('crops')}, mask_info={d.get('mask_info')}")
-                report_lines.append("Cropping diagnostics:\n" + "\n".join(diag_lines))
-            report_lines.append(f"❌ {explanation}")
+        # Stream the solution
+        for messages, text_output, gallery_output, visual_desc, progress_md in solver.stream_solve_user_problem(user_query, user_image, api_key, messages):
+            # Save steps data
+            save_steps_data(query_id, memory)
+            
+            # Return the current state
             state.conversation = messages
-            yield messages, "\n\n".join(report_lines), gallery_output, "**Progress**: Cropping failed", state
-            return
-        if not crops:
-            explanation = "No crops generated; see diagnostics for reasons."
-            diag_lines = []
-            for d in crop_diag:
-                diag_lines.append(f"- {d.get('image')}: allowed={d.get('allowed')}, filtered_out={d.get('filtered_out')}, used_args={d.get('used_args')}, crops={d.get('crops')}, mask_info={d.get('mask_info')}")
-                if d.get("candidates"):
-                    diag_lines.append(f"  candidates: {d.get('candidates')}")
-                if d.get("reason"):
-                    diag_lines.append(f"  reason: {d.get('reason')}")
-                if d.get("error"):
-                    diag_lines.append(f"  error: {d.get('error')}")
-            if diag_lines:
-                explanation += "\nCrop diagnostics:\n" + "\n".join(diag_lines)
-            messages.append(ChatMessage(role="assistant", content=f"⚠️ {explanation}"))
-            report_lines.append(f"⚠️ {explanation}")
-            state.conversation = messages
-            yield messages, "\n\n".join(report_lines), gallery_output, "**Progress**: Cropping produced 0 crops", state
-            return
-        messages.append(ChatMessage(role="assistant", content=f"✅ Cropping complete ({len(crops)} crops)"))
-        report_lines.append(f"✅ Cropping complete; extracted {len(crops)} crops.")
-        # Show up to a few crops per image to avoid overload
-        crops_shown = 0
-        for crop in crops:
-            if crop.path and crops_shown < 12:
-                add_to_gallery(crop.path, f"{crop.group}/{crop.image_id} {crop.cell_id}")
-                crops_shown += 1
-        yield messages, "\n\n".join(report_lines), gallery_output, "**Progress**: Cropping complete", state
-
-        # Stage: feature extraction
-        messages.append(ChatMessage(role="assistant", content="🔍 Feature intent: compute basic per-cell metrics (area)"))
-        report_lines.append("🔍 Feature extraction: computing per-cell metrics (area).")
-        features = runner.feature_batch(crops)
-        if not features:
-            messages.append(ChatMessage(role="assistant", content="⚠️ No features extracted; skipping aggregation and LLM summary."))
-            state.conversation = messages
-            report_lines.append("⚠️ No features extracted; aggregation/LLM skipped.")
-            yield messages, "\n\n".join(report_lines), gallery_output, "**Progress**: No features extracted", state
-            return
-        messages.append(ChatMessage(role="assistant", content=f"✅ Feature extraction complete ({len(features)} feature rows)"))
-        report_lines.append(f"✅ Feature extraction complete; {len(features)} rows.")
-        yield messages, "\n\n".join(report_lines), gallery_output, "**Progress**: Feature extraction complete", state
-
-        # Stage: aggregation
-        messages.append(ChatMessage(role="assistant", content="🔍 Aggregation intent: summarize per group"))
-        report_lines.append("🔍 Aggregation: summarizing per group.")
-        aggregated = runner.aggregate(features)
-        if not aggregated:
-            messages.append(ChatMessage(role="assistant", content="⚠️ No aggregated data; skipping LLM summary."))
-            state.conversation = messages
-            report_lines.append("⚠️ No aggregated data; LLM summary skipped.")
-            yield messages, "\n\n".join(report_lines), gallery_output, "**Progress**: No aggregated data", state
-            return
-        messages.append(ChatMessage(role="assistant", content=f"✅ Aggregation complete ({len(aggregated)} groups)"))
-        report_lines.append(f"✅ Aggregation complete for {len(aggregated)} groups.")
-        yield messages, "\n\n".join(report_lines), gallery_output, "**Progress**: Aggregation complete", state
-
-        # Summary and optional LLM interpretation
-        summary_lines = ["### Group-level summary"]
-        for row in aggregated:
-            summary_lines.append(f"- {row['group']}: cells={row['cell_count']}, mean_area={row['mean_area']:.1f}, std_area={row['std_area']:.1f}")
-        summary_md = "\n".join(summary_lines)
-
-        llm_summary = runner.summarize_groups(aggregated) if aggregated else ""
-        final_md = summary_md + ("\n\n### LLM Summary\n" + str(llm_summary) if llm_summary else "")
-
-        report_lines.append(summary_md)
-        if llm_summary:
-            report_lines.append("### LLM Summary")
-            report_lines.append(str(llm_summary))
-
-        messages.append(ChatMessage(role="assistant", content=final_md))
-        state.conversation = messages
-        state.analysis_session = state.analysis_session or AnalysisSession()
-        yield messages, "\n\n".join(report_lines), gallery_output, "**Progress**: Completed", state
+            state.last_visual_description = visual_desc
+            yield messages, text_output, gallery_output, progress_md, state
+            
     except Exception as e:
-        error_message = f"⚠️ Error during batch analysis: {e}"
-        messages.append(ChatMessage(role="assistant", content=error_message))
-        state.conversation = messages
-        yield messages, "", [], "**Progress**: Error occurred", state
+        print(f"Error in solve_problem_gradio: {e}")
+        import traceback
+        error_traceback = traceback.format_exc()
+        print(f"Full traceback: {error_traceback}")
+        
+        # Create error message for UI
+        error_message = f"⚠️ Error occurred during analysis:\n\n**Error Type:** {type(e).__name__}\n**Error Message:** {str(e)}\n\nPlease check your input and try again."
+        
+        # Return error message in the expected format
+        error_messages = messages + [gr.ChatMessage(role="assistant", content=error_message)]
+        state.conversation = error_messages
+        yield error_messages, "", [], "**Progress**: Error occurred", state
+    finally:
+        print(f"Task completed for query_id: {query_id}. Preparing to clean up cache directory: {query_cache_dir}")
+        try:
+            # Add a check to prevent deleting the root solver_cache
+            if query_cache_dir != DATASET_DIR.name and DATASET_DIR.name in query_cache_dir:
+                # Preserve output_visualizations directory - DO NOT CLEAR IT
+                # This allows users to keep all generated charts until they start a new analysis
+                output_viz_dir = os.path.join(os.getcwd(), 'output_visualizations')
+                if os.path.exists(output_viz_dir):
+                    print(f"📁 Preserving output_visualizations directory: {output_viz_dir}")
+                    print(f"💡 All generated charts are preserved for review")
+                
+                # Add a small delay to ensure files are written
+                time.sleep(1)
+                
+                # Clean up the cache directory (but preserve visualizations)
+                shutil.rmtree(query_cache_dir)
+                print(f"✅ Successfully cleaned up cache directory: {query_cache_dir}")
+                print(f"💡 Note: All visualization files are preserved in output_visualizations/ directory")
+            else:
+                print(f"⚠️ Skipping cleanup for safety. Path was: {query_cache_dir}")
+        except Exception as e:
+            print(f"❌ Error cleaning up cache directory {query_cache_dir}: {e}")
 
 
 def main(args):
@@ -1629,32 +1281,18 @@ def main(args):
             # Main interface
             with gr.Column(scale=5):
                 # Input area
-                gr.Markdown("### 📤 Data Input (multi-image, named conditions)")
+                gr.Markdown("### 📤 Data Input")
                 with gr.Row():
                     with gr.Column(scale=1):
-                        user_images = gr.Files(
-                            label="Upload Images (multiple)", 
-                            file_types=["image"], 
-                            file_count="multiple",
-                            height=200
-                        )
-                        image_table = gr.Dataframe(
-                            headers=["name"],
-                            datatype=["str"],
-                            row_count=(1, "dynamic"),
-                            col_count=1,
-                            label="Name your images (order matches uploads)",
-                            interactive=True
-                        )
-                        user_images.change(
-                            build_image_table,
-                            inputs=user_images,
-                            outputs=image_table
+                        user_image = gr.Image(
+                            label="Upload an Image", 
+                            type="pil", 
+                            height=350
                         )
                     with gr.Column(scale=1):
                         user_query = gr.Textbox(
                             label="Analysis Question", 
-                            placeholder="Describe the features or comparisons you want across these named images (e.g., compare control vs TGFB1)...", 
+                            placeholder="Describe the cell features or states you want to analyze...", 
                             lines=15
                         )
                         
@@ -1700,7 +1338,20 @@ def main(args):
                         gr.Markdown("## 💡 Try these examples with suggested tools.")
                         
                         # Define example lists
-                        examples = [
+                        fibroblast_examples = [
+                            ["Image Preprocessing", "examples/A5_01_1_1_Phase Contrast_001.png", "Normalize this phase contrast image.", 
+                             "Image_Preprocessor_Tool", "Illumination-corrected and brightness-normalized phase contrast image."],
+                            ["Cell Identification", "examples/A2_02_1_1_Phase Contrast_001.png", "How many cells are there in this image.", 
+                             "Image_Preprocessor_Tool, Nuclei_Segmenter_Tool", "258 cells are identified and their nuclei are labeled."],
+                            ["Single-Cell Cropping", "examples/A3_02_1_1_Phase Contrast_001.png", "Crop single cells from the segmented nuclei in this image.", 
+                             "Image_Preprocessor_Tool, Nuclei_Segmenter_Tool, Single_Cell_Cropper_Tool", "Individual cell crops extracted from the image."],
+                            ["Fibroblast State Analysis", "examples/A4_02_1_1_Phase Contrast_001.png", "Analyze the fibroblast cell states in this image.", 
+                             "Image_Preprocessor_Tool, Nuclei_Segmenter_Tool, Single_Cell_Cropper_Tool, Fibroblast_State_Analyzer_Tool", "540 cells identified and segmented successfully. Comprehensive analysis of fibroblast cell states have been performed with visualizations."],
+                            ["Fibroblast Activation Scoring", "examples/A5_02_1_1_Phase Contrast_001.png", "Quantify the activation score of each fibroblast in this image.",
+                             "Image_Preprocessor_Tool, Nuclei_Segmenter_Tool, Single_Cell_Cropper_Tool, Fibroblast_State_Analyzer_Tool, Fibroblast_Activation_Scorer_Tool", "Activation scores for all fibroblasts have been computed and normalized based on the reference map."]
+                        ]
+                        
+                        general_examples = [
                             ["Pathology Diagnosis", "examples/pathology.jpg", "What are the cell types in this image?", 
                              "Generalist_Solution_Generator_Tool, Image_Captioner_Tool, Relevant_Patch_Zoomer_Tool", "Need expert insights."],
                             ["Visual Reasoning", "examples/rotting_kiwi.png", "You are given a 3 x 3 grid in which each cell can contain either no kiwi, one fresh kiwi, or one rotten kiwi. Every minute, any fresh kiwi that is 4-directionally adjacent to a rotten kiwi also becomes rotten. What is the minimum number of minutes that must elapse until no cell has a fresh kiwi?", 
@@ -1715,12 +1366,21 @@ def main(args):
                             selected_fibroblast = [tool for tool in selected_tools if tool in fibroblast_tools]
                             selected_general = [tool for tool in selected_tools if tool in general_tools]
                             return img, q, selected_fibroblast, selected_general
+
+                        gr.Markdown("#### 🧬 Fibroblast Analysis Examples")
+                        gr.Examples(
+                            examples=fibroblast_examples,
+                            inputs=[gr.Textbox(label="Category", visible=False), user_image, user_query, gr.Textbox(label="Select Tools", visible=False), gr.Textbox(label="Reference Answer", visible=False)],
+                            outputs=[user_image, user_query, enabled_fibroblast_tools, enabled_general_tools],
+                            fn=distribute_tools,
+                            cache_examples=False
+                        )
                         
                         gr.Markdown("#### 🧩 General Purpose Examples")
                         gr.Examples(
-                            examples=examples,
-                            inputs=[gr.Textbox(label="Category", visible=False), user_images, user_query, gr.Textbox(label="Select Tools", visible=False), gr.Textbox(label="Reference Answer", visible=False)],
-                            outputs=[user_images, user_query, enabled_fibroblast_tools, enabled_general_tools],
+                            examples=general_examples,
+                            inputs=[gr.Textbox(label="Category", visible=False), user_image, user_query, gr.Textbox(label="Select Tools", visible=False), gr.Textbox(label="Reference Answer", visible=False)],
+                            outputs=[user_image, user_query, enabled_fibroblast_tools, enabled_general_tools],
                             fn=distribute_tools,
                             cache_examples=False
                         )
@@ -1728,7 +1388,7 @@ def main(args):
         # Button click event
         run_button.click(
             solve_problem_gradio,
-            [user_query, user_images, image_table, max_steps, max_time, language_model, enabled_fibroblast_tools, enabled_general_tools, clear_previous_viz, conversation_state],
+            [user_query, user_image, max_steps, max_time, language_model, enabled_fibroblast_tools, enabled_general_tools, clear_previous_viz, conversation_state],
             [chatbot_output, text_output, gallery_output, progress_md, conversation_state]
         )
 
@@ -1792,12 +1452,9 @@ if __name__ == "__main__":
     # Print environment information
     print("\n=== Environment Information ===")
     print(f"Running in HuggingFace Spaces: {IS_SPACES}")
-    if torch:
-        print(f"CUDA Available: {torch.cuda.is_available()}")
-        if torch.cuda.is_available():
-            print(f"CUDA Device: {torch.cuda.get_device_name(0)}")
-    else:
-        print("CUDA Available: torch not installed")
+    print(f"CUDA Available: {torch.cuda.is_available()}")
+    if torch.cuda.is_available():
+        print(f"CUDA Device: {torch.cuda.get_device_name(0)}")
     #print(f"API Key Source: {args.openai_api_source}")
     print("==============================\n")
     
