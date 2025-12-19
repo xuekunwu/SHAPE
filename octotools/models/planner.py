@@ -6,8 +6,8 @@ from typing import Dict, Any, List, Tuple
 
 from octotools.engine.openai import ChatOpenAI
 from octotools.models.memory import Memory
-from octotools.models.formatters import QueryAnalysis, NextStep, MemoryVerification
-from octotools.models.utils import normalize_tool_name
+from octotools.models.formatters import QueryAnalysis, NextStep, MemoryVerification, StepPlan
+from octotools.registry import REGISTRY
 
 class Planner:
     def __init__(self, llm_engine_name: str, toolbox_metadata: dict = None, available_tools: List = None, api_key: str = None):
@@ -26,6 +26,9 @@ class Planner:
         
         # Initialize token usage tracking
         self.last_usage = {}
+
+    def _available_capabilities(self) -> list:
+        return list(REGISTRY._capability_index.keys())
 
     def get_image_info(self, image_path: str) -> Dict[str, Any]:
         image_info = {}
@@ -161,80 +164,15 @@ Please present your analysis in a clear, structured format.
         return analysis_text
 
     def extract_context_subgoal_and_tool(self, response) -> Tuple[str, str, str]:
-        def normalize_tool_name(tool_name: str) -> str:
-            for tool in self.available_tools:
-                if tool.lower() in tool_name.lower():
-                    return tool
-            return "No matched tool given: " + tool_name
-        
+        """Simplified: return tool name if present; context/sub_goal are unused for capability plan."""
         try:
-            print(f"DEBUG: extract_context_subgoal_and_tool - response type: {type(response)}")
-            print(f"DEBUG: extract_context_subgoal_and_tool - response: {response}")
-            
-            # Check if response is a NextStep object
+            if isinstance(response, StepPlan):
+                return "", "", response.tool_name or ""
             if hasattr(response, 'context') and hasattr(response, 'sub_goal') and hasattr(response, 'tool_name'):
-                print(f"DEBUG: Processing NextStep object")
-                print(f"DEBUG: response.context: {response.context}")
-                print(f"DEBUG: response.sub_goal: {response.sub_goal}")
-                print(f"DEBUG: response.tool_name: {response.tool_name}")
-                print(f"DEBUG: available_tools: {self.available_tools}")
-                
-                context = response.context.strip()
-                sub_goal = response.sub_goal.strip()
-                tool_name = normalize_tool_name(response.tool_name.strip())
-                
-                print(f"DEBUG: Normalized tool_name: {tool_name}")
-                
-                return context, sub_goal, tool_name
-            # Check if response is a string (fallback for non-structured models)
-            elif isinstance(response, str):
-                print("WARNING: Received string response instead of NextStep object")
-                # Try to parse the string response to extract context, sub_goal, and tool_name
-                try:
-                    lines = response.split('\n')
-                    context = ""
-                    sub_goal = ""
-                    tool_name = ""
-                    
-                    for line in lines:
-                        line = line.strip()
-                        if line.lower().startswith('<context>') and not line.lower().startswith('<context>:'):
-                            # Only handle <context>...</context> tags, not <context>: format
-                            context = line.split('<context>')[1].split('</context>')[0].strip()
-                        elif line.lower().startswith('context:'):
-                            # Handle both <context>: and context: formats
-                            parts = line.split('context:', 1)
-                            if len(parts) > 1:
-                                context = parts[1].lstrip(' :')
-                            else:
-                                context = ""
-                        elif line.lower().startswith('<sub_goal>') and not line.lower().startswith('<sub_goal>:'):
-                            sub_goal = line.split('<sub_goal>')[1].split('</sub_goal>')[0].strip()
-                        elif line.lower().startswith('sub_goal:'):
-                            parts = line.split('sub_goal:', 1)
-                            if len(parts) > 1:
-                                sub_goal = parts[1].lstrip(' :')
-                            else:
-                                sub_goal = ""
-                        elif line.lower().startswith('<tool_name>') and not line.lower().startswith('<tool_name>:'):
-                            tool_name = line.split('<tool_name>')[1].split('</tool_name>')[0].strip()
-                        elif line.lower().startswith('tool_name:'):
-                            parts = line.split('tool_name:', 1)
-                            if len(parts) > 1:
-                                tool_name = parts[1].lstrip(' :')
-                            else:
-                                tool_name = ""
-                    
-                    # Normalize tool name
-                    tool_name = normalize_tool_name(tool_name)
-                    
-                    return context, sub_goal, tool_name
-                    
-                except Exception as parse_error:
-                    print(f"Error parsing string response: {parse_error}")
-                    return "", "", "Error parsing tool name"
-            else:
-                return "", "", "Unknown response type"
+                return response.context.strip(), response.sub_goal.strip(), response.tool_name.strip()
+            if isinstance(response, str):
+                return "", "", response
+            return "", "", "Unknown response type"
         except Exception as e:
             print(f"Error in extract_context_subgoal_and_tool: {e}")
             return "", "", "Error extracting tool name"

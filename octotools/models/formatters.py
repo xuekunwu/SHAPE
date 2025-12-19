@@ -38,3 +38,10 @@ class ToolCommand(BaseModel):
     analysis: str
     explanation: str
     command: str
+
+# Planner: StepPlan (capability-driven)
+class StepPlan(BaseModel):
+    capability: str
+    tool_name: str | None
+    required_inputs: list[str]
+    rationale: str
