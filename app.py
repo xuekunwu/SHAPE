@@ -25,7 +25,7 @@ import psutil  # For memory usage
 from llm_evaluation_scripts.hf_model_configs import HF_MODEL_CONFIGS
 from datetime import datetime
 from octotools.models.utils import normalize_tool_name
-from octotools.models.utils import set_reproducibility
+from octotools.models.utils import set_reproducibility, make_json_safe
 from octotools.models.task_state import ConversationState, ActiveTask, TaskType, AnalysisSession, AnalysisInput, BatchImage, CellCrop
 from dataclasses import dataclass, field
 import importlib
@@ -159,7 +159,7 @@ def save_query_data(query_id: str, query: str, image_path: str) -> None:
     
     print(f"Saving query metadata to {query_file}")
     with query_file.open("w") as f:
-        json.dump(query_metadata, f, indent=4)
+        json.dump(make_json_safe(query_metadata), f, indent=4)
     
     # # NOTE: As we are using the same name for the query cache directory as the dataset directory,
     # # NOTE: we don't need to copy the content from the query cache directory to the query directory.
@@ -204,7 +204,7 @@ def save_feedback(query_id: str, feedback_type: str, feedback_text: str = None) 
     
     # Write feedback data
     with feedback_file.open("w") as f:
-        json.dump(feedback_data, f, indent=4)
+        json.dump(make_json_safe(feedback_data), f, indent=4)
 
 
 def save_steps_data(query_id: str, memory) -> None:
@@ -216,7 +216,7 @@ def save_steps_data(query_id: str, memory) -> None:
     print("Memory actions: ", memory_actions)
 
     with steps_file.open("w") as f:
-        json.dump(memory_actions, f, indent=4, cls=CustomEncoder)
+        json.dump(make_json_safe(memory_actions), f, indent=4, cls=CustomEncoder)
 
     
 def save_module_data(query_id: str, key: str, value: Any) -> None:
@@ -224,7 +224,7 @@ def save_module_data(query_id: str, key: str, value: Any) -> None:
     try:
         key = key.replace(" ", "_").lower()
         module_file = DATASET_DIR / query_id / f"{key}.json"
-        value = make_json_serializable(value)  # NOTE: make the value serializable
+        value = make_json_safe(make_json_serializable(value))  # NOTE: make the value serializable
         with module_file.open("a") as f:
             json.dump(value, f, indent=4, cls=CustomEncoder)
     except Exception as e:

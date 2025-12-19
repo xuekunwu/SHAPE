@@ -74,6 +74,28 @@ def set_reproducibility(seed: Optional[int] = None) -> Dict[str, Any]:
         env["cuda_available"] = False
     return env
 
+def make_json_safe(obj: Any) -> Any:
+    """
+    Recursively convert common non-serializable types (Path, numpy, tuples) into JSON-safe types.
+    Does NOT drop data. (Execution provenance hardening)
+    """
+    from pathlib import Path
+    if isinstance(obj, Path):
+        return str(obj)
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    if isinstance(obj, tuple):
+        return [make_json_safe(o) for o in obj]
+    if isinstance(obj, list):
+        return [make_json_safe(o) for o in obj]
+    if isinstance(obj, dict):
+        return {make_json_safe(k): make_json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (np.integer,)):
+        return int(obj)
+    if isinstance(obj, (np.floating,)):
+        return float(obj)
+    return obj
+
 def make_json_serializable(obj):
     """Convert numpy arrays and other non-serializable objects to JSON-serializable format."""
     if isinstance(obj, np.ndarray):

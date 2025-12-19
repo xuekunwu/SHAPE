@@ -5,7 +5,7 @@ import re
 import json
 import ast
 from typing import Dict, Any, List, Optional
-from octotools.models.utils import set_reproducibility
+from octotools.models.utils import set_reproducibility, make_json_safe
 from datetime import datetime
 
 from octotools.engine.openai import ChatOpenAI 
@@ -176,7 +176,7 @@ class Executor:
                 "seed_info": self.seed_info,
             }
             with open(log_path, "a") as f:
-                f.write(json.dumps(entry) + "\n")
+                f.write(json.dumps(make_json_safe(entry)) + "\n")
         except Exception as e:
             print(f"Warning: failed to write run log: {e}")
 
