@@ -9,6 +9,7 @@ import torch
 import shutil
 import logging
 import tempfile
+import inspect
 from PIL import Image
 import numpy as np
 from tifffile import imwrite as tiff_write
@@ -1095,11 +1096,12 @@ class BatchPipelineRunner:
             results[img.image_id] = seg_res
         return results
 
-    def crop_batch(self, batch_images: List[BatchImage], preprocessed: Dict[str, str], seg_results: Dict[str, Dict[str, Any]]) -> List[CellCrop]:
+    def crop_batch(self, batch_images: List[BatchImage], preprocessed: Dict[str, str], seg_results: Dict[str, Dict[str, Any]]) -> tuple[List[CellCrop], List[Dict[str, Any]]]:
         tool = self._load_tool("Single_Cell_Cropper_Tool")
         crops: List[CellCrop] = []
+        diag: List[Dict[str, Any]] = []
         if not tool:
-            return crops
+            return crops, diag
         if Image is None or np is None:
             raise ImportError("Pillow and numpy are required for cropping and feature extraction")
         for img in batch_images:
@@ -1132,16 +1134,43 @@ class BatchPipelineRunner:
             output_dir = os.path.join(self.crops_dir, f"{img.group}_{img.image_name}_crops")
             os.makedirs(output_dir, exist_ok=True)
             try:
-                print(f"Single_Cell_Cropper_Tool invoked via callable interface for {img.group}/{img.image_name}", flush=True)
-                try:
-                    res = tool.execute(
-                        original_image=img_path,
-                        nuclei_mask=mask_path,
-                        output_dir=output_dir
-                    )
-                except TypeError as te:
-                    print(f"Cropping TypeError (unsupported kwargs): {te}. Retrying with minimal args.", flush=True)
-                    res = tool.execute(original_image=img_path, nuclei_mask=mask_path, output_dir=output_dir)
+                sig = inspect.signature(tool.execute)
+                allowed = set(sig.parameters.keys())
+                print(f"Detected cropper execute() signature for {img.group}/{img.image_name}: {sorted(allowed)}", flush=True)
+
+                # Build candidate kwargs based on allowed keys
+                call_kwargs = {}
+                filtered_out = []
+                if "original_image" in allowed:
+                    call_kwargs["original_image"] = img_path
+                elif "image" in allowed:
+                    call_kwargs["image"] = img_path
+                else:
+                    raise ValueError("Cropper execute() missing image parameter")
+
+                if "nuclei_mask" in allowed:
+                    call_kwargs["nuclei_mask"] = mask_path
+                elif "mask" in allowed:
+                    call_kwargs["mask"] = mask_path
+                elif "mask_path" in allowed:
+                    call_kwargs["mask_path"] = mask_path
+                else:
+                    filtered_out.append("mask_path")
+
+                if "output_dir" in allowed:
+                    call_kwargs["output_dir"] = output_dir
+                else:
+                    filtered_out.append("output_dir")
+
+                for opt_key, opt_val in [("min_area", 200), ("margin", 10), ("pad_to_square", True)]:
+                    if opt_key in allowed:
+                        call_kwargs[opt_key] = opt_val
+                    else:
+                        filtered_out.append(opt_key)
+
+                print(f"Filtered unsupported arguments for {img.group}/{img.image_name}: {filtered_out}", flush=True)
+                print(f"Invoking Single_Cell_Cropper_Tool with args {list(call_kwargs.keys())}", flush=True)
+                res = tool.execute(**call_kwargs)
                 crop_paths = res.get("cell_crops") or res.get("cropped_cells") or []
                 print(f"Cropping result for {img.group}/{img.image_name}: {len(crop_paths)} crops generated", flush=True)
                 if len(crop_paths) == 0:
@@ -1162,10 +1191,25 @@ class BatchPipelineRunner:
                         ))
                     except Exception as e:
                         print(f"Failed to load crop {cp}: {e}")
+                diag.append({
+                    "image": f"{img.group}/{img.image_name}",
+                    "allowed": sorted(allowed),
+                    "filtered_out": filtered_out,
+                    "used_args": list(call_kwargs.keys()),
+                    "crops": len(crop_paths)
+                })
             except Exception as e:
                 print(f"Cropping failed for {img.group}/{img.image_name}: {e}")
+                diag.append({
+                    "image": f"{img.group}/{img.image_name}",
+                    "allowed": [],
+                    "filtered_out": [],
+                    "used_args": [],
+                    "crops": 0,
+                    "error": str(e)
+                })
                 raise
-        return crops
+        return crops, diag
 
     def feature_batch(self, crops: List[CellCrop]) -> List[Dict[str, Any]]:
         if np is None:
@@ -1573,10 +1617,16 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
         messages.append(ChatMessage(role="assistant", content="🔍 Cropping intent: extract cells using segmentation masks"))
         report_lines.append("🔍 Cropping: attempting cell extraction from segmentation masks.")
         try:
-            crops = runner.crop_batch(batch_images, preprocessed, segmented)
+            crops, crop_diag = runner.crop_batch(batch_images, preprocessed, segmented)
         except Exception as e:
-            explanation = f"Cropping failed due to tool invocation error (likely unsupported argument such as pad_to_square). Retried with minimal args. Error: {e}"
+            explanation = f"Cropping failed due to tool invocation error: {e}"
             messages.append(ChatMessage(role="assistant", content=f"❌ {explanation}"))
+            # Add diagnostic details if available
+            if 'crop_diag' in locals() and crop_diag:
+                diag_lines = []
+                for d in crop_diag:
+                    diag_lines.append(f"- {d.get('image')}: allowed={d.get('allowed')}, filtered_out={d.get('filtered_out')}, used_args={d.get('used_args')}, crops={d.get('crops')}")
+                report_lines.append("Cropping diagnostics:\n" + "\n".join(diag_lines))
             report_lines.append(f"❌ {explanation}")
             state.conversation = messages
             yield messages, "\n\n".join(report_lines), gallery_output, "**Progress**: Cropping failed", state
@@ -1590,6 +1640,12 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
             if no_mask_groups:
                 explanation += " Segmentation provided nuclei-only or no usable masks for: " + ", ".join(no_mask_groups)
             explanation += " Cropping halted; downstream steps skipped."
+            # Add diagnostic details from crop_diag
+            diag_lines = []
+            for d in crop_diag:
+                diag_lines.append(f"- {d.get('image')}: allowed={d.get('allowed')}, filtered_out={d.get('filtered_out')}, used_args={d.get('used_args')}, crops={d.get('crops')}")
+            if diag_lines:
+                explanation += "\nCrop diagnostics:\n" + "\n".join(diag_lines)
             messages.append(ChatMessage(role="assistant", content=f"⚠️ {explanation}"))
             report_lines.append(f"⚠️ {explanation}")
             state.conversation = messages
