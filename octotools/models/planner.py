@@ -73,11 +73,8 @@ class Planner:
 
         return self.base_response
 
-<<<<<<< HEAD
+
     def analyze_query(self, question: str, image: str, bytes_mode: bool = False, conversation_context: str = "", **kwargs) -> str:
-=======
-    def analyze_query(self, question: str, image: str, bytes_mode: bool = False, conversation_context: str = "") -> str:
->>>>>>> Unify Planner and Executor interfaces for conversation context
         image_info = self.get_image_info(image)
         print("image_info: ", image_info)
 
