@@ -435,10 +435,6 @@ class Solver:
         return input_tokens, output_tokens, total_tokens, cost
 
     def push_reasoning_step(messages, step_id, phase, content, role="assistant"):
-        """
-        Unified interface for Reasoning Steps display (app_fb style).
-        One step = one agent decision cycle.
-        """
         messages.append(ChatMessage(
             role=role,
             content=content.strip(),
@@ -452,17 +448,17 @@ class Solver:
         user_query: str,
         user_image,
         api_key: str,
-        messages: List[ChatMessage]
+        messages: list
     ):
-        import os, time, json, psutil, traceback
-        process = psutil.Process(os.getpid())
+        import os, time, json
+        from PIL import Image
     
         self.start_time = time.time()
         self.visual_outputs_for_gradio = []
     
-        # --------------------------------------------------
-        # 0. Handle image input
-        # --------------------------------------------------
+        # ==================================================
+        # Handle image input
+        # ==================================================
         img_path = None
         if user_image:
             if isinstance(user_image, dict) and "path" in user_image:
@@ -471,16 +467,15 @@ class Solver:
                 img_path = os.path.join(self.query_cache_dir, "query_image.jpg")
                 user_image.save(img_path)
     
-        # Set tool cache
         tool_cache_dir = os.path.join(self.query_cache_dir, "tool_cache")
         self.executor.set_query_cache_dir(tool_cache_dir)
     
-        # --------------------------------------------------
+        # ==================================================
         # Step 0 · Query Analysis
-        # --------------------------------------------------
+        # ==================================================
         messages.append(ChatMessage(
             role="assistant",
-            content=f"### 📝 Received Query\n{user_query}"
+            content=f"### 📝 Query\n{user_query}"
         ))
         yield messages, "", [], "**Progress**: Query received"
     
@@ -494,16 +489,16 @@ class Solver:
         )
         yield messages, "", [], "**Progress**: Query analyzed"
     
-        # --------------------------------------------------
+        # ==================================================
         # Main agent loop
-        # --------------------------------------------------
+        # ==================================================
         step_id = 0
     
         while step_id < self.max_steps and (time.time() - self.start_time) < self.max_time:
             step_id += 1
     
             # ----------------------------------------------
-            # 1. Decide intent & tool
+            # 1. Intent & Tool
             # ----------------------------------------------
             next_step = self.planner.generate_next_step(
                 user_query,
@@ -542,12 +537,12 @@ class Solver:
                     messages,
                     step_id,
                     "Decision",
-                    f"❌ Tool `{tool_name}` not available. Skipping."
+                    f"❌ Tool `{tool_name}` not available"
                 )
                 continue
     
             # ----------------------------------------------
-            # 2. Generate command
+            # 2. Command
             # ----------------------------------------------
             tool_command = self.executor.generate_tool_command(
                 user_query,
@@ -559,8 +554,7 @@ class Solver:
                 self.memory
             )
     
-            analysis, explanation, command = \
-                self.executor.extract_explanation_and_command(tool_command)
+            _, _, command = self.executor.extract_explanation_and_command(tool_command)
     
             push_reasoning_step(
                 messages,
@@ -571,12 +565,12 @@ class Solver:
             yield messages, "", self.visual_outputs_for_gradio, f"**Progress**: Step {step_id} command generated"
     
             # ----------------------------------------------
-            # 3. Execute command
+            # 3. Execute tool
             # ----------------------------------------------
             result = self.executor.execute_tool_command(tool_name, command)
             result = make_json_serializable(result)
     
-            # Load visual outputs (append, not reset)
+            # Collect visual outputs (if any)
             if isinstance(result, dict) and "visual_outputs" in result:
                 for fp in result["visual_outputs"]:
                     try:
@@ -599,7 +593,7 @@ class Solver:
             yield messages, "", self.visual_outputs_for_gradio, f"**Progress**: Step {step_id} executed"
     
             # ----------------------------------------------
-            # 4. Update memory & decide STOP / CONTINUE
+            # 4. Decision
             # ----------------------------------------------
             self.memory.add_action(
                 step_id,
@@ -615,7 +609,6 @@ class Solver:
                 query_analysis,
                 self.memory
             )
-    
             _, conclusion = self.planner.extract_conclusion(stop_check)
     
             push_reasoning_step(
@@ -629,9 +622,9 @@ class Solver:
             if conclusion == "STOP":
                 break
     
-        # --------------------------------------------------
-        # Final output (RIGHT PANEL ONLY)
-        # --------------------------------------------------
+        # ==================================================
+        # Final answer (RIGHT PANEL ONLY)
+        # ==================================================
         final_answer = self.planner.generate_direct_output(
             user_query,
             img_path,
@@ -639,6 +632,7 @@ class Solver:
         )
     
         yield messages, final_answer, self.visual_outputs_for_gradio, "**Progress**: Completed"
+
 
     def generate_visual_description(self, tool_name: str, result: dict, visual_outputs: list) -> str:
         """
