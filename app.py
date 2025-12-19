@@ -5,7 +5,6 @@ import argparse
 import time
 import io
 import uuid
-import glob
 import torch
 import shutil
 import logging
@@ -1133,20 +1132,20 @@ class BatchPipelineRunner:
             output_dir = os.path.join(self.crops_dir, f"{img.group}_{img.image_name}_crops")
             os.makedirs(output_dir, exist_ok=True)
             try:
-                before_files = set(glob.glob(os.path.join(output_dir, "*.png")))
-                tool.run(
-                    image_path=img_path,
-                    mask_path=mask_path,
-                    output_dir=output_dir,
+                print(f"Single_Cell_Cropper_Tool invoked via callable interface for {img.group}/{img.image_name}", flush=True)
+                res = tool.execute(
+                    original_image=img_path,
+                    nuclei_mask=mask_path,
                     min_area=200,
                     margin=10,
-                    pad_to_square=True
+                    pad_to_square=True,
+                    output_dir=output_dir
                 )
-                after_files = [p for p in glob.glob(os.path.join(output_dir, "*.png")) if p not in before_files]
-                print(f"Cropping executed for {img.group}/{img.image_name}: {len(after_files)} crops saved", flush=True)
-                if len(after_files) == 0:
+                crop_paths = res.get("cell_crops") or res.get("cropped_cells") or []
+                print(f"Cropping result for {img.group}/{img.image_name}: {len(crop_paths)} crops generated", flush=True)
+                if len(crop_paths) == 0:
                     raise ValueError("Cropping produced 0 crops")
-                for idx, cp in enumerate(sorted(after_files)):
+                for idx, cp in enumerate(crop_paths):
                     try:
                         with Image.open(cp) as cimg:
                             crop_arr = np.array(cimg)
@@ -1164,6 +1163,7 @@ class BatchPipelineRunner:
                         print(f"Failed to load crop {cp}: {e}")
             except Exception as e:
                 print(f"Cropping failed for {img.group}/{img.image_name}: {e}")
+                raise
         return crops
 
     def feature_batch(self, crops: List[CellCrop]) -> List[Dict[str, Any]]:
@@ -1571,9 +1571,16 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
         # Stage: cropping (optional)
         messages.append(ChatMessage(role="assistant", content="🔍 Cropping intent: extract cells using segmentation masks"))
         report_lines.append("🔍 Cropping: attempting cell extraction from segmentation masks.")
-        crops = runner.crop_batch(batch_images, preprocessed, segmented)
+        try:
+            crops = runner.crop_batch(batch_images, preprocessed, segmented)
+        except Exception as e:
+            explanation = f"Cropping failed due to tool invocation error: {e}"
+            messages.append(ChatMessage(role="assistant", content=f"❌ {explanation}"))
+            report_lines.append(f"❌ {explanation}")
+            state.conversation = messages
+            yield messages, "\n\n".join(report_lines), gallery_output, "**Progress**: Cropping failed", state
+            return
         if not crops:
-            # Explain reason based on mask availability
             no_mask_groups = []
             for img in batch_images:
                 if not mask_available.get(img.image_id, False):
@@ -1581,9 +1588,9 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
             explanation = "No crops generated."
             if no_mask_groups:
                 explanation += " Segmentation provided nuclei-only or no usable masks for: " + ", ".join(no_mask_groups)
-                explanation += ". Cropping skipped to avoid invalid cell extraction."
+            explanation += " Cropping halted; downstream steps skipped."
             messages.append(ChatMessage(role="assistant", content=f"⚠️ {explanation}"))
-            report_lines.append(f"⚠️ Cropping skipped: {explanation}")
+            report_lines.append(f"⚠️ {explanation}")
             state.conversation = messages
             yield messages, "\n\n".join(report_lines), gallery_output, "**Progress**: Cropping produced 0 crops", state
             return
