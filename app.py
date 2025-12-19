@@ -434,562 +434,211 @@ class Solver:
         cost = self._calculate_cost(input_tokens, output_tokens)
         return input_tokens, output_tokens, total_tokens, cost
 
-    def stream_solve_user_problem(self, user_query: str, user_inputs: Optional[List[Dict[str, str]]], api_key: str, messages: List[ChatMessage]) -> Iterator:
-        import time
-        import os
-        self.start_time = time.time()
+    def push_reasoning_step(messages, step_id, phase, content, role="assistant"):
+        """
+        Unified interface for Reasoning Steps display (app_fb style).
+        One step = one agent decision cycle.
+        """
+        messages.append(ChatMessage(
+            role=role,
+            content=content.strip(),
+            metadata={
+                "title": f"### Step {step_id} · {phase}"
+            }
+        ))
+
+    def stream_solve_user_problem(
+        self,
+        user_query: str,
+        user_image,
+        api_key: str,
+        messages: List[ChatMessage]
+    ):
+        import os, time, json, psutil, traceback
         process = psutil.Process(os.getpid())
-        visual_description = "*Ready to display analysis results and processed images.*"
-        
-        # Handle image inputs (multi-input aware)
-        print(f"=== DEBUG: Image processing started ===")
-        if user_inputs:
-            print(f"DEBUG: user_inputs provided: {user_inputs}")
-        else:
-            print(f"DEBUG: user_inputs is None")
-
-        if self.analysis_session is None:
-            self.analysis_session = AnalysisSession()
-
-        if user_inputs:
-            for item in user_inputs:
-                if not item or not item.get("path"):
-                    continue
-                name = (item.get("name") or "").strip()
-                if not name:
-                    messages.append(ChatMessage(role="assistant", content="Each uploaded image must have a non-empty name."))
-                    yield messages, "", [], visual_description, "**Progress**: Error"
-                    return
-                self.analysis_session.inputs[name] = AnalysisInput(
-                    name=name,
-                    path=item["path"],
-                    input_type=item.get("type", "image")
+    
+        self.start_time = time.time()
+        self.visual_outputs_for_gradio = []
+    
+        # --------------------------------------------------
+        # 0. Handle image input
+        # --------------------------------------------------
+        img_path = None
+        if user_image:
+            if isinstance(user_image, dict) and "path" in user_image:
+                img_path = user_image["path"]
+            elif hasattr(user_image, "save"):
+                img_path = os.path.join(self.query_cache_dir, "query_image.jpg")
+                user_image.save(img_path)
+    
+        # Set tool cache
+        tool_cache_dir = os.path.join(self.query_cache_dir, "tool_cache")
+        self.executor.set_query_cache_dir(tool_cache_dir)
+    
+        # --------------------------------------------------
+        # Step 0 · Query Analysis
+        # --------------------------------------------------
+        messages.append(ChatMessage(
+            role="assistant",
+            content=f"### 📝 Received Query\n{user_query}"
+        ))
+        yield messages, "", [], "**Progress**: Query received"
+    
+        query_analysis = self.planner.analyze_query(user_query, img_path)
+    
+        push_reasoning_step(
+            messages,
+            0,
+            "Query Analysis",
+            query_analysis
+        )
+        yield messages, "", [], "**Progress**: Query analyzed"
+    
+        # --------------------------------------------------
+        # Main agent loop
+        # --------------------------------------------------
+        step_id = 0
+    
+        while step_id < self.max_steps and (time.time() - self.start_time) < self.max_time:
+            step_id += 1
+    
+            # ----------------------------------------------
+            # 1. Decide intent & tool
+            # ----------------------------------------------
+            next_step = self.planner.generate_next_step(
+                user_query,
+                img_path,
+                query_analysis,
+                self.memory,
+                step_id,
+                self.max_steps
+            )
+    
+            context, sub_goal, tool_name = \
+                self.planner.extract_context_subgoal_and_tool(next_step)
+    
+            if hasattr(self.planner, "available_tools"):
+                tool_name = normalize_tool_name(
+                    tool_name,
+                    self.planner.available_tools
                 )
-            if not self.analysis_session.active_input and self.analysis_session.inputs:
-                self.analysis_session.active_input = list(self.analysis_session.inputs.keys())[0]
-
-        if not self.analysis_session.inputs:
-            error_msg = "No images provided. Upload and name at least one image."
-            messages.append(ChatMessage(role="assistant", content=error_msg))
-            yield messages, "", [], visual_description, "**Progress**: Error"
-            return
-
-        active_input_name = self.analysis_session.active_input or list(self.analysis_session.inputs.keys())[0]
-        img_path = self.analysis_session.inputs[active_input_name].path
-        llm_img_path = normalize_image_for_llm(img_path, self.query_cache_dir)
-
-        print(f"DEBUG: active_input={active_input_name}, img_path={img_path}")
-        print(f"=== DEBUG: Image processing completed ===")
-
-        # Set tool cache directory
-        _tool_cache_dir = os.path.join(self.query_cache_dir, "tool_cache") # NOTE: This is the directory for tool cache
-        self.executor.set_query_cache_dir(_tool_cache_dir) # NOTE: set query cache directory
-        
-        # Step 1: Display the received inputs
-        messages.append(ChatMessage(role="assistant", content=f"### 📝 Received Query:\n{user_query}\n### 🖼️ Active Input: {active_input_name}"))
-        yield messages, "", [], visual_description, "**Progress**: Input received"
-
-        # [Step 3] Initialize problem-solving state
-        step_count = 0
-        json_data = {"query": user_query, "image": "Image received as bytes"}
-
-        messages.append(ChatMessage(role="assistant", content="<br>"))
-        messages.append(ChatMessage(role="assistant", content="### 🐙 Deep Thinking:"))
-        yield messages, "", [], visual_description, "**Progress**: Starting analysis"
-
-        # [Step 4] Query Analysis - This is the key step that should happen first
-        print(f"Debug - Starting query analysis for: {user_query}")
-        print(f"Debug - img_path for query analysis: {img_path} (LLM path: {llm_img_path})")
-        query_analysis_start = time.time()
-        try:
-            conversation_text = self._format_conversation_history()
-            query_analysis = self.planner.analyze_query(user_query, llm_img_path, conversation_text)
-            query_analysis_end = time.time()
-            query_analysis_time = query_analysis_end - query_analysis_start
-            print(f"Debug - Query analysis completed: {len(query_analysis)} characters")
-            
-            # Track tokens for query analysis step
-            planner_usage = self.planner.last_usage if hasattr(self.planner, 'last_usage') else None
-            qa_input_tokens, qa_output_tokens, query_analysis_tokens, query_analysis_cost = self._collect_usage_and_cost(planner_usage)
-            self.step_tokens.append(query_analysis_tokens)
-            self.step_costs.append(query_analysis_cost)
-            self.total_cost += query_analysis_cost
-
-            if query_analysis_tokens:
-                print(f"Query analysis - Input tokens: {qa_input_tokens}, Output tokens: {qa_output_tokens}")
-                print(f"Query analysis cost: ${query_analysis_cost:.6f}")
-            
-            # Track time for query analysis step
-            self.step_times.append(query_analysis_time)
-            print(f"Query analysis time: {query_analysis_time:.2f}s")
-            
-            # Track memory for query analysis step
-            mem_after_query_analysis = process.memory_info().rss / 1024 / 1024  # MB
-            self.step_memory.append(mem_after_query_analysis)
-            if mem_after_query_analysis > self.max_memory:
-                self.max_memory = mem_after_query_analysis
-            print(f"Query analysis memory usage: {mem_after_query_analysis:.2f} MB")
-            
-            # Record step information for query analysis
-            step_info = {
-                "step_number": 0,
-                "step_type": "Query Analysis",
-                "tool_name": "Query Analyzer",
-                "description": "Analyze user query and determine required skills and tools",
-                "time": query_analysis_time,
-                "tokens": query_analysis_tokens,
-                "cost": query_analysis_cost,
-                "memory": mem_after_query_analysis,
-                "input_tokens": qa_input_tokens,
-                "output_tokens": qa_output_tokens
-            }
-            self.step_info.append(step_info)
-            
-            json_data["query_analysis"] = query_analysis
-            query_analysis = query_analysis.replace("Concise Summary:", "**Concise Summary:**\n")
-            query_analysis = query_analysis.replace("Required Skills:", "**Required Skills:**")
-            query_analysis = query_analysis.replace("Relevant Tools:", "**Relevant Tools:**")
-            query_analysis = query_analysis.replace("Additional Considerations:", "**Additional Considerations:**")
-            qa_content = render_query_analysis_legacy(query_analysis) if REASONING_MODE == "legacy" else query_analysis
-            messages.append(ChatMessage(role="assistant", 
-                                        content=qa_content,
-                                        metadata={"title": "### 🔍 Step 0: Query Analysis"}))
-            yield messages, query_analysis, [], visual_description, "**Progress**: Query analysis completed"
-
-            # Save the query analysis data
-            query_analysis_data = {"query_analysis": query_analysis, "time": round(time.time() - self.start_time, 5)}
-            save_module_data(QUERY_ID, "step_0_query_analysis", query_analysis_data)
-        except Exception as e:
-            print(f"Error in query analysis: {e}")
-            error_msg = f"⚠️ Error during query analysis: {str(e)}"
-            messages.append(ChatMessage(role="assistant", 
-                                        content=error_msg,
-                                        metadata={"title": "### 🔍 Step 0: Query Analysis (Error)"}))
-            yield messages, error_msg, [], visual_description, "**Progress**: Error in query analysis"
-            return
-
-        # Execution loop (similar to your step-by-step solver)
-        while step_count < self.max_steps and (time.time() - self.start_time) < self.max_time:
-            step_count += 1
-            step_start = time.time()
-            mem_before = process.memory_info().rss / 1024 / 1024  # MB
-            messages.append(ChatMessage(role="OctoTools", 
-                                        content=f"Generating the {step_count}-th step...",
-                                        metadata={"title": f"🔄 Step {step_count}"}))
-            yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count}"
-
-            # [Step 5] Generate the next step
-            conversation_text = self._format_conversation_history()
-            next_step = self.planner.generate_next_step(user_query, llm_img_path, query_analysis, self.memory, step_count, self.max_steps, conversation_context=conversation_text)
-            context, sub_goal, tool_name = self.planner.extract_context_subgoal_and_tool(next_step)
-            context = context or self.agent_state.last_context or ""
-            sub_goal = sub_goal or self.agent_state.last_sub_goal or ""
-            step_data = {"step_count": step_count, "context": context, "sub_goal": sub_goal, "tool_name": tool_name, "time": round(time.time() - self.start_time, 5)}
-            save_module_data(QUERY_ID, f"step_{step_count}_action_prediction", step_data)
-
-            # Always normalize tool_name before use
-            if hasattr(self.planner, 'available_tools'):
-                tool_name = normalize_tool_name(tool_name, self.planner.available_tools)
-
-            # Display the step information
-            ap_content = render_action_prediction_legacy(step_count, context, sub_goal, tool_name) if REASONING_MODE == "legacy" else f"**Context:** {context}\n\n**Sub-goal:** {sub_goal}\n\n**Tool:** `{tool_name}`"
-            messages.append(ChatMessage(
-                role="assistant",
-                content=ap_content,
-                metadata={"title": f"### 🎯 Step {step_count}: Action Prediction ({tool_name})"}))
-            yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Action predicted"
-
-            # Handle tool execution or errors
+    
+            push_reasoning_step(
+                messages,
+                step_id,
+                "Intent & Tool",
+                f"""
+    **Sub-goal**
+    {sub_goal}
+    
+    **Tool**
+    `{tool_name}`
+    """
+            )
+            yield messages, "", self.visual_outputs_for_gradio, f"**Progress**: Step {step_id} planned"
+    
             if tool_name not in self.planner.available_tools:
-                messages.append(ChatMessage(
-                    role="assistant", 
-                    content=f"⚠️ Error: Tool '{tool_name}' is not available."))
-                yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Tool not available"
+                push_reasoning_step(
+                    messages,
+                    step_id,
+                    "Decision",
+                    f"❌ Tool `{tool_name}` not available. Skipping."
+                )
                 continue
-
-            # [Step 6-7] Generate and execute the tool command
-            safe_path = img_path.replace("\\", "\\\\") if img_path else None
-            conversation_text = self._format_conversation_history()
-            tool_command = self.executor.generate_tool_command(user_query, safe_path, context, sub_goal, tool_name, self.planner.toolbox_metadata[tool_name], self.memory, conversation_context=conversation_text)
-            analysis, explanation, command = self.executor.extract_explanation_and_command(tool_command)
-            # Pass previous outputs to enforce prerequisite checks
-            last_actions = self.memory.get_actions()
-            prev_outputs = last_actions[-1].get("result") if last_actions else {}
-            result = self.executor.execute_tool_command(tool_name, command, previous_outputs=prev_outputs)
+    
+            # ----------------------------------------------
+            # 2. Generate command
+            # ----------------------------------------------
+            tool_command = self.executor.generate_tool_command(
+                user_query,
+                img_path,
+                context,
+                sub_goal,
+                tool_name,
+                self.planner.toolbox_metadata[tool_name],
+                self.memory
+            )
+    
+            analysis, explanation, command = \
+                self.executor.extract_explanation_and_command(tool_command)
+    
+            push_reasoning_step(
+                messages,
+                step_id,
+                "Command",
+                f"```python\n{command}\n```"
+            )
+            yield messages, "", self.visual_outputs_for_gradio, f"**Progress**: Step {step_id} command generated"
+    
+            # ----------------------------------------------
+            # 3. Execute command
+            # ----------------------------------------------
+            result = self.executor.execute_tool_command(tool_name, command)
             result = make_json_serializable(result)
-            print(f"Tool '{tool_name}' result:", result)
-
-            # Persist result per input for later comparison
-            if self.analysis_session and self.analysis_session.active_input:
-                self.executor.record_result(self.analysis_session, self.analysis_session.active_input, f"step_{step_count}", result)
-            
-            # Generate dynamic visual description based on tool and results
-            visual_description = self.generate_visual_description(tool_name, result, self.visual_outputs_for_gradio)
-            
-            if isinstance(result, dict):
-                if "visual_outputs" in result:
-                    visual_output_files = result["visual_outputs"]
-                    # Append new visual outputs instead of reinitializing
-                    for file_path in visual_output_files:
-                        try:
-                            # Skip comparison plots and non-image files
-                            if "comparison" in os.path.basename(file_path).lower():
-                                continue
-                            if not file_path.lower().endswith(('.png', '.jpg', '.jpeg', '.tif', '.tiff')):
-                                continue
-                                
-                            # Check if file exists and is readable
-                            if not os.path.exists(file_path):
-                                print(f"Warning: Image file not found: {file_path}")
-                                continue
-                            
-                            # Check file size
-                            if os.path.getsize(file_path) == 0:
-                                print(f"Warning: Image file is empty: {file_path}")
-                                continue
-                                
-                            # Use (image, label) tuple format to preserve filename for download
-                            image = Image.open(file_path)
-                            
-                            # Validate image data
-                            if image.size[0] == 0 or image.size[1] == 0:
-                                print(f"Warning: Invalid image size: {file_path}")
-                                continue
-                            
-                            # Convert to RGB if necessary for Gradio compatibility
-                            if image.mode not in ['RGB', 'L', 'RGBA']:
-                                try:
-                                    image = image.convert('RGB')
-                                except Exception as e:
-                                    print(f"Warning: Failed to convert image {file_path} to RGB: {e}")
-                                    continue
-                            
-                            # Additional validation for image data
-                            try:
-                                # Test if image can be converted to array
-                                img_array = np.array(image)
-                                if img_array.size == 0 or np.isnan(img_array).any():
-                                    print(f"Warning: Invalid image data in {file_path}")
-                                    continue
-                            except Exception as e:
-                                print(f"Warning: Failed to validate image data for {file_path}: {e}")
-                                continue
-                            
-                            filename = os.path.basename(file_path)
-                            
-                            # Create descriptive label based on filename
-                            if "processed" in filename.lower():
-                                label = f"Processed Image: {filename}"
-                            elif "corrected" in filename.lower():
-                                label = f"Illumination Corrected: {filename}"
-                            elif "segmented" in filename.lower():
-                                label = f"Segmented Result: {filename}"
-                            elif "detected" in filename.lower():
-                                label = f"Detection Result: {filename}"
-                            elif "zoomed" in filename.lower():
-                                label = f"Zoomed Region: {filename}"
-                            elif "crop" in filename.lower():
-                                label = f"Single Cell Crop: {filename}"
-                            else:
-                                label = f"Analysis Result: {filename}"
-                            
-                            self.visual_outputs_for_gradio.append((image, label))
-                            print(f"Successfully loaded image for Gradio: {filename}")
-                            
-                        except Exception as e:
-                            print(f"Warning: Failed to load image {file_path} for Gradio. Error: {e}")
-                            import traceback
-                            print(f"Full traceback: {traceback.format_exc()}")
-                            continue
-
-            # Display the command generation information
-            cg_content = render_command_generation_legacy(step_count, tool_name, analysis, explanation, command) if REASONING_MODE == "legacy" else f"**Analysis:** {analysis}\n\n**Explanation:** {explanation}\n\n**Command:**\n```python\n{command}\n```"
-            messages.append(ChatMessage(
-                role="assistant",
-                content=cg_content,
-                metadata={"title": f"### 📝 Step {step_count}: Command Generation ({tool_name})"}))
-            yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Command generated"
-
-            # Save the command generation data
-            command_generation_data = {
-                "analysis": analysis,
-                "explanation": explanation,
-                "command": command,
-                "time": round(time.time() - self.start_time, 5)
-            }
-            save_module_data(QUERY_ID, f"step_{step_count}_command_generation", command_generation_data)
-            
-            # Display the command execution result
-            ce_content = render_command_execution_legacy(step_count, tool_name, result) if REASONING_MODE == "legacy" else f"**Result:**\n```json\n{json.dumps(make_json_serializable(result), indent=4)}\n```"
-            messages.append(ChatMessage(
-                role="assistant",
-                content=ce_content,
-                metadata={"title": f"### 🛠️ Step {step_count}: Command Execution ({tool_name})"}))
-            yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Command executed"
-
-            # If comparisons are requested and multiple inputs exist, generate a lightweight comparison summary
-            if self.analysis_session and self.analysis_session.compare_requested and len(self.analysis_session.inputs) > 1:
-                comparison_summary = self.executor.compare_results(self.analysis_session)
-                if comparison_summary:
-                    messages.append(ChatMessage(
-                        role="assistant",
-                        content=f"**Comparison across inputs:** {comparison_summary}",
-                        metadata={"title": f"### 📊 Step {step_count}: Comparative Analysis"}))
-                    yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Comparison updated"
-
-            # Save the command execution data
-            command_execution_data = {
-                "result": result,
-                "time": round(time.time() - self.start_time, 5)
-            }
-            save_module_data(QUERY_ID, f"step_{step_count}_command_execution", command_execution_data)
-
-            # [Step 8] Memory update and stopping condition
-            self.memory.add_action(step_count, tool_name, sub_goal, tool_command, result)
-            conversation_text = self._format_conversation_history()
-            stop_verification = self.planner.verificate_memory(user_query, llm_img_path, query_analysis, self.memory, conversation_context=conversation_text)
-            context_verification, conclusion = self.planner.extract_conclusion(stop_verification)
-
-            # Save the context verification data
-            context_verification_data = {
-                "stop_verification": context_verification,
-                "conclusion": conclusion,
-                "time": round(time.time() - self.start_time, 5)
-            }
-            save_module_data(QUERY_ID, f"step_{step_count}_context_verification", context_verification_data)    
-
-            # Display the context verification result
-            conclusion_emoji = "✅" if conclusion == 'STOP' else "🛑"
-            cv_content = render_context_verification_legacy(step_count, context_verification, conclusion) if REASONING_MODE == "legacy" else f"**Analysis:**\n{context_verification}\n\n**Conclusion:** `{conclusion}` {conclusion_emoji}"
-            messages.append(ChatMessage(
-                role="assistant", 
-                content=cv_content,
-                metadata={"title": f"### 🤖 Step {step_count}: Context Verification"}))
-            yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Context verified"
-
-            # After tool execution, estimate tokens and cost
-            planner_usage = self.planner.last_usage if hasattr(self.planner, 'last_usage') else None
-            input_tokens, output_tokens, tokens_used, cost = self._collect_usage_and_cost(planner_usage, result)
-
-            print(f"Step {step_count} - Input tokens: {input_tokens}, Output tokens: {output_tokens}")
-            print(f"Step {step_count} - Total tokens: {tokens_used}, Cost: ${cost:.6f}")
-            
-            self.step_tokens.append(tokens_used)
-            self.step_costs.append(cost)
-            self.total_cost += cost
-            mem_after = process.memory_info().rss / 1024 / 1024  # MB
-            self.step_memory.append(mem_after)
-            if mem_after > self.max_memory:
-                self.max_memory = mem_after
-            step_end = time.time()
-            self.step_times.append(step_end - step_start)
-
-            # Record step information for tool execution
-            context_text = context or self.agent_state.last_context or ""
-            sub_goal_text = sub_goal or self.agent_state.last_sub_goal or ""
-            self.agent_state.last_context = context_text
-            self.agent_state.last_sub_goal = sub_goal_text
-            step_info = {
-                "step_number": step_count,
-                "step_type": "Tool Execution",
-                "tool_name": tool_name,
-                "description": f"Execute {tool_name} with sub-goal: {sub_goal_text[:100]}...",
-                "time": step_end - step_start,
-                "tokens": tokens_used,
-                "cost": cost,
-                "memory": mem_after,
-                "input_tokens": input_tokens,
-                "output_tokens": output_tokens,
-                "context": context_text[:200] + "..." if len(context_text) > 200 else context_text,
-                "sub_goal": sub_goal_text[:200] + "..." if len(sub_goal_text) > 200 else sub_goal_text
-            }
-            self.step_info.append(step_info)
-
-            if conclusion == 'STOP':
+    
+            # Load visual outputs (append, not reset)
+            if isinstance(result, dict) and "visual_outputs" in result:
+                for fp in result["visual_outputs"]:
+                    try:
+                        if os.path.exists(fp):
+                            img = Image.open(fp).convert("RGB")
+                            self.visual_outputs_for_gradio.append(
+                                (img, os.path.basename(fp))
+                            )
+                    except Exception:
+                        pass
+    
+            result_preview = json.dumps(result, indent=2)[:2000]
+    
+            push_reasoning_step(
+                messages,
+                step_id,
+                "Result",
+                f"```json\n{result_preview}\n```"
+            )
+            yield messages, "", self.visual_outputs_for_gradio, f"**Progress**: Step {step_id} executed"
+    
+            # ----------------------------------------------
+            # 4. Update memory & decide STOP / CONTINUE
+            # ----------------------------------------------
+            self.memory.add_action(
+                step_id,
+                tool_name,
+                sub_goal,
+                tool_command,
+                result
+            )
+    
+            stop_check = self.planner.verificate_memory(
+                user_query,
+                img_path,
+                query_analysis,
+                self.memory
+            )
+    
+            _, conclusion = self.planner.extract_conclusion(stop_check)
+    
+            push_reasoning_step(
+                messages,
+                step_id,
+                "Decision",
+                f"**Conclusion**: `{conclusion}`"
+            )
+            yield messages, "", self.visual_outputs_for_gradio, f"**Progress**: Step {step_id} decided"
+    
+            if conclusion == "STOP":
                 break
-
-        self.end_time = time.time()
-
-        # Step 7: Generate Final Output (if needed)
-        final_answer = ""
-        if 'direct' in self.output_types:
-            messages.append(ChatMessage(role="assistant", content="<br>"))
-            final_output_start = time.time()
-            conversation_text = self._format_conversation_history()
-            direct_output = self.planner.generate_direct_output(user_query, llm_img_path, self.memory, conversation_context=conversation_text)
-            final_output_end = time.time()
-            final_output_time = final_output_end - final_output_start
-            
-            # Track tokens for final output generation
-            planner_usage = self.planner.last_usage if hasattr(self.planner, 'last_usage') else None
-            direct_input_tokens, direct_output_tokens, final_output_tokens, final_output_cost = self._collect_usage_and_cost(planner_usage)
-            self.step_tokens.append(final_output_tokens)
-            self.step_costs.append(final_output_cost)
-            self.total_cost += final_output_cost
-
-            if final_output_tokens:
-                print(f"Final output - Input tokens: {direct_input_tokens}, Output tokens: {direct_output_tokens}")
-                print(f"Final output cost: ${final_output_cost:.6f}")
-            
-            # Track time for final output generation
-            self.step_times.append(final_output_time)
-            print(f"Final output time: {final_output_time:.2f}s")
-            
-            # Track memory for final output generation
-            mem_after_final_output = process.memory_info().rss / 1024 / 1024  # MB
-            self.step_memory.append(mem_after_final_output)
-            if mem_after_final_output > self.max_memory:
-                self.max_memory = mem_after_final_output
-            print(f"Final output memory usage: {mem_after_final_output:.2f} MB")
-            
-            # Record step information for final output generation
-            final_step_info = {
-                "step_number": len(self.step_info),
-                "step_type": "Final Output Generation",
-                "tool_name": "Direct Output Generator",
-                "description": "Generate final comprehensive answer based on all previous steps",
-                "time": final_output_time,
-                "tokens": final_output_tokens,
-                "cost": final_output_cost,
-                "memory": mem_after_final_output,
-                "input_tokens": direct_input_tokens,
-                "output_tokens": direct_output_tokens
-            }
-            self.step_info.append(final_step_info)
-            
-            # Extract conclusion from the final answer
-            if isinstance(direct_output, str):
-                conclusion_text = direct_output.strip()
-            elif isinstance(direct_output, dict):
-                # 你可以自定义错误信息或提取dict中的message
-                conclusion_text = str(direct_output)
-            else:
-                conclusion_text = str(direct_output)
-            
-            # Step-by-step breakdown
-            conclusion = f"🐙 **Conclusion:**\n{conclusion_text}\n\n---\n"
-            conclusion += f"**📊 Detailed Performance Statistics**\n\n"
-            
-            # Step-by-step breakdown
-            conclusion += f"**Step-by-Step Analysis:**\n"
-            
-            # Display detailed step information
-            for i, step in enumerate(self.step_info):
-                conclusion += f"**Step {step['step_number']}: {step['step_type']}**\n"
-                conclusion += f"  • Tool: {step['tool_name']}\n"
-                conclusion += f"  • Description: {step['description']}\n"
-                conclusion += f"  • Time: {step['time']:.2f}s\n"
-                conclusion += f"  • Tokens: {step['tokens']} (Input: {step['input_tokens']}, Output: {step['output_tokens']})\n"
-                conclusion += f"  • Cost: ${step['cost']:.6f}\n"
-                conclusion += f"  • Memory: {step['memory']:.2f} MB\n"
-                
-                # Add context and sub-goal for tool execution steps
-                if step['step_type'] == "Tool Execution" and 'context' in step:
-                    conclusion += f"  • Context: {step['context']}\n"
-                    if 'sub_goal' in step and step['sub_goal'] != "":
-                        conclusion += f"  • Sub-goal: {step['sub_goal']}\n"
-                
-                conclusion += "\n"
-            
-            # Summary statistics
-            total_tokens_used = sum(self.step_tokens)
-            conclusion += f"**📈 Summary Statistics:**\n"
-            conclusion += f"  • Total Steps: {len(self.step_times)}\n"
-            conclusion += f"  • Total Time: {self.end_time - self.start_time:.2f}s\n"
-            conclusion += f"  • Total Tokens: {total_tokens_used}\n"
-            conclusion += f"  • Total Cost: ${self.total_cost:.6f}\n"
-            conclusion += f"  • Peak Memory: {self.max_memory:.2f} MB\n"
-            avg_time_per_step = (self.end_time - self.start_time) / len(self.step_times) if self.step_times else 0
-            conclusion += f"  • Average Time per Step: {avg_time_per_step:.2f}s\n"
-            if total_tokens_used > 0:
-                conclusion += f"  • Average Tokens per Step: {total_tokens_used / len(self.step_tokens):.1f}\n"
-                conclusion += f"  • Cost per Token: ${self.total_cost / total_tokens_used:.8f}\n"
-            
-            # Raw data for reference
-            conclusion += f"\n**📋 Raw Data (for reference):**\n"
-            conclusion += f"  • Step Times: {[f'{t:.2f}s' for t in self.step_times]}\n"
-            conclusion += f"  • Step Tokens: {self.step_tokens}\n"
-            conclusion += f"  • Step Costs: {[f'${c:.6f}' for c in self.step_costs]}\n"
-            conclusion += f"  • Step Memory: {[f'{m:.2f}MB' for m in self.step_memory]}\n"
-            
-            # Add model-specific pricing information
-            model_config = None
-            for config in OPENAI_MODEL_CONFIGS.values():
-                if config.get("model_id") == self.planner.llm_engine_name:
-                    model_config = config
-                    break
-            
-            if model_config and 'input_cost_per_1k_tokens' in model_config:
-                conclusion += f"\n**🔧 Model Configuration:**\n"
-                conclusion += f"  • Model: {self.planner.llm_engine_name}\n"
-                conclusion += f"  • Input Cost: ${model_config['input_cost_per_1k_tokens']:.6f} per 1K tokens\n"
-                conclusion += f"  • Output Cost: ${model_config['output_cost_per_1k_tokens']:.6f} per 1K tokens\n"
-                conclusion += f"  • Pricing Source: OpenAI Official Pricing (2024)\n"
-            
-            final_answer = f"{conclusion}"
-            yield messages, final_answer, self.visual_outputs_for_gradio, visual_description, "**Progress**: Completed!"
-
-            # Save the direct output data
-            direct_output_data = {
-                "direct_output": direct_output,
-                "time": round(time.time() - self.start_time, 5)
-            }
-            save_module_data(QUERY_ID, "direct_output", direct_output_data)
-
-        if 'final' in self.output_types:
-            final_output_start = time.time()
-            conversation_text = self._format_conversation_history()
-            final_output = self.planner.generate_final_output(user_query, img_path, self.memory, conversation_context=conversation_text) # Disabled visibility for now
-            final_output_end = time.time()
-            final_output_time = final_output_end - final_output_start
-            # messages.append(ChatMessage(role="assistant", content=f"🎯 Final Output:\n{final_output}"))
-            # yield messages
-
-            planner_usage = self.planner.last_usage if hasattr(self.planner, 'last_usage') else None
-            final_input_tokens, final_output_tokens, final_total_tokens, final_output_cost = self._collect_usage_and_cost(planner_usage)
-            self.step_tokens.append(final_total_tokens)
-            self.step_costs.append(final_output_cost)
-            self.total_cost += final_output_cost
-
-            if final_total_tokens:
-                print(f"Final output - Input tokens: {final_input_tokens}, Output tokens: {final_output_tokens}")
-                print(f"Final output cost: ${final_output_cost:.6f}")
-
-            # Track time for final output generation
-            self.step_times.append(final_output_time)
-            print(f"Final output time: {final_output_time:.2f}s")
-            mem_after_final_generation = process.memory_info().rss / 1024 / 1024  # MB
-            self.step_memory.append(mem_after_final_generation)
-            if mem_after_final_generation > self.max_memory:
-                self.max_memory = mem_after_final_generation
-
-            final_step_info = {
-                "step_number": len(self.step_info),
-                "step_type": "Final Output Generation",
-                "tool_name": "Final Output Generator",
-                "description": "Generate final follow-up answer",
-                "time": final_output_time,
-                "tokens": final_total_tokens,
-                "cost": final_output_cost,
-                "memory": mem_after_final_generation,
-                "input_tokens": final_input_tokens,
-                "output_tokens": final_output_tokens
-            }
-            self.step_info.append(final_step_info)
-
-            # Save the final output data
-            final_output_data = {
-                "final_output": final_output,
-                "time": round(time.time() - self.start_time, 5)
-            }
-            save_module_data(QUERY_ID, "final_output", final_output_data)
-
-        # Step 8: Completion Message
-        messages.append(ChatMessage(role="assistant", content="<br>"))
-        messages.append(ChatMessage(role="assistant", content="### ✅ Query Solved!"))
-        # Use the final answer if available, otherwise use a default message
-        completion_text = final_answer if final_answer else "Analysis completed successfully"
-        yield messages, completion_text, self.visual_outputs_for_gradio, visual_description, "**Progress**: Analysis completed!"
+    
+        # --------------------------------------------------
+        # Final output (RIGHT PANEL ONLY)
+        # --------------------------------------------------
+        final_answer = self.planner.generate_direct_output(
+            user_query,
+            img_path,
+            self.memory
+        )
+    
+        yield messages, final_answer, self.visual_outputs_for_gradio, "**Progress**: Completed"
 
     def generate_visual_description(self, tool_name: str, result: dict, visual_outputs: list) -> str:
         """
