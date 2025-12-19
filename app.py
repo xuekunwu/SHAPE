@@ -70,23 +70,47 @@ def make_json_serializable(obj):
     else:
         return obj
 
-def sanitize_user_path(path: str) -> str:
+def sanitize_user_path(path: str) -> Path:
     """
-    Basic path sanitation to avoid traversal (Issue 7).
+    Securely ingest user file paths.
+    - Accept workspace-local paths.
+    - For Gradio temp uploads (/tmp/gradio/**), copy into workspace/uploads and return the new Path.
+    - Reject all other locations. (Security hardening)
     """
     if not path:
-        return path
-    norm = os.path.abspath(path)
-    # Reject paths that escape workspace
-    workspace = os.path.abspath(os.getcwd())
-    if not norm.startswith(workspace):
-        raise ValueError(f"Rejected path outside workspace: {path}")
-    if not os.path.exists(norm):
+        return Path(path)
+
+    workspace = Path(os.getcwd()).resolve()
+    uploads_dir = workspace / "workspace" / "uploads"
+    uploads_dir.mkdir(parents=True, exist_ok=True)
+
+    norm = Path(path).resolve()
+    if not norm.exists():
         raise ValueError(f"File not found: {path}")
+
     max_size_mb = 500
-    if os.path.getsize(norm) > max_size_mb * 1024 * 1024:
+    if norm.stat().st_size > max_size_mb * 1024 * 1024:
         raise ValueError(f"File too large (> {max_size_mb} MB): {path}")
-    return norm
+
+    allowed_ext = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".gif"}
+
+    if norm.is_file() and norm.suffix.lower() not in allowed_ext:
+        raise ValueError(f"Unsupported file type: {norm.suffix}")
+
+    # Already inside workspace -> accept
+    if str(norm).startswith(str(workspace)):
+        return norm
+
+    # Gradio staging area -> copy into workspace/uploads
+    gradio_tmp = Path("/tmp/gradio").resolve()
+    if str(norm).startswith(str(gradio_tmp)):
+        dest = uploads_dir / f"{uuid.uuid4().hex}_{norm.name}"
+        shutil.copy2(norm, dest)
+        print(f"Ingested upload from {norm} -> {dest}")
+        return dest.resolve()
+
+    # Everything else rejected
+    raise ValueError(f"Rejected path outside workspace: {path}")
 
 # Filter model configs to only include OpenAI models
 def get_openai_model_configs():
