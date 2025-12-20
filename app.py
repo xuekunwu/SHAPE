@@ -1441,7 +1441,7 @@ def main(args):
                     "Text_Detector_Tool",
                     "Advanced_Object_Detector_Tool"
                 ]
-                tools_dropdown = gr.Dropdown(choices=all_tools_flat, value=all_tools_flat, multiselect=True, label="Select Tools")
+                tools_dropdown = gr.Dropdown(choices=all_tools_flat, value=all_tools_flat, multiselect=False, label="Select Tools")
 
         # Main interaction row: left (uploads + question), right (conversation)
         with gr.Row():
