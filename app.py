@@ -296,6 +296,24 @@ def store_artifact(state: "AgentState", group_name: str, tool_name: str, key: st
     state.image_groups[group_name]["artifacts"][tool_name].append(entry)
 
 
+def get_question_result(state: "AgentState", question: str) -> QuestionResult | None:
+    for qr in state.question_results:
+        if qr.question.strip() == str(question).strip():
+            return qr
+    return None
+
+
+def record_question_result(state: "AgentState", question: str, status: str, final_answer: str = "", error: str = ""):
+    existing = get_question_result(state, question)
+    if existing:
+        existing.status = status
+        existing.final_answer = final_answer
+        existing.error = error
+        existing.created_at = time.time()
+    else:
+        state.question_results.append(QuestionResult(question=question, status=status, final_answer=final_answer, error=error))
+
+
 def add_image_to_group(group_name: str, user_image, state: "AgentState", images_dir: Path, features_dir: Path) -> str:
     """Store an uploaded image into a session-level group and cache its features."""
     if not user_image:
@@ -370,6 +388,15 @@ class ImageContext:
 
 
 @dataclass
+class QuestionResult:
+    question: str
+    status: str  # "SUCCESS" | "FAILED"
+    final_answer: str = ""
+    error: str = ""
+    created_at: float = field(default_factory=time.time)
+
+
+@dataclass
 class AgentState:
     """Persistent session state to survive across turns."""
     conversation: List[ChatMessage] = field(default_factory=list)
@@ -379,6 +406,7 @@ class AgentState:
     image_context: ImageContext = None
     image_groups: Dict[str, Dict[str, Any]] = field(default_factory=dict)  # {group: {"images": [...], "features": [...], "artifacts": {tool_name: [..]}} }
     last_group_name: str = ""
+    question_results: List[QuestionResult] = field(default_factory=list)
     session_id: str = field(default_factory=lambda: uuid.uuid4().hex)
 
 def normalize_tool_name(tool_name: str, available_tools=None) -> str:
@@ -979,6 +1007,8 @@ class Solver:
                 "time": round(time.time() - self.start_time, 5)
             }
             save_module_data(QUERY_ID, "direct_output", direct_output_data)
+            # Record success for this question
+            record_question_result(self.agent_state, user_query, status="SUCCESS", final_answer=final_answer)
 
         if 'final' in self.output_types:
             final_output_start = time.time()
@@ -1027,6 +1057,9 @@ class Solver:
                 "time": round(time.time() - self.start_time, 5)
             }
             save_module_data(QUERY_ID, "final_output", final_output_data)
+            # Record success for this question if not already recorded
+            if not get_question_result(self.agent_state, user_query):
+                record_question_result(self.agent_state, user_query, status="SUCCESS", final_answer=str(final_output))
 
         # Step 8: Completion Message
         messages.append(ChatMessage(role="assistant", content="<br>"))
@@ -1146,6 +1179,15 @@ def solve_problem_gradio(user_query, group_name, max_steps=10, max_time=60, llm_
     messages: List[ChatMessage] = list(state.conversation)
     if user_query:
         messages.append(ChatMessage(role="user", content=str(user_query)))
+
+    # Short-circuit if we already answered this question successfully
+    cached_qr = get_question_result(state, user_query) if user_query else None
+    if cached_qr and cached_qr.status == "SUCCESS":
+        reuse_msg = f"♻️ Previously answered this question. Reusing stored result."
+        answer_msg = cached_qr.final_answer or "Stored result (no answer text)."
+        new_history = messages + [gr.ChatMessage(role="assistant", content=reuse_msg), gr.ChatMessage(role="assistant", content=answer_msg)]
+        state.conversation = new_history
+        return new_history, cached_qr.final_answer, [], "**Progress**: Reused prior answer", state
     
     # Find the model config by model_id
     selected_model_config = None
@@ -1342,6 +1384,7 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
         import traceback
         error_traceback = traceback.format_exc()
         print(f"Full traceback: {error_traceback}")
+        record_question_result(state, user_query, status="FAILED", final_answer="", error=str(e))
         
         # Create error message for UI
         error_message = f"⚠️ Error occurred during analysis:\n\n**Error Type:** {type(e).__name__}\n**Error Message:** {str(e)}\n\nPlease check your input and try again."
