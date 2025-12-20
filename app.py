@@ -1,3 +1,4 @@
+from __future__ import annotations
 import os
 import sys
 repo_root = os.path.dirname(os.path.abspath(__file__))
@@ -275,7 +276,7 @@ def make_artifact_key(tool_name: str, image_path: str, context: str = "", sub_go
     return hasher.hexdigest()
 
 
-def get_cached_artifact(state: AgentState, group_name: str, tool_name: str, key: str):
+def get_cached_artifact(state: "AgentState", group_name: str, tool_name: str, key: str):
     group = state.image_groups.get(group_name, {})
     artifacts = group.get("artifacts", {}).get(tool_name, [])
     for art in artifacts:
@@ -284,7 +285,7 @@ def get_cached_artifact(state: AgentState, group_name: str, tool_name: str, key:
     return None
 
 
-def store_artifact(state: AgentState, group_name: str, tool_name: str, key: str, result: Any):
+def store_artifact(state: "AgentState", group_name: str, tool_name: str, key: str, result: Any):
     state.image_groups.setdefault(group_name, {"images": [], "features": [], "artifacts": {}})
     state.image_groups[group_name].setdefault("artifacts", {}).setdefault(tool_name, [])
     entry = {
