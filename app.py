@@ -337,63 +337,79 @@ def record_question_result(state: "AgentState", question: str, status: str, fina
 
 
 def add_image_to_group(group_name: str, user_image, state: "AgentState", images_dir: Path, features_dir: Path) -> str:
-    """Store an uploaded image into a session-level group and cache its features."""
+    """Store uploaded image(s) into a session-level group and cache their features."""
     if not user_image:
         return "⚠️ No image provided."
+    images = user_image if isinstance(user_image, list) else [user_image]
     group = group_name.strip() or "default"
     state.image_groups.setdefault(group, {"images": [], "features": [], "artifacts": {}})
 
-    fingerprint = compute_image_fingerprint(user_image)
-    for entry in state.image_groups[group]["images"]:
-        if entry.get("fingerprint") == fingerprint:
-            state.last_group_name = group
-            state.image_context = ImageContext(
-                image_id=entry["image_id"],
-                image_path=entry["image_path"],
-                features_path=entry.get("features_path", ""),
-                fingerprint=fingerprint,
-                source_type="group"
-            )
-            return f"✅ Image already cached in group '{group}'. Reusing existing features."
-
-    image_id = uuid.uuid4().hex
+    added = 0
+    reused = 0
     group_image_dir = images_dir / group
     group_image_dir.mkdir(parents=True, exist_ok=True)
-    image_path = group_image_dir / f"{image_id}.jpg"
-    try:
-        if isinstance(user_image, dict) and 'path' in user_image:
-            shutil.copy(user_image['path'], image_path)
-        elif isinstance(user_image, str) and os.path.exists(user_image):
-            shutil.copy(user_image, image_path)
-        elif hasattr(user_image, "save"):
-            user_image.save(image_path)
-        else:
-            raise ValueError(f"Unsupported image type: {type(user_image)}")
-    except Exception as e:
-        print(f"Error caching uploaded image: {e}")
-        traceback.print_exc()
-        return f"❌ Failed to save image to group '{group}': {e}"
 
-    feature_path = encode_image_features(str(image_path), features_dir / group)
-    entry = {
-        "image_id": image_id,
-        "image_path": str(image_path),
-        "fingerprint": fingerprint,
-        "features_path": feature_path
-    }
-    state.image_groups[group]["images"].append(entry)
-    if feature_path:
-        state.image_groups[group]["features"].append(feature_path)
-    # Preserve existing artifacts; already initialized above
+    for img in images:
+        fingerprint = compute_image_fingerprint(img)
+        already = False
+        for entry in state.image_groups[group]["images"]:
+            if entry.get("fingerprint") == fingerprint and fingerprint:
+                reused += 1
+                already = True
+                state.image_context = ImageContext(
+                    image_id=entry["image_id"],
+                    image_path=entry["image_path"],
+                    features_path=entry.get("features_path", ""),
+                    fingerprint=fingerprint,
+                    source_type="group"
+                )
+                break
+        if already:
+            continue
+
+        image_id = uuid.uuid4().hex
+        image_path = group_image_dir / f"{image_id}.jpg"
+        try:
+            if isinstance(img, dict) and 'path' in img:
+                shutil.copy(img['path'], image_path)
+            elif isinstance(img, str) and os.path.exists(img):
+                shutil.copy(img, image_path)
+            elif hasattr(img, "save"):
+                img.save(image_path)
+            else:
+                raise ValueError(f"Unsupported image type: {type(img)}")
+        except Exception as e:
+            print(f"Error caching uploaded image: {e}")
+            traceback.print_exc()
+            continue
+
+        feature_path = encode_image_features(str(image_path), features_dir / group)
+        entry = {
+            "image_id": image_id,
+            "image_path": str(image_path),
+            "fingerprint": fingerprint,
+            "features_path": feature_path
+        }
+        state.image_groups[group]["images"].append(entry)
+        if feature_path:
+            state.image_groups[group]["features"].append(feature_path)
+        added += 1
+        state.image_context = ImageContext(
+            image_id=image_id,
+            image_path=str(image_path),
+            features_path=feature_path,
+            fingerprint=fingerprint,
+            source_type="group"
+        )
+
     state.last_group_name = group
-    state.image_context = ImageContext(
-        image_id=image_id,
-        image_path=str(image_path),
-        features_path=feature_path,
-        fingerprint=fingerprint,
-        source_type="group"
-    )
-    return f"✅ Added image to group '{group}' and cached features."
+    if added and reused:
+        return f"✅ Added {added} new image(s) to group '{group}', reused {reused} existing."
+    elif added:
+        return f"✅ Added {added} new image(s) to group '{group}'."
+    elif reused:
+        return f"♻️ Reused {reused} existing image(s) in group '{group}'."
+    return f"⚠️ No images added."
 
 ########### End of Test Huggingface Dataset ###########
 
@@ -1457,7 +1473,7 @@ def main(args):
         with gr.Row():
             with gr.Column(scale=1):
                 gr.Markdown("### 📤 Image Groups")
-                user_image = gr.Image(label="Upload an Image", type="pil", height=240)
+                user_image = gr.Image(label="Upload Images", type="pil", height=240, file_count="multiple")
                 group_name_input = gr.Textbox(label="Image Group Name", placeholder="e.g., control, drugA, replicate1", value="control")
                 upload_btn = gr.Button("Add Image to Group", variant="primary")
                 upload_status_md = gr.Markdown("**Upload Status**: No uploads yet")
