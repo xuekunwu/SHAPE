@@ -1447,7 +1447,6 @@ def main(args):
         with gr.Row():
             with gr.Column(scale=1):
                 gr.Markdown("### 📤 Image Groups")
-                gr.Markdown("Upload images into named groups (e.g., control, drugA). Each upload appends to the group and caches features; no reasoning is run here.")
                 user_image = gr.Image(label="Upload an Image", type="pil", height=240)
                 group_name_input = gr.Textbox(label="Image Group Name", placeholder="e.g., control, drugA, replicate1", value="control")
                 upload_btn = gr.Button("Add Image to Group", variant="primary")
