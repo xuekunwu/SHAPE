@@ -29,6 +29,8 @@ from llm_evaluation_scripts.hf_model_configs import HF_MODEL_CONFIGS
 from datetime import datetime
 from octotools.models.utils import make_json_serializable, VisualizationConfig, normalize_tool_name
 from dataclasses import dataclass, field
+from octotools.registry import REGISTRY
+from octotools.models.tool_adapter import load_adapter
 
 # Add the project root to the Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -486,11 +488,15 @@ class Solver:
 
             # [Step 5] Generate the next step
             conversation_text = self._format_conversation_history()
-            next_step = self.planner.generate_next_step(user_query, img_path, query_analysis, self.memory, step_count, self.max_steps, conversation_context=conversation_text)
-            context, sub_goal, tool_name = self.planner.extract_context_subgoal_and_tool(next_step)
-            context = context or self.agent_state.last_context or ""
-            sub_goal = sub_goal or self.agent_state.last_sub_goal or ""
-            step_data = {"step_count": step_count, "context": context, "sub_goal": sub_goal, "tool_name": tool_name, "time": round(time.time() - self.start_time, 5)}
+            plan = self.planner.generate_next_step(user_query, img_path, query_analysis, self.memory, step_count, self.max_steps, conversation_context=conversation_text)
+            # Resolve tool name via capability if absent
+            tool_name = plan.tool_name
+            if not tool_name:
+                candidates = [spec.name for spec in REGISTRY.by_capability(plan.capability) if spec.name in self.planner.available_tools]
+                tool_name = candidates[0] if candidates else None
+            context = "; ".join(plan.required_inputs) if getattr(plan, "required_inputs", None) else ""
+            sub_goal = getattr(plan, "rationale", "")
+            step_data = {"step_count": step_count, "capability": plan.capability, "context": context, "sub_goal": sub_goal, "tool_name": tool_name, "time": round(time.time() - self.start_time, 5)}
             save_module_data(QUERY_ID, f"step_{step_count}_action_prediction", step_data)
 
             # Always normalize tool_name before use
@@ -505,19 +511,36 @@ class Solver:
             yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Action predicted"
 
             # Handle tool execution or errors
-            if tool_name not in self.planner.available_tools:
+            if not tool_name or tool_name not in self.planner.available_tools:
                 messages.append(ChatMessage(
                     role="assistant", 
                     content=f"⚠️ Error: Tool '{tool_name}' is not available."))
                 yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Tool not available"
                 continue
 
-            # [Step 6-7] Generate and execute the tool command
-            safe_path = img_path.replace("\\", "\\\\") if img_path else None
-            conversation_text = self._format_conversation_history()
-            tool_command = self.executor.generate_tool_command(user_query, safe_path, context, sub_goal, tool_name, self.planner.toolbox_metadata[tool_name], self.memory, conversation_context=conversation_text)
-            analysis, explanation, command = self.executor.extract_explanation_and_command(tool_command)
-            result = self.executor.execute_tool_command(tool_name, command)
+            # [Step 6-7] Generate and execute the tool arguments via adapter (no exec)
+            spec = REGISTRY.get(tool_name)
+            if not spec:
+                messages.append(ChatMessage(role="assistant", content=f"⚠️ Error: Tool spec missing for '{tool_name}'."))
+                yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Spec missing"
+                continue
+            try:
+                adapter = load_adapter(spec.adapter_path)
+            except Exception as e:
+                messages.append(ChatMessage(role="assistant", content=f"⚠️ Error loading adapter for {tool_name}: {e}"))
+                yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Adapter load error"
+                continue
+
+            args_dict = self.executor.generate_tool_arguments(
+                user_query,
+                context,
+                sub_goal,
+                tool_name,
+                self.planner.toolbox_metadata.get(tool_name, {}),
+                adapter,
+                self.memory
+            )
+            result = self.executor.execute_tool(tool_name, args_dict)
             result = make_json_serializable(result)
             print(f"Tool '{tool_name}' result:", result)
             
@@ -600,38 +623,36 @@ class Solver:
                             print(f"Full traceback: {traceback.format_exc()}")
                             continue
 
-            # Display the command generation information
+            # Display argument generation info
             messages.append(ChatMessage(
                 role="assistant",
-                content=f"**Analysis:** {analysis}\n\n**Explanation:** {explanation}\n\n**Command:**\n```python\n{command}\n```",
-                metadata={"title": f"### 📝 Step {step_count}: Command Generation ({tool_name})"}))
-            yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Command generated"
+                content=f"**Capability:** {plan.capability}\n\n**Tool:** `{tool_name}`\n\n**Arguments:**\n```json\n{json.dumps(args_dict, indent=4)}\n```",
+                metadata={"title": f"### 📝 Step {step_count}: Arguments ({tool_name})"}))
+            yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Arguments prepared"
 
-            # Save the command generation data
             command_generation_data = {
-                "analysis": analysis,
-                "explanation": explanation,
-                "command": command,
+                "capability": plan.capability,
+                "tool": tool_name,
+                "args": args_dict,
                 "time": round(time.time() - self.start_time, 5)
             }
-            save_module_data(QUERY_ID, f"step_{step_count}_command_generation", command_generation_data)
+            save_module_data(QUERY_ID, f"step_{step_count}_arguments", command_generation_data)
             
-            # Display the command execution result
+            # Display the execution result
             messages.append(ChatMessage(
                 role="assistant",
                 content=f"**Result:**\n```json\n{json.dumps(make_json_serializable(result), indent=4)}\n```",
-                metadata={"title": f"### 🛠️ Step {step_count}: Command Execution ({tool_name})"}))
-            yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Command executed"
+                metadata={"title": f"### 🛠️ Step {step_count}: Execution ({tool_name})"}))
+            yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Executed"
 
-            # Save the command execution data
             command_execution_data = {
                 "result": result,
                 "time": round(time.time() - self.start_time, 5)
             }
-            save_module_data(QUERY_ID, f"step_{step_count}_command_execution", command_execution_data)
+            save_module_data(QUERY_ID, f"step_{step_count}_execution", command_execution_data)
 
             # [Step 8] Memory update and stopping condition
-            self.memory.add_action(step_count, tool_name, sub_goal, tool_command, result)
+            self.memory.add_action(step_count, tool_name, sub_goal, args_dict, result)
             conversation_text = self._format_conversation_history()
             stop_verification = self.planner.verificate_memory(user_query, img_path, query_analysis, self.memory, conversation_context=conversation_text)
             context_verification, conclusion = self.planner.extract_conclusion(stop_verification)

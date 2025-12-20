@@ -39,6 +39,8 @@ class Single_Cell_Cropper_Tool(BaseTool):
                 "best_practice": "Use with Nuclei_Segmenter_Tool for optimal results. Adjust min_area and margin based on cell size and analysis requirements. Automatically handles dimension mismatches between original image and nuclei mask."
             }
         )
+        self.capabilities = ["cell_crop"]
+        self.domain = "fibroblast"
 
     def execute(self, original_image, nuclei_mask, min_area=50, margin=25, output_format='png', query_cache_dir=None):
         """

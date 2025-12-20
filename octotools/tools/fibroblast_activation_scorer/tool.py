@@ -81,6 +81,8 @@ class Fibroblast_Activation_Scorer_Tool(BaseTool):
         - visualizations: Paths to generated visualization files (including box plots)
         - metadata: Processing metadata and parameters
         """
+        self.capabilities = ["activation_score"]
+        self.domain = "fibroblast"
         
         # Demo commands
         self.demo_commands = [

@@ -43,6 +43,9 @@ class Image_Preprocessor_Tool(BaseTool):
             },
             output_dir="output_visualizations"  # Set default output directory to output_visualizations
         )
+        # Registry metadata for capability-driven planning
+        self.capabilities = ["image_preprocess"]
+        self.domain = "fibroblast"
 
     def global_illumination_correction(self, image, kernel_size=151):
         """

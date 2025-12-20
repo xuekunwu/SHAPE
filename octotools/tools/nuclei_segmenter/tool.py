@@ -39,6 +39,8 @@ class Nuclei_Segmenter_Tool(BaseTool):
             },
             output_dir="output_visualizations"  # Set default output directory to output_visualizations
         )
+        self.capabilities = ["segmentation"]
+        self.domain = "fibroblast"
         
         # Enable GPU if available
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
