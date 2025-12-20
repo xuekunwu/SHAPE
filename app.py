@@ -1424,13 +1424,13 @@ def main(args):
             with gr.Column(scale=5):
                 # Input area
                 gr.Markdown("### 📤 Data Input")
-                gr.Markdown("Upload an image once per session; subsequent questions reuse the cached image. Upload a new file anytime to replace the session image.")
-                with gr.Row():
-                    with gr.Column(scale=1):
-                        user_image = gr.Image(
-                            label="Upload an Image", 
-                            type="pil", 
-                            height=350
+        gr.Markdown("Upload images into named groups (e.g., control, drugA). Each upload appends to the group and caches features; questions always reuse cached features.")
+        with gr.Row():
+            with gr.Column(scale=1):
+                user_image = gr.Image(
+                    label="Upload an Image", 
+                    type="pil", 
+                    height=350
                         )
                         group_name_input = gr.Textbox(
                             label="Image Group Name",
@@ -1439,51 +1439,36 @@ def main(args):
                         )
                         upload_btn = gr.Button("Add Image to Group", variant="primary")
                     with gr.Column(scale=1):
-                        user_query = gr.Textbox(
-                            label="Analysis Question", 
-                            placeholder="Describe the cell features or states you want to analyze...", 
-                            lines=15
-                        )
-                        with gr.Row():
-                            replace_image_btn = gr.Button("Replace image", variant="secondary")
-                            clear_image_btn = gr.Button("Clear image", variant="stop")
+                user_query = gr.Textbox(
+                    label="Analysis Question", 
+                    placeholder="Describe the cell features or states you want to analyze...", 
+                    lines=15
+                )
                         
-                # Submit button
+                # Question trigger only (decoupled from uploads)
                 with gr.Row():
                     with gr.Column(scale=6):
-                        run_button = gr.Button("🚀 Start Analysis", variant="primary", size="lg")
+                        run_button = gr.Button("🚀 Ask Question", variant="primary", size="lg")
                         progress_md = gr.Markdown("**Progress**: Ready")
                         upload_status_md = gr.Markdown("**Upload Status**: No uploads yet")
                         conversation_state = gr.State(AgentState())
 
-                # Output area - two columns instead of three
-                gr.Markdown("### 📊 Analysis Results")
-                with gr.Row():
-                    # Reasoning steps
-                    with gr.Column(scale=1):
-                        gr.Markdown("#### 🔍 Reasoning Steps")
-                        chatbot_output = gr.Chatbot(
-                            type="messages", 
-                            height=700,
-                            show_label=False
-                        )
-
-                    # Combined analysis report and visual output
-                    with gr.Column(scale=1):
-                        gr.Markdown("#### 📝 Analysis Report & Visual Output")
-                        with gr.Group():
-                            #gr.Markdown("*The final analysis conclusion and key findings will appear here.*")
-                            text_output = gr.Markdown(
-                                value="",
-                                height=350
-                            )
-                            gallery_output = gr.Gallery(
-                                label=None, 
-                                show_label=False,
-                                height=350,
-                                columns=2,
-                                rows=2
-                            )
+                # Output area - single conversation thread + visuals
+                gr.Markdown("### 🗣️ Conversation")
+                chatbot_output = gr.Chatbot(
+                    type="messages", 
+                    height=700,
+                    show_label=False
+                )
+                text_output = gr.Markdown(value="", visible=False)  # keep for compatibility but hide
+                gr.Markdown("### 🖼️ Visual Outputs")
+                gallery_output = gr.Gallery(
+                    label=None, 
+                    show_label=False,
+                    height=350,
+                    columns=2,
+                    rows=2
+                )
 
                 # Bottom row for examples
                 with gr.Row():
@@ -1549,51 +1534,6 @@ def main(args):
             solve_problem_gradio,
             [user_query, group_name_input, max_steps, max_time, language_model, enabled_fibroblast_tools, enabled_general_tools, clear_previous_viz, conversation_state],
             [chatbot_output, text_output, gallery_output, progress_md, conversation_state]
-        )
-
-        def _drop_group(state: AgentState, group_name: str):
-            if not isinstance(state, AgentState):
-                state = AgentState()
-            target = (group_name or state.last_group_name or "").strip()
-            if not target:
-                return None, state, "**Progress**: No group specified to clear"
-            group = state.image_groups.get(target)
-            if group:
-                for entry in group.get("images", []):
-                    try:
-                        if os.path.exists(entry["image_path"]):
-                            os.remove(entry["image_path"])
-                    except Exception as e:
-                        print(f"Warning: failed to delete cached image {entry['image_path']}: {e}")
-                for feature_path in group.get("features", []):
-                    try:
-                        if os.path.exists(feature_path):
-                            os.remove(feature_path)
-                    except Exception as e:
-                        print(f"Warning: failed to delete cached features {feature_path}: {e}")
-            state.image_groups.pop(target, None)
-            if state.last_group_name == target:
-                state.last_group_name = ""
-                state.image_context = None
-            return None, state, f"**Progress**: Cleared group '{target}'"
-
-        def _clear_image(state: AgentState, group_name: str):
-            return _drop_group(state, group_name)
-
-        def _replace_image(state: AgentState, group_name: str):
-            _, state, progress = _drop_group(state, group_name)
-            return None, state, f"{progress} - upload a new image to replace it."
-
-        clear_image_btn.click(
-            _clear_image,
-            inputs=[conversation_state, group_name_input],
-            outputs=[user_image, conversation_state, progress_md]
-        )
-
-        replace_image_btn.click(
-            _replace_image,
-            inputs=[conversation_state, group_name_input],
-            outputs=[user_image, conversation_state, progress_md]
         )
 
     #################### Gradio Interface ####################
