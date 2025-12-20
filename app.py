@@ -287,13 +287,14 @@ def encode_image_features(image_path: str, features_dir: Path) -> str:
         return ""
 
 
-def make_artifact_key(tool_name: str, image_path: str, context: str = "", sub_goal: str = "") -> str:
-    """Deterministic key for caching tool outputs tied to inputs."""
+def make_artifact_key(tool_name: str, image_path: str, context: str = "", sub_goal: str = "", image_id: str = "") -> str:
+    """Deterministic key for caching tool outputs tied to inputs (image-aware)."""
     hasher = hashlib.sha256()
     hasher.update(tool_name.encode())
     hasher.update(str(image_path or "").encode())
     hasher.update(str(context or "").encode())
     hasher.update(str(sub_goal or "").encode())
+    hasher.update(str(image_id or "").encode())
     return hasher.hexdigest()
 
 
@@ -556,20 +557,21 @@ class Solver:
         cost = self._calculate_cost(input_tokens, output_tokens)
         return input_tokens, output_tokens, total_tokens, cost
 
-    def stream_solve_user_problem(self, user_query: str, image_context: ImageContext, api_key: str, messages: List[ChatMessage]) -> Iterator:
+    def stream_solve_user_problem(self, user_query: str, image_context: ImageContext, group_name: str, group_images: List[Dict[str, Any]], api_key: str, messages: List[ChatMessage]) -> Iterator:
         import time
         import os
         self.start_time = time.time()
         process = psutil.Process(os.getpid())
         visual_description = "*Ready to display analysis results and processed images.*"
 
-        # Pull image path from cached session context
-        img_path_for_tools = image_context.image_path if image_context else None
+        # Build list of image paths/ids for this group
+        image_items = group_images or []
+        img_path_for_tools = image_items[0]["image_path"] if image_items else (image_context.image_path if image_context else None)
+        img_id = image_items[0]["image_id"] if image_items else (image_context.image_id if image_context else None)
         # NOTE: Features are for downstream reasoning/caching only; they must never replace images in vision prompts
-        img_path_for_analysis = None
-        img_id = image_context.image_id if image_context else None
+        img_path_for_analysis = img_path_for_tools
         self.agent_state.image_context = image_context
-        group_name = getattr(self.agent_state, "last_group_name", "")
+        group_name = group_name or getattr(self.agent_state, "last_group_name", "")
         analysis_img_ref = img_path_for_tools
         print(f"=== DEBUG: Image context ===")
         print(f"DEBUG: img_path_for_tools: {img_path_for_tools}")
@@ -704,30 +706,36 @@ class Solver:
                 yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Tool not available"
                 continue
 
-            # [Step 6-7] Generate and execute the tool command (with artifact reuse)
-            safe_path = img_path_for_tools.replace("\\", "\\\\") if img_path_for_tools else None
-            conversation_text = self._format_conversation_history()
-            artifact_key = make_artifact_key(tool_name, safe_path, context, sub_goal)
-            cached_artifact = get_cached_artifact(self.agent_state, group_name, tool_name, artifact_key)
+            # [Step 6-7] Generate and execute the tool command (with artifact reuse) for each image in the group
+            results_per_image = []
+            for img_item in image_items:
+                safe_path = img_item["image_path"].replace("\\", "\\\\") if img_item.get("image_path") else None
+                conversation_text = self._format_conversation_history()
+                artifact_key = make_artifact_key(tool_name, safe_path, context, sub_goal, image_id=img_item.get("image_id"))
+                cached_artifact = get_cached_artifact(self.agent_state, group_name, tool_name, artifact_key)
 
-            if cached_artifact:
-                result = cached_artifact.get("result")
-                analysis = "Cached result reused"
-                explanation = "Found matching artifact in session; skipping execution."
-                command = "execution = 'cached_artifact'"
-                messages.append(ChatMessage(
-                    role="assistant",
-                    content=f"♻️ Reusing cached {tool_name} result from previous turn.",
-                    metadata={"title": f"### 🛠️ Step {step_count}: Cached Execution ({tool_name})"}
-                ))
-                print(f"Reused cached artifact for {tool_name} (key={artifact_key})")
-            else:
-                tool_command = self.executor.generate_tool_command(user_query, safe_path, context, sub_goal, self.planner.toolbox_metadata[tool_name], self.memory, conversation_context=conversation_text)
-                analysis, explanation, command = self.executor.extract_explanation_and_command(tool_command)
-                result = self.executor.execute_tool_command(tool_name, command)
-                result = make_json_serializable(result)
-                store_artifact(self.agent_state, group_name, tool_name, artifact_key, result)
-                print(f"Tool '{tool_name}' result:", result)
+                if cached_artifact:
+                    result = cached_artifact.get("result")
+                    analysis = "Cached result reused"
+                    explanation = "Found matching artifact in session; skipping execution."
+                    command = "execution = 'cached_artifact'"
+                    messages.append(ChatMessage(
+                        role="assistant",
+                        content=f"♻️ Reusing cached {tool_name} result for image `{img_item.get('image_id')}`.",
+                        metadata={"title": f"### 🛠️ Step {step_count}: Cached Execution ({tool_name})"}
+                    ))
+                    print(f"Reused cached artifact for {tool_name} (key={artifact_key})")
+                else:
+                    tool_command = self.executor.generate_tool_command(user_query, safe_path, context, sub_goal, self.planner.toolbox_metadata[tool_name], self.memory, conversation_context=conversation_text)
+                    analysis, explanation, command = self.executor.extract_explanation_and_command(tool_command)
+                    result = self.executor.execute_tool_command(tool_name, command)
+                    result = make_json_serializable(result)
+                    store_artifact(self.agent_state, group_name, tool_name, artifact_key, result)
+                    print(f"Tool '{tool_name}' result for image {img_item.get('image_id')}: {result}")
+                results_per_image.append(result)
+
+            # For downstream steps, if only one image use its result, else aggregate
+            result = results_per_image[0] if len(results_per_image) == 1 else {"per_image": results_per_image}
             
             # Generate dynamic visual description based on tool and results
             visual_description = self.generate_visual_description(tool_name, result, self.visual_outputs_for_gradio)
@@ -1322,7 +1330,8 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
         return new_history, "", [], "**Progress**: Waiting for image upload", state
 
     group_entry = state.image_groups[group_name]
-    representative = group_entry["images"][0]
+    group_images = group_entry["images"]
+    representative = group_images[0]
     state.image_context = ImageContext(
         image_id=representative["image_id"],
         image_path=representative["image_path"],
@@ -1373,7 +1382,7 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
 
     try:
         # Stream the solution
-        for messages, text_output, gallery_output, visual_desc, progress_md in solver.stream_solve_user_problem(user_query, state.image_context, api_key, messages):
+        for messages, text_output, gallery_output, visual_desc, progress_md in solver.stream_solve_user_problem(user_query, state.image_context, group_name, group_images, api_key, messages):
             # Save steps data
             save_steps_data(query_id, memory)
             
