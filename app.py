@@ -1220,7 +1220,8 @@ def upload_image_to_group(user_image, group_table, conversation_state):
         return state, f"**Progress**: {status}"
 
     # Multiple images: require group_table rows [filepath, group]
-    if not group_table:
+    import pandas as pd
+    if group_table is None or (isinstance(group_table, pd.DataFrame) and group_table.empty):
         return state, "**Progress**: ⚠️ Multiple images uploaded. Please assign a group per image before adding."
     added_msgs = []
     for row in group_table:
