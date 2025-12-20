@@ -1201,7 +1201,7 @@ def prepare_group_assignment(uploaded_files):
     rows = []
     for f in files:
         path = f if isinstance(f, str) else f.get("name", "")
-        rows.append([path, ""])
+        rows.append([os.path.basename(path), ""])
     return gr.update(value=rows, visible=True), "**Upload Status**: Multiple images detected. Please assign a group per image."
 
 
@@ -1227,11 +1227,16 @@ def upload_image_to_group(user_image, group_table, conversation_state):
     for row in group_table:
         if not row or len(row) < 2:
             continue
-        file_path, group = row[0], (row[1] or "").strip()
-        if not file_path or not group:
-            added_msgs.append(f"⚠️ Skipped file '{file_path}' due to missing group.")
+        image_name, group = row[0], (row[1] or "").strip()
+        if not image_name or not group:
+            added_msgs.append(f"⚠️ Skipped file '{image_name}' due to missing group.")
             continue
-        status = add_image_to_group(group, file_path, state, images_dir, features_dir)
+        # Resolve full path from uploaded files
+        full_path = next((f for f in files if os.path.basename(f) == image_name), None)
+        if not full_path:
+            added_msgs.append(f"⚠️ Skipped file '{image_name}' because original path not found.")
+            continue
+        status = add_image_to_group(group, full_path, state, images_dir, features_dir)
         added_msgs.append(status)
     progress = "**Progress**:\n" + "\n".join(f"- {m}" for m in added_msgs) if added_msgs else "**Progress**: ⚠️ No images processed."
     return state, progress
@@ -1511,9 +1516,9 @@ def main(args):
             with gr.Column(scale=1):
                 gr.Markdown("### 📤 Image Groups")
                 user_image = gr.File(label="Upload Images", file_count="multiple", type="filepath")
-                group_table = gr.Dataframe(headers=["file_path", "group"], row_count=0, col_count=2, wrap=True, interactive=True, visible=False)
+                group_table = gr.Dataframe(headers=["image_name", "group"], row_count=0, col_count=2, wrap=True, interactive=True, visible=False)
                 group_prompt = gr.Markdown("**Upload Status**: No uploads yet")
-                upload_btn = gr.Button("Add Image(s) to Group(s)", variant="primary")
+                upload_btn = gr.Button("Add Image(s) to Registry", variant="primary")
                 gr.Markdown("### ❓ Ask Question")
                 group_name_input = gr.Textbox(label="Group to analyze", placeholder="e.g., control or drugA", value="")
                 user_query = gr.Textbox(label="Ask about your groups", placeholder="e.g., Compare cell counts between control and drugA", lines=5)
