@@ -260,7 +260,7 @@ def encode_image_features(image_path: str, features_dir: Path) -> str:
         return ""
 
 
-def add_image_to_group(group_name: str, user_image, state: AgentState, images_dir: Path, features_dir: Path) -> str:
+def add_image_to_group(group_name: str, user_image, state: "AgentState", images_dir: Path, features_dir: Path) -> str:
     """Store an uploaded image into a session-level group and cache its features."""
     if not user_image:
         return "⚠️ No image provided."
