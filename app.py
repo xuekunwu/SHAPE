@@ -1438,7 +1438,7 @@ def main(args):
                 multimodal_models = [m for m in OPENAI_MODEL_CONFIGS.values()]
                 model_names = [m["model_id"] for m in multimodal_models]
                 default_model = next((m["model_id"] for m in multimodal_models if m.get("model_type") == "openai"), model_names[0] if model_names else None)
-                language_model = gr.Dropdown(choices=model_names, value=default_model, label="Multimodal Large Language Model")
+                language_model = gr.Dropdown(choices=model_names, value=default_model)
             with gr.Column(scale=1):
                 gr.Markdown("### 🛠️ Available Tools")
                 with gr.Accordion("🛠️ Available Tools", open=False):
