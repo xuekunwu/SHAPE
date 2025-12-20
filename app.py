@@ -1422,15 +1422,15 @@ def main(args):
 
             # Main interface
             with gr.Column(scale=5):
-                # Input area
-                gr.Markdown("### 📤 Data Input")
-        gr.Markdown("Upload images into named groups (e.g., control, drugA). Each upload appends to the group and caches features; questions always reuse cached features.")
-        with gr.Row():
-            with gr.Column(scale=1):
-                user_image = gr.Image(
-                    label="Upload an Image", 
-                    type="pil", 
-                    height=350
+                # Image group manager (uploads only)
+                gr.Markdown("### 📤 Image Groups")
+                gr.Markdown("Upload images into named groups (e.g., control, drugA). Each upload appends to the group and caches features; questions always reuse cached features.")
+                with gr.Row():
+                    with gr.Column(scale=1):
+                        user_image = gr.Image(
+                            label="Upload an Image", 
+                            type="pil", 
+                            height=300
                         )
                         group_name_input = gr.Textbox(
                             label="Image Group Name",
@@ -1438,29 +1438,25 @@ def main(args):
                             value="control"
                         )
                         upload_btn = gr.Button("Add Image to Group", variant="primary")
-                    with gr.Column(scale=1):
-                user_query = gr.Textbox(
-                    label="Analysis Question", 
-                    placeholder="Describe the cell features or states you want to analyze...", 
-                    lines=15
-                )
-                        
-                # Question trigger only (decoupled from uploads)
-                with gr.Row():
-                    with gr.Column(scale=6):
-                        run_button = gr.Button("🚀 Ask Question", variant="primary", size="lg")
-                        progress_md = gr.Markdown("**Progress**: Ready")
                         upload_status_md = gr.Markdown("**Upload Status**: No uploads yet")
-                        conversation_state = gr.State(AgentState())
 
-                # Output area - single conversation thread + visuals
+                # Conversation (question-driven execution)
                 gr.Markdown("### 🗣️ Conversation")
                 chatbot_output = gr.Chatbot(
                     type="messages", 
-                    height=700,
+                    height=550,
                     show_label=False
                 )
-                text_output = gr.Markdown(value="", visible=False)  # keep for compatibility but hide
+                user_query = gr.Textbox(
+                    label="Ask a question about your groups", 
+                    placeholder="e.g., Compare cell counts between control and drugA", 
+                    lines=4
+                )
+                run_button = gr.Button("🚀 Ask Question", variant="primary", size="lg")
+                progress_md = gr.Markdown("**Progress**: Ready")
+                conversation_state = gr.State(AgentState())
+
+                # Visual outputs
                 gr.Markdown("### 🖼️ Visual Outputs")
                 gallery_output = gr.Gallery(
                     label=None, 
@@ -1469,6 +1465,7 @@ def main(args):
                     columns=2,
                     rows=2
                 )
+                text_output = gr.Markdown(value="", visible=False)  # compatibility placeholder
 
                 # Bottom row for examples
                 with gr.Row():
