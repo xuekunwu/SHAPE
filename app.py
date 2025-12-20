@@ -8,7 +8,12 @@ import argparse
 import time
 import io
 import uuid
-import torch
+try:
+    import torch
+    TORCH_AVAILABLE = True
+except ImportError:
+    torch = None
+    TORCH_AVAILABLE = False
 import shutil
 import logging
 import tempfile
@@ -479,11 +484,12 @@ class Solver:
 
         # Pull image path from cached session context
         img_path_for_tools = image_context.image_path if image_context else None
-        img_path_for_analysis = image_context.features_path if image_context and image_context.features_path else None
+        # NOTE: Features are for downstream reasoning/caching only; they must never replace images in vision prompts
+        img_path_for_analysis = None
         img_id = image_context.image_id if image_context else None
         self.agent_state.image_context = image_context
         group_name = getattr(self.agent_state, "last_group_name", "")
-        analysis_img_ref = img_path_for_analysis or img_path_for_tools
+        analysis_img_ref = img_path_for_tools
         print(f"=== DEBUG: Image context ===")
         print(f"DEBUG: img_path_for_tools: {img_path_for_tools}")
         print(f"DEBUG: img_path_for_analysis: {img_path_for_analysis}")
@@ -1593,9 +1599,12 @@ if __name__ == "__main__":
     # Print environment information
     print("\n=== Environment Information ===")
     print(f"Running in HuggingFace Spaces: {IS_SPACES}")
-    print(f"CUDA Available: {torch.cuda.is_available()}")
-    if torch.cuda.is_available():
-        print(f"CUDA Device: {torch.cuda.get_device_name(0)}")
+    if TORCH_AVAILABLE:
+        print(f"CUDA Available: {torch.cuda.is_available()}")
+        if torch.cuda.is_available():
+            print(f"CUDA Device: {torch.cuda.get_device_name(0)}")
+    else:
+        print("PyTorch not installed; running in CPU-only mode.")
     #print(f"API Key Source: {args.openai_api_source}")
     print("==============================\n")
     
