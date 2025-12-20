@@ -1155,15 +1155,13 @@ def upload_image_to_group(user_image, group_name, conversation_state):
     return state, progress
 
 
-def solve_problem_gradio(user_query, group_name, max_steps=10, max_time=60, llm_model_engine=None, enabled_fibroblast_tools=None, enabled_general_tools=None, clear_previous_viz=False, conversation_history=None):
+def solve_problem_gradio(user_query, group_name, llm_model_engine=None, enabled_fibroblast_tools=None, enabled_general_tools=None, clear_previous_viz=False, conversation_history=None):
     """
     Solve a problem using the Gradio interface with optional visualization clearing.
     
     Args:
         user_query: The user's query
         group_name: The target image group name to analyze
-        max_steps: Maximum number of reasoning steps
-        max_time: Maximum analysis time in seconds
         llm_model_engine: Language model engine (model_id from dropdown)
         enabled_fibroblast_tools: List of enabled fibroblast tools
         enabled_general_tools: List of enabled general tools
@@ -1357,8 +1355,8 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
         task_description="",   # Default empty description
         output_types="base,final,direct",  # Default output types
         verbose=True,          # Default verbose
-        max_steps=max_steps,
-        max_time=max_time,
+        max_steps=10,
+        max_time=60,
         query_cache_dir=query_cache_dir, # NOTE
         agent_state=state
     )
@@ -1428,27 +1426,22 @@ def main(args):
         **SHPAE** is an open-source assistant for interpreting cell images, powered by large language models and tool-based reasoning.
         """)
         
-        # Model / tool configuration (top row)
-        with gr.Row():
+        # Model / tool configuration (top row, equal height)
+        with gr.Row(equal_height=True):
             with gr.Column(scale=1, min_width=250):
                 gr.Markdown("### ⚙️ Model Configuration")
                 multimodal_models = [m for m in OPENAI_MODEL_CONFIGS.values()]
                 model_names = [m["model_id"] for m in multimodal_models]
                 default_model = next((m["model_id"] for m in multimodal_models if m.get("model_type") == "openai"), model_names[0] if model_names else None)
                 language_model = gr.Dropdown(choices=model_names, value=default_model, label="Multimodal Large Language Model")
-                max_steps = gr.Slider(1, 15, value=10, label="Max Reasoning Steps")
-                max_time = gr.Slider(60, 600, value=300, label="Max Analysis Time (seconds)")
-                gr.Markdown("#### 📊 Visualization Options")
-                clear_previous_viz = gr.Checkbox(label="Clear previous visualizations", value=False, info="Check this to clear all previous charts when starting new analysis")
-                gr.Markdown("#### 🛠️ Available Tools")
-                fibroblast_tools = [
+            with gr.Column(scale=1):
+                gr.Markdown("### 🛠️ Available Tools")
+                all_tools_flat = [
                     "Image_Preprocessor_Tool",
                     "Nuclei_Segmenter_Tool",
                     "Single_Cell_Cropper_Tool",
                     "Fibroblast_State_Analyzer_Tool",
-                    "Fibroblast_Activation_Scorer_Tool"
-                ]
-                general_tools = [
+                    "Fibroblast_Activation_Scorer_Tool",
                     "Generalist_Solution_Generator_Tool",
                     "Python_Code_Generator_Tool",
                     "ArXiv_Paper_Searcher_Tool",
@@ -1458,19 +1451,13 @@ def main(args):
                     "Wikipedia_Knowledge_Searcher_Tool",
                     "URL_Text_Extractor_Tool",
                     "Object_Detector_Tool",
-                    "Image_Captioner_Tool", 
+                    "Image_Captioner_Tool",
                     "Relevant_Patch_Zoomer_Tool",
                     "Text_Detector_Tool",
                     "Advanced_Object_Detector_Tool"
                 ]
-                with gr.Accordion("🧬 Fibroblas Tools", open=True):
-                    enabled_fibroblast_tools = gr.CheckboxGroup(choices=fibroblast_tools, value=fibroblast_tools, label="Select Fibroblast Analysis Tools")
-                with gr.Accordion("🧩 General Tools", open=False):
-                    enabled_general_tools = gr.CheckboxGroup(choices=general_tools, label="Select General Purpose Tools")
-                with gr.Row():
-                    gr.Button("Select Fibroblast Tools", size="sm").click(lambda: fibroblast_tools, outputs=enabled_fibroblast_tools)
-                    gr.Button("Select All Tools", size="sm").click(lambda: (fibroblast_tools, general_tools), outputs=[enabled_fibroblast_tools, enabled_general_tools])
-                    gr.Button("Clear Selection", size="sm").click(lambda: ([], []), outputs=[enabled_fibroblast_tools, enabled_general_tools])
+                enabled_fibroblast_tools = gr.Dropdown(choices=all_tools_flat, value=all_tools_flat, multiselect=True, label="Select Tools")
+                enabled_general_tools = gr.Dropdown(visible=False)  # placeholder for compatibility
 
         # Main interaction row: left (uploads + question), right (conversation)
         with gr.Row():
@@ -1543,7 +1530,7 @@ def main(args):
 
         run_button.click(
             solve_problem_gradio,
-            [user_query, group_name_input, max_steps, max_time, language_model, enabled_fibroblast_tools, enabled_general_tools, clear_previous_viz, conversation_state],
+            [user_query, group_name_input, language_model, enabled_fibroblast_tools, enabled_general_tools, clear_previous_viz, conversation_state],
             [chatbot_output, text_output, gallery_output, progress_md, conversation_state]
         )
 
