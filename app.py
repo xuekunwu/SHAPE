@@ -1473,7 +1473,7 @@ def main(args):
         with gr.Row():
             with gr.Column(scale=1):
                 gr.Markdown("### 📤 Image Groups")
-                user_image = gr.File(label="Upload Images", file_count="multiple", type="file")
+                user_image = gr.File(label="Upload Images", file_count="multiple", type="filepath")
                 group_name_input = gr.Textbox(label="Image Group Name", placeholder="e.g., control, drugA, replicate1", value="control")
                 upload_btn = gr.Button("Add Image to Group", variant="primary")
                 upload_status_md = gr.Markdown("**Upload Status**: No uploads yet")
