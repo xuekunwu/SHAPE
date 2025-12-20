@@ -1155,7 +1155,7 @@ def upload_image_to_group(user_image, group_name, conversation_state):
     return state, progress
 
 
-def solve_problem_gradio(user_query, group_name, llm_model_engine=None, enabled_fibroblast_tools=None, enabled_general_tools=None, clear_previous_viz=False, conversation_history=None):
+def solve_problem_gradio(user_query, group_name, llm_model_engine=None, enabled_fibroblast_tools=None, enabled_general_tools=None, conversation_history=None):
     """
     Solve a problem using the Gradio interface with optional visualization clearing.
     
@@ -1165,7 +1165,6 @@ def solve_problem_gradio(user_query, group_name, llm_model_engine=None, enabled_
         llm_model_engine: Language model engine (model_id from dropdown)
         enabled_fibroblast_tools: List of enabled fibroblast tools
         enabled_general_tools: List of enabled general tools
-        clear_previous_viz: Whether to clear previous visualizations
         conversation_history: Persistent chat history to keep context across runs
     """
     # Initialize or reuse persistent agent state
@@ -1213,23 +1212,10 @@ def solve_problem_gradio(user_query, group_name, llm_model_engine=None, enabled_
     # Legacy logging directory (keeps previous dataset layout)
     os.makedirs(DATASET_DIR / query_id, exist_ok=True)
 
-    # Handle visualization clearing based on user preference
-    if clear_previous_viz:
-        print("🧹 Clearing output_visualizations directory as requested...")
-        # Manually clear the directory
-        output_viz_dir = os.path.join(os.getcwd(), 'output_visualizations')
-        if os.path.exists(output_viz_dir):
-            import shutil
-            shutil.rmtree(output_viz_dir)
-            print(f"✅ Cleared output directory: {output_viz_dir}")
-        os.makedirs(output_viz_dir, exist_ok=True)
-        print("✅ Output directory cleared successfully")
-    else:
-        print("📁 Preserving output_visualizations directory for continuity...")
-        # Just ensure directory exists without clearing
-        output_viz_dir = os.path.join(os.getcwd(), 'output_visualizations')
-        os.makedirs(output_viz_dir, exist_ok=True)
-        print("✅ Output directory preserved - all charts will be retained")
+    # Always preserve output directory (no user toggle)
+    output_viz_dir = os.path.join(os.getcwd(), 'output_visualizations')
+    os.makedirs(output_viz_dir, exist_ok=True)
+    print("✅ Output directory preserved - all charts will be retained")
 
     # Create a directory for the query ID
     query_cache_dir = os.path.join(str(session_dir), query_id) # scoped per session + query
@@ -1530,7 +1516,7 @@ def main(args):
 
         run_button.click(
             solve_problem_gradio,
-            [user_query, group_name_input, language_model, enabled_fibroblast_tools, enabled_general_tools, clear_previous_viz, conversation_state],
+            [user_query, group_name_input, language_model, enabled_fibroblast_tools, enabled_general_tools, conversation_state],
             [chatbot_output, text_output, gallery_output, progress_md, conversation_state]
         )
 
