@@ -9,6 +9,27 @@ import argparse
 import time
 import io
 import uuid
+AVAILABLE_TOOLS = [
+    "Image_Preprocessor_Tool",
+    "Nuclei_Segmenter_Tool",
+    "Single_Cell_Cropper_Tool",
+    "Fibroblast_State_Analyzer_Tool",
+    "Fibroblast_Activation_Scorer_Tool",
+    "Generalist_Solution_Generator_Tool",
+    "Python_Code_Generator_Tool",
+    "ArXiv_Paper_Searcher_Tool",
+    "Pubmed_Search_Tool",
+    "Nature_News_Fetcher_Tool",
+    "Google_Search_Tool",
+    "Wikipedia_Knowledge_Searcher_Tool",
+    "URL_Text_Extractor_Tool",
+    "Object_Detector_Tool",
+    "Image_Captioner_Tool",
+    "Relevant_Patch_Zoomer_Tool",
+    "Text_Detector_Tool",
+    "Advanced_Object_Detector_Tool"
+]
+
 try:
     import torch
     TORCH_AVAILABLE = True
@@ -1155,7 +1176,7 @@ def upload_image_to_group(user_image, group_name, conversation_state):
     return state, progress
 
 
-def solve_problem_gradio(user_query, group_name, llm_model_engine=None, enabled_tools=None, conversation_history=None):
+def solve_problem_gradio(user_query, group_name, llm_model_engine=None, conversation_history=None):
     """
     Solve a problem using the Gradio interface with optional visualization clearing.
     
@@ -1163,7 +1184,6 @@ def solve_problem_gradio(user_query, group_name, llm_model_engine=None, enabled_
         user_query: The user's query
         group_name: The target image group name to analyze
         llm_model_engine: Language model engine (model_id from dropdown)
-        enabled_tools: List of enabled tools (session capabilities)
         conversation_history: Persistent chat history to keep context across runs
     """
     # Initialize or reuse persistent agent state
@@ -1199,7 +1219,7 @@ def solve_problem_gradio(user_query, group_name, llm_model_engine=None, enabled_
     api_key = os.getenv("OPENAI_API_KEY")
     
     # Combine the tool lists
-    enabled_tools = enabled_tools or []
+    enabled_tools = AVAILABLE_TOOLS
 
     # Generate a unique query ID
     query_id = time.strftime("%Y%m%d_%H%M%S") + "_" + str(uuid.uuid4())[:8] # e.g, 20250217_062225_612f2474
@@ -1421,27 +1441,8 @@ def main(args):
                 language_model = gr.Dropdown(choices=model_names, value=default_model, label="Multimodal Large Language Model")
             with gr.Column(scale=1):
                 gr.Markdown("### 🛠️ Available Tools")
-                all_tools_flat = [
-                    "Image_Preprocessor_Tool",
-                    "Nuclei_Segmenter_Tool",
-                    "Single_Cell_Cropper_Tool",
-                    "Fibroblast_State_Analyzer_Tool",
-                    "Fibroblast_Activation_Scorer_Tool",
-                    "Generalist_Solution_Generator_Tool",
-                    "Python_Code_Generator_Tool",
-                    "ArXiv_Paper_Searcher_Tool",
-                    "Pubmed_Search_Tool",
-                    "Nature_News_Fetcher_Tool",
-                    "Google_Search_Tool",
-                    "Wikipedia_Knowledge_Searcher_Tool",
-                    "URL_Text_Extractor_Tool",
-                    "Object_Detector_Tool",
-                    "Image_Captioner_Tool",
-                    "Relevant_Patch_Zoomer_Tool",
-                    "Text_Detector_Tool",
-                    "Advanced_Object_Detector_Tool"
-                ]
-                tools_dropdown = gr.Dropdown(choices=all_tools_flat, value=None, multiselect=False, label="Select Tools")
+                with gr.Accordion("Available Tools (read-only)", open=False):
+                    gr.Markdown("\n".join([f"- {t}" for t in AVAILABLE_TOOLS]))
 
         # Main interaction row: left (uploads + question), right (conversation)
         with gr.Row():
@@ -1484,13 +1485,13 @@ def main(args):
                 ]
                 def distribute_tools(category, img, q, tools_str, ans):
                     selected_tools = [tool.strip() for tool in tools_str.split(',')]
-                    selected = [tool for tool in selected_tools if tool in all_tools_flat]
-                    return img, q, (selected[0] if selected else None)
+                    selected = [tool for tool in selected_tools if tool in AVAILABLE_TOOLS]
+                    return img, q
                 gr.Markdown("#### 🧬 Fibroblast Analysis Examples")
                 gr.Examples(
                     examples=fibroblast_examples,
                     inputs=[gr.Textbox(label="Category", visible=False), user_image, user_query, gr.Textbox(label="Select Tools", visible=False), gr.Textbox(label="Reference Answer", visible=False)],
-                    outputs=[user_image, user_query, tools_dropdown],
+                    outputs=[user_image, user_query],
                     fn=distribute_tools,
                     cache_examples=False
                 )
@@ -1498,7 +1499,7 @@ def main(args):
                 gr.Examples(
                     examples=general_examples,
                     inputs=[gr.Textbox(label="Category", visible=False), user_image, user_query, gr.Textbox(label="Select Tools", visible=False), gr.Textbox(label="Reference Answer", visible=False)],
-                    outputs=[user_image, user_query, tools_dropdown],
+                    outputs=[user_image, user_query],
                     fn=distribute_tools,
                     cache_examples=False
                 )
@@ -1512,7 +1513,7 @@ def main(args):
 
         run_button.click(
             solve_problem_gradio,
-            [user_query, group_name_input, language_model, tools_dropdown, conversation_state],
+            [user_query, group_name_input, language_model, conversation_state],
             [chatbot_output, text_output, gallery_output, progress_md, conversation_state]
         )
 
