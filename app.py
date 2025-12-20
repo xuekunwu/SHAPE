@@ -1434,14 +1434,14 @@ def main(args):
         # Model / tool configuration (top row, equal height)
         with gr.Row(equal_height=True):
             with gr.Column(scale=1, min_width=250):
-                gr.Markdown("### ⚙️ Model Configuration")
+                gr.Markdown("### ⚙️ LLM Configuration")
                 multimodal_models = [m for m in OPENAI_MODEL_CONFIGS.values()]
                 model_names = [m["model_id"] for m in multimodal_models]
                 default_model = next((m["model_id"] for m in multimodal_models if m.get("model_type") == "openai"), model_names[0] if model_names else None)
                 language_model = gr.Dropdown(choices=model_names, value=default_model, label="Multimodal Large Language Model")
             with gr.Column(scale=1):
                 gr.Markdown("### 🛠️ Available Tools")
-                with gr.Accordion("Available Tools (read-only)", open=False):
+                with gr.Accordion("🛠️ Available Tools", open=False):
                     gr.Markdown("\n".join([f"- {t}" for t in AVAILABLE_TOOLS]))
 
         # Main interaction row: left (uploads + question), right (conversation)
