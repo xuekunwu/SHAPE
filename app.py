@@ -20,6 +20,7 @@ import matplotlib.pyplot as plt
 import gradio as gr
 from gradio import ChatMessage
 from pathlib import Path
+import hashlib
 from huggingface_hub import CommitScheduler
 from octotools.models.formatters import ToolCommand
 import random
@@ -29,8 +30,6 @@ from llm_evaluation_scripts.hf_model_configs import HF_MODEL_CONFIGS
 from datetime import datetime
 from octotools.models.utils import make_json_serializable, VisualizationConfig, normalize_tool_name
 from dataclasses import dataclass, field
-from octotools.registry import REGISTRY
-from octotools.models.tool_adapter import load_adapter
 
 # Add the project root to the Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -202,7 +201,48 @@ def save_module_data(query_id: str, key: str, value: Any) -> None:
         except Exception as e:
             print(f"Error: Failed to save as text file: {e}")
 
+
+def ensure_session_dirs(session_id: str):
+    """Create and return session-scoped directories for caching."""
+    session_dir = DATASET_DIR / session_id
+    images_dir = session_dir / "images"
+    session_dir.mkdir(parents=True, exist_ok=True)
+    images_dir.mkdir(parents=True, exist_ok=True)
+    return session_dir, images_dir
+
+
+def compute_image_fingerprint(image) -> str:
+    """Return a stable hash for the uploaded image to detect reuse."""
+    hasher = hashlib.sha256()
+    try:
+        if isinstance(image, dict) and 'path' in image:
+            with open(image['path'], "rb") as f:
+                hasher.update(f.read())
+        elif isinstance(image, str) and os.path.exists(image):
+            with open(image, "rb") as f:
+                hasher.update(f.read())
+        elif hasattr(image, "save"):
+            buf = io.BytesIO()
+            image.save(buf, format="PNG")
+            hasher.update(buf.getvalue())
+        else:
+            return ""
+        return hasher.hexdigest()
+    except Exception as e:
+        print(f"Warning: failed to compute image fingerprint: {e}")
+        return ""
+
 ########### End of Test Huggingface Dataset ###########
+
+
+@dataclass
+class ImageContext:
+    """Persistent image metadata for the session."""
+    image_id: str
+    image_path: str
+    source_type: str = "uploaded"
+    created_at: float = field(default_factory=time.time)
+    fingerprint: str = ""
 
 
 @dataclass
@@ -212,6 +252,8 @@ class AgentState:
     last_context: str = ""
     last_sub_goal: str = ""
     last_visual_description: str = "*Ready to display analysis results and processed images.*"
+    image_context: ImageContext = None
+    session_id: str = field(default_factory=lambda: uuid.uuid4().hex)
 
 def normalize_tool_name(tool_name: str, available_tools=None) -> str:
     """Normalize the tool name to match the available tools."""
@@ -339,68 +381,35 @@ class Solver:
         cost = self._calculate_cost(input_tokens, output_tokens)
         return input_tokens, output_tokens, total_tokens, cost
 
-    def stream_solve_user_problem(self, user_query: str, user_image, api_key: str, messages: List[ChatMessage]) -> Iterator:
+    def stream_solve_user_problem(self, user_query: str, image_context: ImageContext, api_key: str, messages: List[ChatMessage]) -> Iterator:
         import time
         import os
         self.start_time = time.time()
         process = psutil.Process(os.getpid())
         visual_description = "*Ready to display analysis results and processed images.*"
-        
-        # Handle image input - simplified logic based on original OctoTools
-        print(f"=== DEBUG: Image processing started ===")
-        print(f"DEBUG: user_image type: {type(user_image)}")
-        print(f"DEBUG: user_image is None: {user_image is None}")
-        
-        if user_image:
-            print(f"DEBUG: user_image exists, processing...")
-            # Handle different image input formats from Gradio
-            if isinstance(user_image, dict) and 'path' in user_image:
-                img_path = user_image['path']
-                print(f"DEBUG: extracted path from dict: {img_path}")
-            elif isinstance(user_image, str) and os.path.exists(user_image):
-                img_path = user_image
-                print(f"DEBUG: user_image is valid string path: {img_path}")
-            elif hasattr(user_image, 'save'):
-                print(f"DEBUG: user_image is a PIL Image, saving...")
-                # It's a PIL Image object - save it like in original version
-                img_path = os.path.join(self.query_cache_dir, 'query_image.jpg')
-                print(f"DEBUG: saving to path: {img_path}")
-                print(f"DEBUG: query_cache_dir exists: {os.path.exists(self.query_cache_dir)}")
-                try:
-                    user_image.save(img_path)
-                    print(f"DEBUG: Image saved successfully to: {img_path}")
-                    print(f"DEBUG: file exists after save: {os.path.exists(img_path)}")
-                except Exception as e:
-                    print(f"DEBUG: Error saving image: {e}")
-                    import traceback
-                    print(f"DEBUG: Full traceback: {traceback.format_exc()}")
-                    img_path = None
-            else:
-                print(f"DEBUG: user_image is not a recognized format: {type(user_image)}")
-                if user_image:
-                    print(f"DEBUG: user_image attributes: {dir(user_image)}")
-                img_path = None
-        else:
-            print(f"DEBUG: no user_image provided")
-            img_path = None
 
-        print(f"DEBUG: final img_path: {img_path}")
-        print(f"=== DEBUG: Image processing completed ===")
+        # Pull image path from cached session context
+        img_path = image_context.image_path if image_context else None
+        img_id = image_context.image_id if image_context else None
+        self.agent_state.image_context = image_context
+        print(f"=== DEBUG: Image context ===")
+        print(f"DEBUG: img_path: {img_path}")
+        print(f"DEBUG: image_id: {img_id}")
 
         # Set tool cache directory
         _tool_cache_dir = os.path.join(self.query_cache_dir, "tool_cache") # NOTE: This is the directory for tool cache
         self.executor.set_query_cache_dir(_tool_cache_dir) # NOTE: set query cache directory
         
         # Step 1: Display the received inputs
-        if user_image:
-            messages.append(ChatMessage(role="assistant", content=f"### 📝 Received Query:\n{user_query}\n### 🖼️ Image Uploaded"))
+        if image_context and img_path:
+            messages.append(ChatMessage(role="assistant", content=f"### 📝 Received Query:\n{user_query}\n### 🖼️ Using session image `{img_id}`"))
         else:
             messages.append(ChatMessage(role="assistant", content=f"### 📝 Received Query:\n{user_query}"))
         yield messages, "", [], visual_description, "**Progress**: Input received"
 
         # [Step 3] Initialize problem-solving state
         step_count = 0
-        json_data = {"query": user_query, "image": "Image received as bytes"}
+        json_data = {"query": user_query, "image_id": img_id}
 
         messages.append(ChatMessage(role="assistant", content="<br>"))
         messages.append(ChatMessage(role="assistant", content="### 🐙 Deep Thinking:"))
@@ -488,15 +497,11 @@ class Solver:
 
             # [Step 5] Generate the next step
             conversation_text = self._format_conversation_history()
-            plan = self.planner.generate_next_step(user_query, img_path, query_analysis, self.memory, step_count, self.max_steps, conversation_context=conversation_text)
-            # Resolve tool name via capability if absent
-            tool_name = plan.tool_name
-            if not tool_name:
-                candidates = [spec.name for spec in REGISTRY.by_capability(plan.capability) if spec.name in self.planner.available_tools]
-                tool_name = candidates[0] if candidates else None
-            context = "; ".join(plan.required_inputs) if getattr(plan, "required_inputs", None) else ""
-            sub_goal = getattr(plan, "rationale", "")
-            step_data = {"step_count": step_count, "capability": plan.capability, "context": context, "sub_goal": sub_goal, "tool_name": tool_name, "time": round(time.time() - self.start_time, 5)}
+            next_step = self.planner.generate_next_step(user_query, img_path, query_analysis, self.memory, step_count, self.max_steps, conversation_context=conversation_text)
+            context, sub_goal, tool_name = self.planner.extract_context_subgoal_and_tool(next_step)
+            context = context or self.agent_state.last_context or ""
+            sub_goal = sub_goal or self.agent_state.last_sub_goal or ""
+            step_data = {"step_count": step_count, "context": context, "sub_goal": sub_goal, "tool_name": tool_name, "time": round(time.time() - self.start_time, 5)}
             save_module_data(QUERY_ID, f"step_{step_count}_action_prediction", step_data)
 
             # Always normalize tool_name before use
@@ -511,36 +516,19 @@ class Solver:
             yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Action predicted"
 
             # Handle tool execution or errors
-            if not tool_name or tool_name not in self.planner.available_tools:
+            if tool_name not in self.planner.available_tools:
                 messages.append(ChatMessage(
                     role="assistant", 
                     content=f"⚠️ Error: Tool '{tool_name}' is not available."))
                 yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Tool not available"
                 continue
 
-            # [Step 6-7] Generate and execute the tool arguments via adapter (no exec)
-            spec = REGISTRY.get(tool_name)
-            if not spec:
-                messages.append(ChatMessage(role="assistant", content=f"⚠️ Error: Tool spec missing for '{tool_name}'."))
-                yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Spec missing"
-                continue
-            try:
-                adapter = load_adapter(spec.adapter_path)
-            except Exception as e:
-                messages.append(ChatMessage(role="assistant", content=f"⚠️ Error loading adapter for {tool_name}: {e}"))
-                yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Adapter load error"
-                continue
-
-            args_dict = self.executor.generate_tool_arguments(
-                user_query,
-                context,
-                sub_goal,
-                tool_name,
-                self.planner.toolbox_metadata.get(tool_name, {}),
-                adapter,
-                self.memory
-            )
-            result = self.executor.execute_tool(tool_name, args_dict)
+            # [Step 6-7] Generate and execute the tool command
+            safe_path = img_path.replace("\\", "\\\\") if img_path else None
+            conversation_text = self._format_conversation_history()
+            tool_command = self.executor.generate_tool_command(user_query, safe_path, context, sub_goal, tool_name, self.planner.toolbox_metadata[tool_name], self.memory, conversation_context=conversation_text)
+            analysis, explanation, command = self.executor.extract_explanation_and_command(tool_command)
+            result = self.executor.execute_tool_command(tool_name, command)
             result = make_json_serializable(result)
             print(f"Tool '{tool_name}' result:", result)
             
@@ -623,36 +611,38 @@ class Solver:
                             print(f"Full traceback: {traceback.format_exc()}")
                             continue
 
-            # Display argument generation info
+            # Display the command generation information
             messages.append(ChatMessage(
                 role="assistant",
-                content=f"**Capability:** {plan.capability}\n\n**Tool:** `{tool_name}`\n\n**Arguments:**\n```json\n{json.dumps(args_dict, indent=4)}\n```",
-                metadata={"title": f"### 📝 Step {step_count}: Arguments ({tool_name})"}))
-            yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Arguments prepared"
+                content=f"**Analysis:** {analysis}\n\n**Explanation:** {explanation}\n\n**Command:**\n```python\n{command}\n```",
+                metadata={"title": f"### 📝 Step {step_count}: Command Generation ({tool_name})"}))
+            yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Command generated"
 
+            # Save the command generation data
             command_generation_data = {
-                "capability": plan.capability,
-                "tool": tool_name,
-                "args": args_dict,
+                "analysis": analysis,
+                "explanation": explanation,
+                "command": command,
                 "time": round(time.time() - self.start_time, 5)
             }
-            save_module_data(QUERY_ID, f"step_{step_count}_arguments", command_generation_data)
+            save_module_data(QUERY_ID, f"step_{step_count}_command_generation", command_generation_data)
             
-            # Display the execution result
+            # Display the command execution result
             messages.append(ChatMessage(
                 role="assistant",
                 content=f"**Result:**\n```json\n{json.dumps(make_json_serializable(result), indent=4)}\n```",
-                metadata={"title": f"### 🛠️ Step {step_count}: Execution ({tool_name})"}))
-            yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Executed"
+                metadata={"title": f"### 🛠️ Step {step_count}: Command Execution ({tool_name})"}))
+            yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Command executed"
 
+            # Save the command execution data
             command_execution_data = {
                 "result": result,
                 "time": round(time.time() - self.start_time, 5)
             }
-            save_module_data(QUERY_ID, f"step_{step_count}_execution", command_execution_data)
+            save_module_data(QUERY_ID, f"step_{step_count}_command_execution", command_execution_data)
 
             # [Step 8] Memory update and stopping condition
-            self.memory.add_action(step_count, tool_name, sub_goal, args_dict, result)
+            self.memory.add_action(step_count, tool_name, sub_goal, tool_command, result)
             conversation_text = self._format_conversation_history()
             stop_verification = self.planner.verificate_memory(user_query, img_path, query_analysis, self.memory, conversation_context=conversation_text)
             context_verification, conclusion = self.planner.extract_conclusion(stop_verification)
@@ -981,7 +971,7 @@ def solve_problem_gradio(user_query, user_image, max_steps=10, max_time=60, llm_
     
     Args:
         user_query: The user's query
-        user_image: The user's image
+        user_image: The user's image (optional after first upload; session will reuse cached image)
         max_steps: Maximum number of reasoning steps
         max_time: Maximum analysis time in seconds
         llm_model_engine: Language model engine (model_id from dropdown)
@@ -993,6 +983,41 @@ def solve_problem_gradio(user_query, user_image, max_steps=10, max_time=60, llm_
     # Initialize or reuse persistent agent state
     state: AgentState = conversation_history if isinstance(conversation_history, AgentState) else AgentState()
     state.conversation = list(state.conversation)
+    session_dir, images_dir = ensure_session_dirs(state.session_id)
+
+    # Persist or reuse the session image without re-upload per turn
+    new_fingerprint = compute_image_fingerprint(user_image) if user_image is not None else ""
+    if state.image_context and new_fingerprint and state.image_context.fingerprint == new_fingerprint:
+        print("DEBUG: uploaded image matches cached fingerprint; reusing existing context")
+        user_image = None
+
+    if user_image is not None:
+        print("DEBUG: new image provided, saving to session cache")
+        image_id = uuid.uuid4().hex
+        image_path = images_dir / f"{image_id}.jpg"
+        try:
+            if isinstance(user_image, dict) and 'path' in user_image:
+                shutil.copy(user_image['path'], image_path)
+            elif isinstance(user_image, str) and os.path.exists(user_image):
+                shutil.copy(user_image, image_path)
+            elif hasattr(user_image, "save"):
+                user_image.save(image_path)
+            else:
+                raise ValueError(f"Unsupported image type: {type(user_image)}")
+            state.image_context = ImageContext(
+                image_id=image_id,
+                image_path=str(image_path),
+                fingerprint=new_fingerprint
+            )
+            print(f"DEBUG: cached image at {image_path}")
+        except Exception as e:
+            print(f"Error caching uploaded image: {e}")
+            traceback.print_exc()
+    elif state.image_context:
+        print(f"DEBUG: reusing cached image {state.image_context.image_id} at {state.image_context.image_path}")
+    else:
+        print("DEBUG: no image in session; proceeding without image context")
+
     # Start with prior conversation so the session feels continuous
     messages: List[ChatMessage] = list(state.conversation)
     if user_query:
@@ -1021,6 +1046,8 @@ def solve_problem_gradio(user_query, user_image, max_steps=10, max_time=60, llm_
     # NOTE: update the global variable to save the query ID
     global QUERY_ID
     QUERY_ID = query_id
+    # Legacy logging directory (keeps previous dataset layout)
+    os.makedirs(DATASET_DIR / query_id, exist_ok=True)
 
     # Handle visualization clearing based on user preference
     if clear_previous_viz:
@@ -1041,7 +1068,7 @@ def solve_problem_gradio(user_query, user_image, max_steps=10, max_time=60, llm_
         print("✅ Output directory preserved - all charts will be retained")
 
     # Create a directory for the query ID
-    query_cache_dir = os.path.join(DATASET_DIR.name, query_id) # NOTE
+    query_cache_dir = os.path.join(str(session_dir), query_id) # scoped per session + query
     os.makedirs(query_cache_dir, exist_ok=True)
 
     if api_key is None or api_key.strip() == "":
@@ -1090,7 +1117,7 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
     save_query_data(
         query_id=query_id,
         query=user_query,
-        image_path=os.path.join(query_cache_dir, 'query_image.jpg') if user_image else None
+        image_path=state.image_context.image_path if state.image_context else None
     )
 
     # Instantiate Initializer
@@ -1156,7 +1183,7 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
 
     try:
         # Stream the solution
-        for messages, text_output, gallery_output, visual_desc, progress_md in solver.stream_solve_user_problem(user_query, user_image, api_key, messages):
+        for messages, text_output, gallery_output, visual_desc, progress_md in solver.stream_solve_user_problem(user_query, state.image_context, api_key, messages):
             # Save steps data
             save_steps_data(query_id, memory)
             
@@ -1306,6 +1333,7 @@ def main(args):
             with gr.Column(scale=5):
                 # Input area
                 gr.Markdown("### 📤 Data Input")
+                gr.Markdown("Upload an image once per session; subsequent questions reuse the cached image. Upload a new file anytime to replace the session image.")
                 with gr.Row():
                     with gr.Column(scale=1):
                         user_image = gr.Image(
@@ -1319,6 +1347,9 @@ def main(args):
                             placeholder="Describe the cell features or states you want to analyze...", 
                             lines=15
                         )
+                        with gr.Row():
+                            replace_image_btn = gr.Button("Replace image", variant="secondary")
+                            clear_image_btn = gr.Button("Clear image", variant="stop")
                         
                 # Submit button
                 with gr.Row():
@@ -1414,6 +1445,39 @@ def main(args):
             solve_problem_gradio,
             [user_query, user_image, max_steps, max_time, language_model, enabled_fibroblast_tools, enabled_general_tools, clear_previous_viz, conversation_state],
             [chatbot_output, text_output, gallery_output, progress_md, conversation_state]
+        )
+
+        def _drop_cached_image(state: AgentState):
+            if not isinstance(state, AgentState):
+                state = AgentState()
+            ctx = state.image_context
+            if ctx and ctx.image_path and os.path.exists(ctx.image_path):
+                try:
+                    os.remove(ctx.image_path)
+                except Exception as e:
+                    print(f"Warning: failed to delete cached image {ctx.image_path}: {e}")
+            state.image_context = None
+            return state
+
+        def _clear_image(state: AgentState):
+            state = _drop_cached_image(state)
+            return None, state, "**Progress**: Image cleared"
+
+        def _replace_image(state: AgentState):
+            # Drop cached file and prompt user to upload new image.
+            state = _drop_cached_image(state)
+            return None, state, "**Progress**: Upload a new image to replace the current one"
+
+        clear_image_btn.click(
+            _clear_image,
+            inputs=[conversation_state],
+            outputs=[user_image, conversation_state, progress_md]
+        )
+
+        replace_image_btn.click(
+            _replace_image,
+            inputs=[conversation_state],
+            outputs=[user_image, conversation_state, progress_md]
         )
 
     #################### Gradio Interface ####################

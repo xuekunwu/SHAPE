@@ -86,8 +86,6 @@ class Fibroblast_State_Analyzer_Tool(BaseTool):
                 "umap_benefits": "UMAP visualization provides superior insights into cell distribution patterns, helping identify clusters, outliers, and spatial relationships between different cell states in the high-dimensional feature space."
             }
         )
-        self.capabilities = ["state_analysis"]
-        self.domain = "fibroblast"
         # Device configuration
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         logger.info(f"Fibroblast_State_Analyzer_Tool: Using device: {self.device}")
