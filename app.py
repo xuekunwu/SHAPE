@@ -1517,52 +1517,54 @@ def main(args):
                         outputs=[enabled_fibroblast_tools, enabled_general_tools]
                     )
 
-            # Main interface
-            with gr.Column(scale=5):
-                # Image group manager (uploads only)
-                gr.Markdown("### 📤 Image Groups")
-                gr.Markdown("Upload images into named groups (e.g., control, drugA). Each upload appends to the group and caches features; questions always reuse cached features.")
-                with gr.Row():
-                    with gr.Column(scale=1):
-                        user_image = gr.Image(
-                            label="Upload an Image", 
-                            type="pil", 
-                            height=300
-                        )
-                        group_name_input = gr.Textbox(
-                            label="Image Group Name",
-                            placeholder="e.g., control, drugA, replicate1",
-                            value="control"
-                        )
-                        upload_btn = gr.Button("Add Image to Group", variant="primary")
-                        upload_status_md = gr.Markdown("**Upload Status**: No uploads yet")
+            with gr.Row():
+                # Left column: uploads + question trigger (state mutation only)
+                with gr.Column(scale=1):
+                    gr.Markdown("### 📤 Image Groups")
+                    gr.Markdown("Upload images into named groups (e.g., control, drugA). Each upload appends to the group and caches features; no reasoning is run here.")
+                    user_image = gr.Image(
+                        label="Upload an Image", 
+                        type="pil", 
+                        height=240
+                    )
+                    group_name_input = gr.Textbox(
+                        label="Image Group Name",
+                        placeholder="e.g., control, drugA, replicate1",
+                        value="control"
+                    )
+                    upload_btn = gr.Button("Add Image to Group", variant="primary")
+                    upload_status_md = gr.Markdown("**Upload Status**: No uploads yet")
 
-                # Conversation (question-driven execution)
-                gr.Markdown("### 🗣️ Conversation")
-                chatbot_output = gr.Chatbot(
-                    type="messages", 
-                    height=550,
-                    show_label=False
-                )
-                user_query = gr.Textbox(
-                    label="Ask a question about your groups", 
-                    placeholder="e.g., Compare cell counts between control and drugA", 
-                    lines=4
-                )
-                run_button = gr.Button("🚀 Ask Question", variant="primary", size="lg")
-                progress_md = gr.Markdown("**Progress**: Ready")
-                conversation_state = gr.State(AgentState())
+                    gr.Markdown("### ❓ Ask Question")
+                    user_query = gr.Textbox(
+                        label="Ask about your groups", 
+                        placeholder="e.g., Compare cell counts between control and drugA", 
+                        lines=5
+                    )
+                    run_button = gr.Button("🚀 Ask Question", variant="primary", size="lg")
+                    progress_md = gr.Markdown("**Progress**: Ready")
+                    conversation_state = gr.State(AgentState())
 
-                # Visual outputs
-                gr.Markdown("### 🖼️ Visual Outputs")
-                gallery_output = gr.Gallery(
-                    label=None, 
-                    show_label=False,
-                    height=350,
-                    columns=2,
-                    rows=2
-                )
-                text_output = gr.Markdown(value="", visible=False)  # compatibility placeholder
+                # Right column: conversation only
+                with gr.Column(scale=2):
+                    gr.Markdown("### 🗣️ Conversation")
+                    chatbot_output = gr.Chatbot(
+                        type="messages", 
+                        height=700,
+                        show_label=False
+                    )
+
+            # Bottom full-width: summary + visual outputs (artifacts only)
+            gr.Markdown("### 🧾 Summary")
+            text_output = gr.Markdown(value="")
+            gr.Markdown("### 🖼️ Visual Outputs")
+            gallery_output = gr.Gallery(
+                label=None, 
+                show_label=False,
+                height=350,
+                columns=3,
+                rows=2
+            )
 
                 # Bottom row for examples
                 with gr.Row():
