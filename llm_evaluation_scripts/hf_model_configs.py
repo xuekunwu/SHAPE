@@ -655,4 +655,5 @@ def cleanup_loaded_models():
             del model_data['model']
             del model_data['processor']
         _run_local_inference._loaded_models.clear()
-        torch.cuda.empty_cache() 
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache() 

@@ -40,7 +40,7 @@ class Nuclei_Segmenter_Tool(BaseTool):
             output_dir="output_visualizations"  # Set default output directory to output_visualizations
         )
         
-        # Enable GPU if available
+        # Enable GPU if available (fall back to CPU gracefully)
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         print(f"Nuclei_Segmenter_Tool: Using device: {self.device}")
         
@@ -67,8 +67,18 @@ class Nuclei_Segmenter_Tool(BaseTool):
                 raise ValueError("Failed to initialize CellposeModel")
             print(f"Nuclei_Segmenter_Tool: Model initialized successfully")
         except Exception as e:
-            print(f"Nuclei_Segmenter_Tool: Error initializing model: {e}")
-            raise
+            # Retry on CPU if GPU path fails (e.g., NVML issues)
+            try:
+                print(f"Nuclei_Segmenter_Tool: GPU init failed ({e}), retrying on CPU")
+                self.device = torch.device('cpu')
+                self.model = models.CellposeModel(
+                    gpu=False,
+                    pretrained_model=model_path
+                )
+                print("Nuclei_Segmenter_Tool: CPU model initialized successfully")
+            except Exception as cpu_e:
+                print(f"Nuclei_Segmenter_Tool: Error initializing model even on CPU: {cpu_e}")
+                raise
 
     def execute(self, image, diameter=25, flow_threshold=0.6, cellprob_threshold=0, query_cache_dir=None):
         """
