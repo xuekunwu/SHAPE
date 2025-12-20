@@ -445,6 +445,7 @@ class AgentState:
     image_groups: Dict[str, Dict[str, Any]] = field(default_factory=dict)  # {group: {"images": [...], "features": [...], "artifacts": {tool_name: [..]}} }
     last_group_name: str = ""
     question_results: List[QuestionResult] = field(default_factory=list)
+    upload_path_map: Dict[str, str] = field(default_factory=dict)  # image_name -> full path
     session_id: str = field(default_factory=lambda: uuid.uuid4().hex)
 
 def normalize_tool_name(tool_name: str, available_tools=None) -> str:
@@ -1191,18 +1192,26 @@ def parse_arguments():
     return parser.parse_args()
 
 
-def prepare_group_assignment(uploaded_files):
-    """Prepare per-file group assignment table after upload."""
+def prepare_group_assignment(uploaded_files, conversation_state):
+    """Prepare per-file group assignment table after upload and track path mapping."""
+    state: AgentState = conversation_state if isinstance(conversation_state, AgentState) else AgentState()
+    state.upload_path_map = {}
     if not uploaded_files:
-        return gr.update(value=None, visible=False), "**Upload Status**: No files uploaded."
+        return gr.update(value=None, visible=False), "**Upload Status**: No files uploaded.", state
     files = uploaded_files if isinstance(uploaded_files, list) else [uploaded_files]
     if len(files) == 1:
-        return gr.update(value=None, visible=False), "**Upload Status**: Single image detected; it will be assigned to the default group automatically."
+        f = files[0]
+        path = f if isinstance(f, str) else f.get("name", "")
+        image_name = os.path.basename(path)
+        state.upload_path_map[image_name] = path
+        return gr.update(value=None, visible=False), "**Upload Status**: Single image detected; it will be assigned to the default group automatically.", state
     rows = []
     for f in files:
         path = f if isinstance(f, str) else f.get("name", "")
-        rows.append([os.path.basename(path), ""])
-    return gr.update(value=rows, visible=True), "**Upload Status**: Multiple images detected. Please assign a group per image."
+        image_name = os.path.basename(path)
+        state.upload_path_map[image_name] = path
+        rows.append([image_name, ""])
+    return gr.update(value=rows, visible=True), "**Upload Status**: Multiple images detected. Please assign a group per image.", state
 
 
 def upload_image_to_group(user_image, group_table, conversation_state):
@@ -1231,8 +1240,7 @@ def upload_image_to_group(user_image, group_table, conversation_state):
         if not image_name or not group:
             added_msgs.append(f"⚠️ Skipped file '{image_name}' due to missing group.")
             continue
-        # Resolve full path from uploaded files
-        full_path = next((f for f in files if os.path.basename(f) == image_name), None)
+        full_path = state.upload_path_map.get(image_name)
         if not full_path:
             added_msgs.append(f"⚠️ Skipped file '{image_name}' because original path not found.")
             continue
@@ -1575,8 +1583,8 @@ def main(args):
         # Button click event
         user_image.change(
             prepare_group_assignment,
-            inputs=[user_image],
-            outputs=[group_table, group_prompt]
+            inputs=[user_image, conversation_state],
+            outputs=[group_table, group_prompt, conversation_state]
         )
 
         upload_btn.click(
