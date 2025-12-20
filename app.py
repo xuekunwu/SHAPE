@@ -1191,12 +1191,48 @@ def parse_arguments():
     return parser.parse_args()
 
 
-def upload_image_to_group(user_image, group_name, conversation_state):
-    """Gradio handler: add image to a named group and cache features."""
+def prepare_group_assignment(uploaded_files):
+    """Prepare per-file group assignment table after upload."""
+    if not uploaded_files:
+        return gr.update(value=None, visible=False), "**Upload Status**: No files uploaded."
+    files = uploaded_files if isinstance(uploaded_files, list) else [uploaded_files]
+    if len(files) == 1:
+        return gr.update(value=None, visible=False), "**Upload Status**: Single image detected; it will be assigned to the default group automatically."
+    rows = []
+    for f in files:
+        path = f if isinstance(f, str) else f.get("name", "")
+        rows.append([path, ""])
+    return gr.update(value=rows, visible=True), "**Upload Status**: Multiple images detected. Please assign a group per image."
+
+
+def upload_image_to_group(user_image, group_table, conversation_state):
+    """Gradio handler: add image(s) to group(s) and cache features."""
     state: AgentState = conversation_state if isinstance(conversation_state, AgentState) else AgentState()
     _, images_dir, features_dir = ensure_session_dirs(state.session_id)
-    status = add_image_to_group(group_name or "default", user_image, state, images_dir, features_dir)
-    progress = f"**Progress**: {status}"
+
+    files = user_image if isinstance(user_image, list) else [user_image] if user_image else []
+    if not files:
+        return state, "**Progress**: ⚠️ No image provided."
+
+    # If single image, auto-assign default group
+    if len(files) == 1:
+        status = add_image_to_group("default", files[0], state, images_dir, features_dir)
+        return state, f"**Progress**: {status}"
+
+    # Multiple images: require group_table rows [filepath, group]
+    if not group_table:
+        return state, "**Progress**: ⚠️ Multiple images uploaded. Please assign a group per image before adding."
+    added_msgs = []
+    for row in group_table:
+        if not row or len(row) < 2:
+            continue
+        file_path, group = row[0], (row[1] or "").strip()
+        if not file_path or not group:
+            added_msgs.append(f"⚠️ Skipped file '{file_path}' due to missing group.")
+            continue
+        status = add_image_to_group(group, file_path, state, images_dir, features_dir)
+        added_msgs.append(status)
+    progress = "**Progress**:\n" + "\n".join(f"- {m}" for m in added_msgs) if added_msgs else "**Progress**: ⚠️ No images processed."
     return state, progress
 
 
@@ -1473,11 +1509,13 @@ def main(args):
         with gr.Row():
             with gr.Column(scale=1):
                 gr.Markdown("### 📤 Image Groups")
+                gr.Markdown("Upload one or many images. Single image: auto-assigned to default group. Multiple images: assign a group per file below. Uploads append to the registry; no reasoning is run here.")
                 user_image = gr.File(label="Upload Images", file_count="multiple", type="filepath")
-                group_name_input = gr.Textbox(label="Image Group Name", placeholder="e.g., control, drugA, replicate1", value="control")
-                upload_btn = gr.Button("Add Image to Group", variant="primary")
-                upload_status_md = gr.Markdown("**Upload Status**: No uploads yet")
+                group_table = gr.Dataframe(headers=["file_path", "group"], row_count=0, col_count=2, wrap=True, interactive=True, visible=False)
+                group_prompt = gr.Markdown("**Upload Status**: No uploads yet")
+                upload_btn = gr.Button("Add Image(s) to Group(s)", variant="primary")
                 gr.Markdown("### ❓ Ask Question")
+                group_name_input = gr.Textbox(label="Group to analyze", placeholder="e.g., control or drugA", value="")
                 user_query = gr.Textbox(label="Ask about your groups", placeholder="e.g., Compare cell counts between control and drugA", lines=5)
                 run_button = gr.Button("🚀 Ask Question", variant="primary", size="lg")
                 progress_md = gr.Markdown("**Progress**: Ready")
@@ -1530,10 +1568,16 @@ def main(args):
                 )
 
         # Button click event
+        user_image.change(
+            prepare_group_assignment,
+            inputs=[user_image],
+            outputs=[group_table, group_prompt]
+        )
+
         upload_btn.click(
             upload_image_to_group,
-            inputs=[user_image, group_name_input, conversation_state],
-            outputs=[conversation_state, upload_status_md]
+            inputs=[user_image, group_table, conversation_state],
+            outputs=[conversation_state, group_prompt]
         )
 
         run_button.click(
