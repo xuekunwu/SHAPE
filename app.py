@@ -1428,44 +1428,19 @@ def main(args):
         **SHPAE** is an open-source assistant for interpreting cell images, powered by large language models and tool-based reasoning.
         """)
         
+        # Model / tool configuration (top row)
         with gr.Row():
-            # Left control panel
             with gr.Column(scale=1, min_width=250):
                 gr.Markdown("### ⚙️ Model Configuration")
-                
-                # Model and limits
                 multimodal_models = [m for m in OPENAI_MODEL_CONFIGS.values()]
                 model_names = [m["model_id"] for m in multimodal_models]
-                
-                # Set default to first OpenAI model if available, otherwise first model
-                default_model = None
-                for model in multimodal_models:
-                    if model.get("model_type") == "openai":
-                        default_model = model["model_id"]
-                        break
-                if not default_model and model_names:
-                    default_model = model_names[0]
-                
-                language_model = gr.Dropdown(
-                    choices=model_names,
-                    value=default_model,
-                    label="Multimodal Large Language Model"
-                )
+                default_model = next((m["model_id"] for m in multimodal_models if m.get("model_type") == "openai"), model_names[0] if model_names else None)
+                language_model = gr.Dropdown(choices=model_names, value=default_model, label="Multimodal Large Language Model")
                 max_steps = gr.Slider(1, 15, value=10, label="Max Reasoning Steps")
                 max_time = gr.Slider(60, 600, value=300, label="Max Analysis Time (seconds)")
-
-                # Visualization options
                 gr.Markdown("#### 📊 Visualization Options")
-                clear_previous_viz = gr.Checkbox(
-                    label="Clear previous visualizations", 
-                    value=False,
-                    info="Check this to clear all previous charts when starting new analysis"
-                )
-
-                # Tool selection
+                clear_previous_viz = gr.Checkbox(label="Clear previous visualizations", value=False, info="Check this to clear all previous charts when starting new analysis")
                 gr.Markdown("#### 🛠️ Available Tools")
-                
-                # Fibroblast analysis tools
                 fibroblast_tools = [
                     "Image_Preprocessor_Tool",
                     "Nuclei_Segmenter_Tool",
@@ -1473,8 +1448,6 @@ def main(args):
                     "Fibroblast_State_Analyzer_Tool",
                     "Fibroblast_Activation_Scorer_Tool"
                 ]
-                
-                # General tools
                 general_tools = [
                     "Generalist_Solution_Generator_Tool",
                     "Python_Code_Generator_Tool",
@@ -1490,134 +1463,76 @@ def main(args):
                     "Text_Detector_Tool",
                     "Advanced_Object_Detector_Tool"
                 ]
-                
                 with gr.Accordion("🧬 Fibroblas Tools", open=True):
-                    enabled_fibroblast_tools = gr.CheckboxGroup(
-                        choices=fibroblast_tools, 
-                        value=fibroblast_tools, 
-                        label="Select Fibroblast Analysis Tools"
-                    )
-
+                    enabled_fibroblast_tools = gr.CheckboxGroup(choices=fibroblast_tools, value=fibroblast_tools, label="Select Fibroblast Analysis Tools")
                 with gr.Accordion("🧩 General Tools", open=False):
-                    enabled_general_tools = gr.CheckboxGroup(
-                        choices=general_tools, 
-                        label="Select General Purpose Tools"
-                    )
-
+                    enabled_general_tools = gr.CheckboxGroup(choices=general_tools, label="Select General Purpose Tools")
                 with gr.Row():
-                    gr.Button("Select Fibroblast Tools", size="sm").click(
-                        lambda: fibroblast_tools, outputs=enabled_fibroblast_tools
-                    )
-                    gr.Button("Select All Tools", size="sm").click(
-                        lambda: (fibroblast_tools, general_tools), 
-                        outputs=[enabled_fibroblast_tools, enabled_general_tools]
-                    )
-                    gr.Button("Clear Selection", size="sm").click(
-                        lambda: ([], []), 
-                        outputs=[enabled_fibroblast_tools, enabled_general_tools]
-                    )
+                    gr.Button("Select Fibroblast Tools", size="sm").click(lambda: fibroblast_tools, outputs=enabled_fibroblast_tools)
+                    gr.Button("Select All Tools", size="sm").click(lambda: (fibroblast_tools, general_tools), outputs=[enabled_fibroblast_tools, enabled_general_tools])
+                    gr.Button("Clear Selection", size="sm").click(lambda: ([], []), outputs=[enabled_fibroblast_tools, enabled_general_tools])
 
-            with gr.Row():
-                # Left column: uploads + question trigger (state mutation only)
-                with gr.Column(scale=1):
-                    gr.Markdown("### 📤 Image Groups")
-                    gr.Markdown("Upload images into named groups (e.g., control, drugA). Each upload appends to the group and caches features; no reasoning is run here.")
-                    user_image = gr.Image(
-                        label="Upload an Image", 
-                        type="pil", 
-                        height=240
-                    )
-                    group_name_input = gr.Textbox(
-                        label="Image Group Name",
-                        placeholder="e.g., control, drugA, replicate1",
-                        value="control"
-                    )
-                    upload_btn = gr.Button("Add Image to Group", variant="primary")
-                    upload_status_md = gr.Markdown("**Upload Status**: No uploads yet")
+        # Main interaction row: left (uploads + question), right (conversation)
+        with gr.Row():
+            with gr.Column(scale=1):
+                gr.Markdown("### 📤 Image Groups")
+                gr.Markdown("Upload images into named groups (e.g., control, drugA). Each upload appends to the group and caches features; no reasoning is run here.")
+                user_image = gr.Image(label="Upload an Image", type="pil", height=240)
+                group_name_input = gr.Textbox(label="Image Group Name", placeholder="e.g., control, drugA, replicate1", value="control")
+                upload_btn = gr.Button("Add Image to Group", variant="primary")
+                upload_status_md = gr.Markdown("**Upload Status**: No uploads yet")
+                gr.Markdown("### ❓ Ask Question")
+                user_query = gr.Textbox(label="Ask about your groups", placeholder="e.g., Compare cell counts between control and drugA", lines=5)
+                run_button = gr.Button("🚀 Ask Question", variant="primary", size="lg")
+                progress_md = gr.Markdown("**Progress**: Ready")
+                conversation_state = gr.State(AgentState())
+            with gr.Column(scale=2):
+                gr.Markdown("### 🗣️ Conversation")
+                chatbot_output = gr.Chatbot(type="messages", height=700, show_label=False)
 
-                    gr.Markdown("### ❓ Ask Question")
-                    user_query = gr.Textbox(
-                        label="Ask about your groups", 
-                        placeholder="e.g., Compare cell counts between control and drugA", 
-                        lines=5
-                    )
-                    run_button = gr.Button("🚀 Ask Question", variant="primary", size="lg")
-                    progress_md = gr.Markdown("**Progress**: Ready")
-                    conversation_state = gr.State(AgentState())
+        # Bottom full-width: summary and visual outputs
+        gr.Markdown("### 🧾 Summary")
+        text_output = gr.Markdown(value="")
+        gr.Markdown("### 🖼️ Visual Outputs")
+        gallery_output = gr.Gallery(label=None, show_label=False, height=350, columns=3, rows=2)
 
-                # Right column: conversation only
-                with gr.Column(scale=2):
-                    gr.Markdown("### 🗣️ Conversation")
-                    chatbot_output = gr.Chatbot(
-                        type="messages", 
-                        height=700,
-                        show_label=False
-                    )
-
-            # Bottom full-width: summary + visual outputs (artifacts only)
-            gr.Markdown("### 🧾 Summary")
-            text_output = gr.Markdown(value="")
-            gr.Markdown("### 🖼️ Visual Outputs")
-            gallery_output = gr.Gallery(
-                label=None, 
-                show_label=False,
-                height=350,
-                columns=3,
-                rows=2
-            )
-
-                # Bottom row for examples
-                with gr.Row():
-                    with gr.Column(scale=5):
-                        gr.Markdown("## 💡 Try these examples with suggested tools.")
-                        
-                        # Define example lists
-                        fibroblast_examples = [
-                            ["Image Preprocessing", "examples/A5_01_1_1_Phase Contrast_001.png", "Normalize this phase contrast image.", 
-                             "Image_Preprocessor_Tool", "Illumination-corrected and brightness-normalized phase contrast image."],
-                            ["Cell Identification", "examples/A2_02_1_1_Phase Contrast_001.png", "How many cells are there in this image.", 
-                             "Image_Preprocessor_Tool, Nuclei_Segmenter_Tool", "258 cells are identified and their nuclei are labeled."],
-                            ["Single-Cell Cropping", "examples/A3_02_1_1_Phase Contrast_001.png", "Crop single cells from the segmented nuclei in this image.", 
-                             "Image_Preprocessor_Tool, Nuclei_Segmenter_Tool, Single_Cell_Cropper_Tool", "Individual cell crops extracted from the image."],
-                            ["Fibroblast State Analysis", "examples/A4_02_1_1_Phase Contrast_001.png", "Analyze the fibroblast cell states in this image.", 
-                             "Image_Preprocessor_Tool, Nuclei_Segmenter_Tool, Single_Cell_Cropper_Tool, Fibroblast_State_Analyzer_Tool", "540 cells identified and segmented successfully. Comprehensive analysis of fibroblast cell states have been performed with visualizations."],
-                            ["Fibroblast Activation Scoring", "examples/A5_02_1_1_Phase Contrast_001.png", "Quantify the activation score of each fibroblast in this image.",
-                             "Image_Preprocessor_Tool, Nuclei_Segmenter_Tool, Single_Cell_Cropper_Tool, Fibroblast_State_Analyzer_Tool, Fibroblast_Activation_Scorer_Tool", "Activation scores for all fibroblasts have been computed and normalized based on the reference map."]
-                        ]
-                        
-                        general_examples = [
-                            ["Pathology Diagnosis", "examples/pathology.jpg", "What are the cell types in this image?", 
-                             "Generalist_Solution_Generator_Tool, Image_Captioner_Tool, Relevant_Patch_Zoomer_Tool", "Need expert insights."],
-                            ["Visual Reasoning", "examples/rotting_kiwi.png", "You are given a 3 x 3 grid in which each cell can contain either no kiwi, one fresh kiwi, or one rotten kiwi. Every minute, any fresh kiwi that is 4-directionally adjacent to a rotten kiwi also becomes rotten. What is the minimum number of minutes that must elapse until no cell has a fresh kiwi?", 
-                             "Image_Captioner_Tool", "4 minutes"],
-                            ["Scientific Research", None, "What are the research trends in tool agents with large language models for scientific discovery? Please consider the latest literature from ArXiv, PubMed, Nature, and news sources.", 
-                             "ArXiv_Paper_Searcher_Tool, Pubmed_Search_Tool, Nature_News_Fetcher_Tool", "Open-ended question. No reference answer."]
-                        ]
-
-                        # Helper function to distribute tools
-                        def distribute_tools(category, img, q, tools_str, ans):
-                            selected_tools = [tool.strip() for tool in tools_str.split(',')]
-                            selected_fibroblast = [tool for tool in selected_tools if tool in fibroblast_tools]
-                            selected_general = [tool for tool in selected_tools if tool in general_tools]
-                            return img, q, selected_fibroblast, selected_general
-
-                        gr.Markdown("#### 🧬 Fibroblast Analysis Examples")
-                        gr.Examples(
-                            examples=fibroblast_examples,
-                            inputs=[gr.Textbox(label="Category", visible=False), user_image, user_query, gr.Textbox(label="Select Tools", visible=False), gr.Textbox(label="Reference Answer", visible=False)],
-                            outputs=[user_image, user_query, enabled_fibroblast_tools, enabled_general_tools],
-                            fn=distribute_tools,
-                            cache_examples=False
-                        )
-                        
-                        gr.Markdown("#### 🧩 General Purpose Examples")
-                        gr.Examples(
-                            examples=general_examples,
-                            inputs=[gr.Textbox(label="Category", visible=False), user_image, user_query, gr.Textbox(label="Select Tools", visible=False), gr.Textbox(label="Reference Answer", visible=False)],
-                            outputs=[user_image, user_query, enabled_fibroblast_tools, enabled_general_tools],
-                            fn=distribute_tools,
-                            cache_examples=False
-                        )
+        # Examples row (optional, no nesting issues)
+        with gr.Row():
+            with gr.Column(scale=5):
+                gr.Markdown("## 💡 Try these examples with suggested tools.")
+                fibroblast_examples = [
+                    ["Image Preprocessing", "examples/A5_01_1_1_Phase Contrast_001.png", "Normalize this phase contrast image.", "Image_Preprocessor_Tool", "Illumination-corrected and brightness-normalized phase contrast image."],
+                    ["Cell Identification", "examples/A2_02_1_1_Phase Contrast_001.png", "How many cells are there in this image.", "Image_Preprocessor_Tool, Nuclei_Segmenter_Tool", "258 cells are identified and their nuclei are labeled."],
+                    ["Single-Cell Cropping", "examples/A3_02_1_1_Phase Contrast_001.png", "Crop single cells from the segmented nuclei in this image.", "Image_Preprocessor_Tool, Nuclei_Segmenter_Tool, Single_Cell_Cropper_Tool", "Individual cell crops extracted from the image."],
+                    ["Fibroblast State Analysis", "examples/A4_02_1_1_Phase Contrast_001.png", "Analyze the fibroblast cell states in this image.", "Image_Preprocessor_Tool, Nuclei_Segmenter_Tool, Single_Cell_Cropper_Tool, Fibroblast_State_Analyzer_Tool", "540 cells identified and segmented successfully. Comprehensive analysis of fibroblast cell states have been performed with visualizations."],
+                    ["Fibroblast Activation Scoring", "examples/A5_02_1_1_Phase Contrast_001.png", "Quantify the activation score of each fibroblast in this image.", "Image_Preprocessor_Tool, Nuclei_Segmenter_Tool, Single_Cell_Cropper_Tool, Fibroblast_State_Analyzer_Tool, Fibroblast_Activation_Scorer_Tool", "Activation scores for all fibroblasts have been computed and normalized based on the reference map."]
+                ]
+                general_examples = [
+                    ["Pathology Diagnosis", "examples/pathology.jpg", "What are the cell types in this image?", "Generalist_Solution_Generator_Tool, Image_Captioner_Tool, Relevant_Patch_Zoomer_Tool", "Need expert insights."],
+                    ["Visual Reasoning", "examples/rotting_kiwi.png", "You are given a 3 x 3 grid in which each cell can contain either no kiwi, one fresh kiwi, or one rotten kiwi. Every minute, any fresh kiwi that is 4-directionally adjacent to a rotten kiwi also becomes rotten. What is the minimum number of minutes that must elapse until no cell has a fresh kiwi?", "Image_Captioner_Tool", "4 minutes"],
+                    ["Scientific Research", None, "What are the research trends in tool agents with large language models for scientific discovery? Please consider the latest literature from ArXiv, PubMed, Nature, and news sources.", "ArXiv_Paper_Searcher_Tool, Pubmed_Search_Tool, Nature_News_Fetcher_Tool", "Open-ended question. No reference answer."]
+                ]
+                def distribute_tools(category, img, q, tools_str, ans):
+                    selected_tools = [tool.strip() for tool in tools_str.split(',')]
+                    selected_fibroblast = [tool for tool in selected_tools if tool in fibroblast_tools]
+                    selected_general = [tool for tool in selected_tools if tool in general_tools]
+                    return img, q, selected_fibroblast, selected_general
+                gr.Markdown("#### 🧬 Fibroblast Analysis Examples")
+                gr.Examples(
+                    examples=fibroblast_examples,
+                    inputs=[gr.Textbox(label="Category", visible=False), user_image, user_query, gr.Textbox(label="Select Tools", visible=False), gr.Textbox(label="Reference Answer", visible=False)],
+                    outputs=[user_image, user_query, enabled_fibroblast_tools, enabled_general_tools],
+                    fn=distribute_tools,
+                    cache_examples=False
+                )
+                gr.Markdown("#### 🧩 General Purpose Examples")
+                gr.Examples(
+                    examples=general_examples,
+                    inputs=[gr.Textbox(label="Category", visible=False), user_image, user_query, gr.Textbox(label="Select Tools", visible=False), gr.Textbox(label="Reference Answer", visible=False)],
+                    outputs=[user_image, user_query, enabled_fibroblast_tools, enabled_general_tools],
+                    fn=distribute_tools,
+                    cache_examples=False
+                )
 
         # Button click event
         upload_btn.click(
