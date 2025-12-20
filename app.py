@@ -1441,7 +1441,7 @@ def main(args):
                     "Text_Detector_Tool",
                     "Advanced_Object_Detector_Tool"
                 ]
-                tools_dropdown = gr.Dropdown(choices=all_tools_flat, value=all_tools_flat, multiselect=False, label="Select Tools")
+                tools_dropdown = gr.Dropdown(choices=all_tools_flat, value=None, multiselect=False, label="Select Tools")
 
         # Main interaction row: left (uploads + question), right (conversation)
         with gr.Row():
@@ -1485,7 +1485,7 @@ def main(args):
                 def distribute_tools(category, img, q, tools_str, ans):
                     selected_tools = [tool.strip() for tool in tools_str.split(',')]
                     selected = [tool for tool in selected_tools if tool in all_tools_flat]
-                    return img, q, selected
+                    return img, q, (selected[0] if selected else None)
                 gr.Markdown("#### 🧬 Fibroblast Analysis Examples")
                 gr.Examples(
                     examples=fibroblast_examples,
