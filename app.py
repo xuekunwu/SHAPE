@@ -265,12 +265,42 @@ def encode_image_features(image_path: str, features_dir: Path) -> str:
         return ""
 
 
+def make_artifact_key(tool_name: str, image_path: str, context: str = "", sub_goal: str = "") -> str:
+    """Deterministic key for caching tool outputs tied to inputs."""
+    hasher = hashlib.sha256()
+    hasher.update(tool_name.encode())
+    hasher.update(str(image_path or "").encode())
+    hasher.update(str(context or "").encode())
+    hasher.update(str(sub_goal or "").encode())
+    return hasher.hexdigest()
+
+
+def get_cached_artifact(state: AgentState, group_name: str, tool_name: str, key: str):
+    group = state.image_groups.get(group_name, {})
+    artifacts = group.get("artifacts", {}).get(tool_name, [])
+    for art in artifacts:
+        if art.get("key") == key:
+            return art
+    return None
+
+
+def store_artifact(state: AgentState, group_name: str, tool_name: str, key: str, result: Any):
+    state.image_groups.setdefault(group_name, {"images": [], "features": [], "artifacts": {}})
+    state.image_groups[group_name].setdefault("artifacts", {}).setdefault(tool_name, [])
+    entry = {
+        "key": key,
+        "result": result,
+        "created_at": time.time()
+    }
+    state.image_groups[group_name]["artifacts"][tool_name].append(entry)
+
+
 def add_image_to_group(group_name: str, user_image, state: "AgentState", images_dir: Path, features_dir: Path) -> str:
     """Store an uploaded image into a session-level group and cache its features."""
     if not user_image:
         return "⚠️ No image provided."
     group = group_name.strip() or "default"
-    state.image_groups.setdefault(group, {"images": [], "features": []})
+    state.image_groups.setdefault(group, {"images": [], "features": [], "artifacts": {}})
 
     fingerprint = compute_image_fingerprint(user_image)
     for entry in state.image_groups[group]["images"]:
@@ -313,6 +343,7 @@ def add_image_to_group(group_name: str, user_image, state: "AgentState", images_
     state.image_groups[group]["images"].append(entry)
     if feature_path:
         state.image_groups[group]["features"].append(feature_path)
+    # Preserve existing artifacts; already initialized above
     state.last_group_name = group
     state.image_context = ImageContext(
         image_id=image_id,
@@ -345,7 +376,7 @@ class AgentState:
     last_sub_goal: str = ""
     last_visual_description: str = "*Ready to display analysis results and processed images.*"
     image_context: ImageContext = None
-    image_groups: Dict[str, Dict[str, Any]] = field(default_factory=dict)  # {group: {"images": [...], "features": [...]} }
+    image_groups: Dict[str, Dict[str, Any]] = field(default_factory=dict)  # {group: {"images": [...], "features": [...], "artifacts": {tool_name: [..]}} }
     last_group_name: str = ""
     session_id: str = field(default_factory=lambda: uuid.uuid4().hex)
 
@@ -623,14 +654,30 @@ class Solver:
                 yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Tool not available"
                 continue
 
-            # [Step 6-7] Generate and execute the tool command
+            # [Step 6-7] Generate and execute the tool command (with artifact reuse)
             safe_path = img_path_for_tools.replace("\\", "\\\\") if img_path_for_tools else None
             conversation_text = self._format_conversation_history()
-            tool_command = self.executor.generate_tool_command(user_query, safe_path, context, sub_goal, tool_name, self.planner.toolbox_metadata[tool_name], self.memory, conversation_context=conversation_text)
-            analysis, explanation, command = self.executor.extract_explanation_and_command(tool_command)
-            result = self.executor.execute_tool_command(tool_name, command)
-            result = make_json_serializable(result)
-            print(f"Tool '{tool_name}' result:", result)
+            artifact_key = make_artifact_key(tool_name, safe_path, context, sub_goal)
+            cached_artifact = get_cached_artifact(self.agent_state, group_name, tool_name, artifact_key)
+
+            if cached_artifact:
+                result = cached_artifact.get("result")
+                analysis = "Cached result reused"
+                explanation = "Found matching artifact in session; skipping execution."
+                command = "execution = 'cached_artifact'"
+                messages.append(ChatMessage(
+                    role="assistant",
+                    content=f"♻️ Reusing cached {tool_name} result from previous turn.",
+                    metadata={"title": f"### 🛠️ Step {step_count}: Cached Execution ({tool_name})"}
+                ))
+                print(f"Reused cached artifact for {tool_name} (key={artifact_key})")
+            else:
+                tool_command = self.executor.generate_tool_command(user_query, safe_path, context, sub_goal, self.planner.toolbox_metadata[tool_name], self.memory, conversation_context=conversation_text)
+                analysis, explanation, command = self.executor.extract_explanation_and_command(tool_command)
+                result = self.executor.execute_tool_command(tool_name, command)
+                result = make_json_serializable(result)
+                store_artifact(self.agent_state, group_name, tool_name, artifact_key, result)
+                print(f"Tool '{tool_name}' result:", result)
             
             # Generate dynamic visual description based on tool and results
             visual_description = self.generate_visual_description(tool_name, result, self.visual_outputs_for_gradio)
