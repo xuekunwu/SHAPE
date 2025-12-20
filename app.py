@@ -1510,7 +1510,6 @@ def main(args):
         with gr.Row():
             with gr.Column(scale=1):
                 gr.Markdown("### 📤 Image Groups")
-                gr.Markdown("Upload one or many images. Single image: auto-assigned to default group. Multiple images: assign a group per file below. Uploads append to the registry; no reasoning is run here.")
                 user_image = gr.File(label="Upload Images", file_count="multiple", type="filepath")
                 group_table = gr.Dataframe(headers=["file_path", "group"], row_count=0, col_count=2, wrap=True, interactive=True, visible=False)
                 group_prompt = gr.Markdown("**Upload Status**: No uploads yet")
