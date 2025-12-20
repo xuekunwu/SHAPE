@@ -206,9 +206,11 @@ def ensure_session_dirs(session_id: str):
     """Create and return session-scoped directories for caching."""
     session_dir = DATASET_DIR / session_id
     images_dir = session_dir / "images"
+    features_dir = session_dir / "features"
     session_dir.mkdir(parents=True, exist_ok=True)
     images_dir.mkdir(parents=True, exist_ok=True)
-    return session_dir, images_dir
+    features_dir.mkdir(parents=True, exist_ok=True)
+    return session_dir, images_dir, features_dir
 
 
 def compute_image_fingerprint(image) -> str:
@@ -232,6 +234,90 @@ def compute_image_fingerprint(image) -> str:
         print(f"Warning: failed to compute image fingerprint: {e}")
         return ""
 
+
+def encode_image_features(image_path: str, features_dir: Path) -> str:
+    """
+    Compute a lightweight cached encoding for an image.
+    This runs once per upload and is reused for all subsequent questions.
+    """
+    try:
+        features_dir.mkdir(parents=True, exist_ok=True)
+        feature_path = features_dir / (Path(image_path).stem + "_features.npy")
+        if feature_path.exists():
+            return str(feature_path)
+        img = Image.open(image_path).convert("RGB").resize((64, 64))
+        arr = np.asarray(img, dtype=np.float32) / 255.0
+        pooled = np.concatenate([
+            arr.mean(axis=(0, 1)),
+            arr.std(axis=(0, 1)),
+            arr.max(axis=(0, 1)),
+            arr.min(axis=(0, 1))
+        ])
+        np.save(feature_path, pooled)
+        return str(feature_path)
+    except Exception as e:
+        print(f"Warning: failed to encode image features for {image_path}: {e}")
+        return ""
+
+
+def add_image_to_group(group_name: str, user_image, state: AgentState, images_dir: Path, features_dir: Path) -> str:
+    """Store an uploaded image into a session-level group and cache its features."""
+    if not user_image:
+        return "⚠️ No image provided."
+    group = group_name.strip() or "default"
+    state.image_groups.setdefault(group, {"images": [], "features": []})
+
+    fingerprint = compute_image_fingerprint(user_image)
+    for entry in state.image_groups[group]["images"]:
+        if entry.get("fingerprint") == fingerprint:
+            state.last_group_name = group
+            state.image_context = ImageContext(
+                image_id=entry["image_id"],
+                image_path=entry["image_path"],
+                features_path=entry.get("features_path", ""),
+                fingerprint=fingerprint,
+                source_type="group"
+            )
+            return f"✅ Image already cached in group '{group}'. Reusing existing features."
+
+    image_id = uuid.uuid4().hex
+    group_image_dir = images_dir / group
+    group_image_dir.mkdir(parents=True, exist_ok=True)
+    image_path = group_image_dir / f"{image_id}.jpg"
+    try:
+        if isinstance(user_image, dict) and 'path' in user_image:
+            shutil.copy(user_image['path'], image_path)
+        elif isinstance(user_image, str) and os.path.exists(user_image):
+            shutil.copy(user_image, image_path)
+        elif hasattr(user_image, "save"):
+            user_image.save(image_path)
+        else:
+            raise ValueError(f"Unsupported image type: {type(user_image)}")
+    except Exception as e:
+        print(f"Error caching uploaded image: {e}")
+        traceback.print_exc()
+        return f"❌ Failed to save image to group '{group}': {e}"
+
+    feature_path = encode_image_features(str(image_path), features_dir / group)
+    entry = {
+        "image_id": image_id,
+        "image_path": str(image_path),
+        "fingerprint": fingerprint,
+        "features_path": feature_path
+    }
+    state.image_groups[group]["images"].append(entry)
+    if feature_path:
+        state.image_groups[group]["features"].append(feature_path)
+    state.last_group_name = group
+    state.image_context = ImageContext(
+        image_id=image_id,
+        image_path=str(image_path),
+        features_path=feature_path,
+        fingerprint=fingerprint,
+        source_type="group"
+    )
+    return f"✅ Added image to group '{group}' and cached features."
+
 ########### End of Test Huggingface Dataset ###########
 
 
@@ -240,6 +326,7 @@ class ImageContext:
     """Persistent image metadata for the session."""
     image_id: str
     image_path: str
+    features_path: str = ""
     source_type: str = "uploaded"
     created_at: float = field(default_factory=time.time)
     fingerprint: str = ""
@@ -253,6 +340,8 @@ class AgentState:
     last_sub_goal: str = ""
     last_visual_description: str = "*Ready to display analysis results and processed images.*"
     image_context: ImageContext = None
+    image_groups: Dict[str, Dict[str, Any]] = field(default_factory=dict)  # {group: {"images": [...], "features": [...]} }
+    last_group_name: str = ""
     session_id: str = field(default_factory=lambda: uuid.uuid4().hex)
 
 def normalize_tool_name(tool_name: str, available_tools=None) -> str:
@@ -389,11 +478,15 @@ class Solver:
         visual_description = "*Ready to display analysis results and processed images.*"
 
         # Pull image path from cached session context
-        img_path = image_context.image_path if image_context else None
+        img_path_for_tools = image_context.image_path if image_context else None
+        img_path_for_analysis = image_context.features_path if image_context and image_context.features_path else None
         img_id = image_context.image_id if image_context else None
         self.agent_state.image_context = image_context
+        group_name = getattr(self.agent_state, "last_group_name", "")
+        analysis_img_ref = img_path_for_analysis or img_path_for_tools
         print(f"=== DEBUG: Image context ===")
-        print(f"DEBUG: img_path: {img_path}")
+        print(f"DEBUG: img_path_for_tools: {img_path_for_tools}")
+        print(f"DEBUG: img_path_for_analysis: {img_path_for_analysis}")
         print(f"DEBUG: image_id: {img_id}")
 
         # Set tool cache directory
@@ -401,8 +494,9 @@ class Solver:
         self.executor.set_query_cache_dir(_tool_cache_dir) # NOTE: set query cache directory
         
         # Step 1: Display the received inputs
-        if image_context and img_path:
-            messages.append(ChatMessage(role="assistant", content=f"### 📝 Received Query:\n{user_query}\n### 🖼️ Using session image `{img_id}`"))
+        if image_context and img_path_for_tools:
+            group_label = f" in group `{group_name}`" if group_name else ""
+            messages.append(ChatMessage(role="assistant", content=f"### 📝 Received Query:\n{user_query}\n### 🖼️ Using session image `{img_id}`{group_label}"))
         else:
             messages.append(ChatMessage(role="assistant", content=f"### 📝 Received Query:\n{user_query}"))
         yield messages, "", [], visual_description, "**Progress**: Input received"
@@ -417,11 +511,11 @@ class Solver:
 
         # [Step 4] Query Analysis - This is the key step that should happen first
         print(f"Debug - Starting query analysis for: {user_query}")
-        print(f"Debug - img_path for query analysis: {img_path}")
+        print(f"Debug - img_path for query analysis: {analysis_img_ref}")
         query_analysis_start = time.time()
         try:
             conversation_text = self._format_conversation_history()
-            query_analysis = self.planner.analyze_query(user_query, img_path, conversation_text)
+            query_analysis = self.planner.analyze_query(user_query, analysis_img_ref, conversation_text)
             query_analysis_end = time.time()
             query_analysis_time = query_analysis_end - query_analysis_start
             print(f"Debug - Query analysis completed: {len(query_analysis)} characters")
@@ -497,7 +591,7 @@ class Solver:
 
             # [Step 5] Generate the next step
             conversation_text = self._format_conversation_history()
-            next_step = self.planner.generate_next_step(user_query, img_path, query_analysis, self.memory, step_count, self.max_steps, conversation_context=conversation_text)
+            next_step = self.planner.generate_next_step(user_query, analysis_img_ref, query_analysis, self.memory, step_count, self.max_steps, conversation_context=conversation_text)
             context, sub_goal, tool_name = self.planner.extract_context_subgoal_and_tool(next_step)
             context = context or self.agent_state.last_context or ""
             sub_goal = sub_goal or self.agent_state.last_sub_goal or ""
@@ -524,7 +618,7 @@ class Solver:
                 continue
 
             # [Step 6-7] Generate and execute the tool command
-            safe_path = img_path.replace("\\", "\\\\") if img_path else None
+            safe_path = img_path_for_tools.replace("\\", "\\\\") if img_path_for_tools else None
             conversation_text = self._format_conversation_history()
             tool_command = self.executor.generate_tool_command(user_query, safe_path, context, sub_goal, tool_name, self.planner.toolbox_metadata[tool_name], self.memory, conversation_context=conversation_text)
             analysis, explanation, command = self.executor.extract_explanation_and_command(tool_command)
@@ -644,7 +738,7 @@ class Solver:
             # [Step 8] Memory update and stopping condition
             self.memory.add_action(step_count, tool_name, sub_goal, tool_command, result)
             conversation_text = self._format_conversation_history()
-            stop_verification = self.planner.verificate_memory(user_query, img_path, query_analysis, self.memory, conversation_context=conversation_text)
+            stop_verification = self.planner.verificate_memory(user_query, analysis_img_ref, query_analysis, self.memory, conversation_context=conversation_text)
             context_verification, conclusion = self.planner.extract_conclusion(stop_verification)
 
             # Save the context verification data
@@ -712,7 +806,7 @@ class Solver:
             messages.append(ChatMessage(role="assistant", content="<br>"))
             final_output_start = time.time()
             conversation_text = self._format_conversation_history()
-            direct_output = self.planner.generate_direct_output(user_query, img_path, self.memory, conversation_context=conversation_text)
+            direct_output = self.planner.generate_direct_output(user_query, analysis_img_ref, self.memory, conversation_context=conversation_text)
             final_output_end = time.time()
             final_output_time = final_output_end - final_output_start
             
@@ -835,7 +929,7 @@ class Solver:
         if 'final' in self.output_types:
             final_output_start = time.time()
             conversation_text = self._format_conversation_history()
-            final_output = self.planner.generate_final_output(user_query, img_path, self.memory, conversation_context=conversation_text) # Disabled visibility for now
+            final_output = self.planner.generate_final_output(user_query, analysis_img_ref, self.memory, conversation_context=conversation_text) # Disabled visibility for now
             final_output_end = time.time()
             final_output_time = final_output_end - final_output_start
             # messages.append(ChatMessage(role="assistant", content=f"🎯 Final Output:\n{final_output}"))
@@ -965,13 +1059,22 @@ def parse_arguments():
     return parser.parse_args()
 
 
-def solve_problem_gradio(user_query, user_image, max_steps=10, max_time=60, llm_model_engine=None, enabled_fibroblast_tools=None, enabled_general_tools=None, clear_previous_viz=False, conversation_history=None):
+def upload_image_to_group(user_image, group_name, conversation_state):
+    """Gradio handler: add image to a named group and cache features."""
+    state: AgentState = conversation_state if isinstance(conversation_state, AgentState) else AgentState()
+    _, images_dir, features_dir = ensure_session_dirs(state.session_id)
+    status = add_image_to_group(group_name or "default", user_image, state, images_dir, features_dir)
+    progress = f"**Progress**: {status}"
+    return state, progress
+
+
+def solve_problem_gradio(user_query, group_name, max_steps=10, max_time=60, llm_model_engine=None, enabled_fibroblast_tools=None, enabled_general_tools=None, clear_previous_viz=False, conversation_history=None):
     """
     Solve a problem using the Gradio interface with optional visualization clearing.
     
     Args:
         user_query: The user's query
-        user_image: The user's image (optional after first upload; session will reuse cached image)
+        group_name: The target image group name to analyze
         max_steps: Maximum number of reasoning steps
         max_time: Maximum analysis time in seconds
         llm_model_engine: Language model engine (model_id from dropdown)
@@ -983,40 +1086,7 @@ def solve_problem_gradio(user_query, user_image, max_steps=10, max_time=60, llm_
     # Initialize or reuse persistent agent state
     state: AgentState = conversation_history if isinstance(conversation_history, AgentState) else AgentState()
     state.conversation = list(state.conversation)
-    session_dir, images_dir = ensure_session_dirs(state.session_id)
-
-    # Persist or reuse the session image without re-upload per turn
-    new_fingerprint = compute_image_fingerprint(user_image) if user_image is not None else ""
-    if state.image_context and new_fingerprint and state.image_context.fingerprint == new_fingerprint:
-        print("DEBUG: uploaded image matches cached fingerprint; reusing existing context")
-        user_image = None
-
-    if user_image is not None:
-        print("DEBUG: new image provided, saving to session cache")
-        image_id = uuid.uuid4().hex
-        image_path = images_dir / f"{image_id}.jpg"
-        try:
-            if isinstance(user_image, dict) and 'path' in user_image:
-                shutil.copy(user_image['path'], image_path)
-            elif isinstance(user_image, str) and os.path.exists(user_image):
-                shutil.copy(user_image, image_path)
-            elif hasattr(user_image, "save"):
-                user_image.save(image_path)
-            else:
-                raise ValueError(f"Unsupported image type: {type(user_image)}")
-            state.image_context = ImageContext(
-                image_id=image_id,
-                image_path=str(image_path),
-                fingerprint=new_fingerprint
-            )
-            print(f"DEBUG: cached image at {image_path}")
-        except Exception as e:
-            print(f"Error caching uploaded image: {e}")
-            traceback.print_exc()
-    elif state.image_context:
-        print(f"DEBUG: reusing cached image {state.image_context.image_id} at {state.image_context.image_path}")
-    else:
-        print("DEBUG: no image in session; proceeding without image context")
+    session_dir, images_dir, features_dir = ensure_session_dirs(state.session_id)
 
     # Start with prior conversation so the session feels continuous
     messages: List[ChatMessage] = list(state.conversation)
@@ -1113,13 +1183,6 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
 
     print(f"Debug - final enabled_tools: {enabled_tools}")
     
-    # Save the query data
-    save_query_data(
-        query_id=query_id,
-        query=user_query,
-        image_path=state.image_context.image_path if state.image_context else None
-    )
-
     # Instantiate Initializer
     try:
         initializer = Initializer(
@@ -1148,6 +1211,34 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
         new_history = messages + [gr.ChatMessage(role="assistant", content=f"⚠️ Error: Failed to initialize planner. {str(e)}")]
         state.conversation = new_history
         return new_history, "", [], "**Progress**: Error occurred", state
+
+    # Resolve target image group and cached features
+    group_name = (group_name or state.last_group_name or "").strip()
+    if not group_name and len(state.image_groups) == 1:
+        group_name = next(iter(state.image_groups.keys()))
+    if not group_name or group_name not in state.image_groups or not state.image_groups[group_name]["images"]:
+        prompt_msg = "⚠️ Please upload an image into a group before asking a question."
+        new_history = messages + [gr.ChatMessage(role="assistant", content=prompt_msg)]
+        state.conversation = new_history
+        return new_history, "", [], "**Progress**: Waiting for image upload", state
+
+    group_entry = state.image_groups[group_name]
+    representative = group_entry["images"][0]
+    state.image_context = ImageContext(
+        image_id=representative["image_id"],
+        image_path=representative["image_path"],
+        features_path=representative.get("features_path", ""),
+        fingerprint=representative.get("fingerprint", ""),
+        source_type="group"
+    )
+    state.last_group_name = group_name
+
+    # Save the query data with resolved group context
+    save_query_data(
+        query_id=query_id,
+        query=user_query,
+        image_path=state.image_context.image_path if state.image_context else None
+    )
 
     # Instantiate Memory
     memory = Memory()
@@ -1341,6 +1432,12 @@ def main(args):
                             type="pil", 
                             height=350
                         )
+                        group_name_input = gr.Textbox(
+                            label="Image Group Name",
+                            placeholder="e.g., control, drugA, replicate1",
+                            value="control"
+                        )
+                        upload_btn = gr.Button("Add Image to Group", variant="primary")
                     with gr.Column(scale=1):
                         user_query = gr.Textbox(
                             label="Analysis Question", 
@@ -1356,6 +1453,7 @@ def main(args):
                     with gr.Column(scale=6):
                         run_button = gr.Button("🚀 Start Analysis", variant="primary", size="lg")
                         progress_md = gr.Markdown("**Progress**: Ready")
+                        upload_status_md = gr.Markdown("**Upload Status**: No uploads yet")
                         conversation_state = gr.State(AgentState())
 
                 # Output area - two columns instead of three
@@ -1441,42 +1539,60 @@ def main(args):
                         )
 
         # Button click event
+        upload_btn.click(
+            upload_image_to_group,
+            inputs=[user_image, group_name_input, conversation_state],
+            outputs=[conversation_state, upload_status_md]
+        )
+
         run_button.click(
             solve_problem_gradio,
-            [user_query, user_image, max_steps, max_time, language_model, enabled_fibroblast_tools, enabled_general_tools, clear_previous_viz, conversation_state],
+            [user_query, group_name_input, max_steps, max_time, language_model, enabled_fibroblast_tools, enabled_general_tools, clear_previous_viz, conversation_state],
             [chatbot_output, text_output, gallery_output, progress_md, conversation_state]
         )
 
-        def _drop_cached_image(state: AgentState):
+        def _drop_group(state: AgentState, group_name: str):
             if not isinstance(state, AgentState):
                 state = AgentState()
-            ctx = state.image_context
-            if ctx and ctx.image_path and os.path.exists(ctx.image_path):
-                try:
-                    os.remove(ctx.image_path)
-                except Exception as e:
-                    print(f"Warning: failed to delete cached image {ctx.image_path}: {e}")
-            state.image_context = None
-            return state
+            target = (group_name or state.last_group_name or "").strip()
+            if not target:
+                return None, state, "**Progress**: No group specified to clear"
+            group = state.image_groups.get(target)
+            if group:
+                for entry in group.get("images", []):
+                    try:
+                        if os.path.exists(entry["image_path"]):
+                            os.remove(entry["image_path"])
+                    except Exception as e:
+                        print(f"Warning: failed to delete cached image {entry['image_path']}: {e}")
+                for feature_path in group.get("features", []):
+                    try:
+                        if os.path.exists(feature_path):
+                            os.remove(feature_path)
+                    except Exception as e:
+                        print(f"Warning: failed to delete cached features {feature_path}: {e}")
+            state.image_groups.pop(target, None)
+            if state.last_group_name == target:
+                state.last_group_name = ""
+                state.image_context = None
+            return None, state, f"**Progress**: Cleared group '{target}'"
 
-        def _clear_image(state: AgentState):
-            state = _drop_cached_image(state)
-            return None, state, "**Progress**: Image cleared"
+        def _clear_image(state: AgentState, group_name: str):
+            return _drop_group(state, group_name)
 
-        def _replace_image(state: AgentState):
-            # Drop cached file and prompt user to upload new image.
-            state = _drop_cached_image(state)
-            return None, state, "**Progress**: Upload a new image to replace the current one"
+        def _replace_image(state: AgentState, group_name: str):
+            _, state, progress = _drop_group(state, group_name)
+            return None, state, f"{progress} - upload a new image to replace it."
 
         clear_image_btn.click(
             _clear_image,
-            inputs=[conversation_state],
+            inputs=[conversation_state, group_name_input],
             outputs=[user_image, conversation_state, progress_md]
         )
 
         replace_image_btn.click(
             _replace_image,
-            inputs=[conversation_state],
+            inputs=[conversation_state, group_name_input],
             outputs=[user_image, conversation_state, progress_md]
         )
 

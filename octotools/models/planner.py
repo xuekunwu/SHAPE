@@ -61,13 +61,6 @@ class Planner:
         image_info = self.get_image_info(image)
 
         input_data = [question]
-        if image_info and "image_path" in image_info:
-            try:
-                with open(image_info["image_path"], 'rb') as file:
-                    image_bytes = file.read()
-                input_data.append(image_bytes)
-            except Exception as e:
-                print(f"Error reading image file: {str(e)}")
 
         self.base_response = self.llm_engine_mm(input_data, max_tokens=max_tokens)
 
@@ -123,13 +116,6 @@ Please present your analysis in a clear, structured format.
 """
 
         input_data = [query_prompt]
-        if image_info and "image_path" in image_info:
-            try:
-                with open(image_info["image_path"], 'rb') as file:
-                    image_bytes = file.read()
-                input_data.append(image_bytes)
-            except Exception as e:
-                print(f"Error reading image file: {str(e)}")
 
         llm_response = self.llm_engine_mm.generate(input_data, response_format=QueryAnalysis)
         
