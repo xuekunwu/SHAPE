@@ -665,7 +665,20 @@ class Solver:
             if "visual_outputs" in result:
                 summary_parts.append(f"Generated {len(result['visual_outputs'])} visual output(s)")
             if "per_image" in result:
-                summary_parts.append(f"Processed {len(result['per_image'])} image(s)")
+                per_image = result["per_image"]
+                if isinstance(per_image, list) and len(per_image) > 0:
+                    image_summaries = []
+                    for i, img_result in enumerate(per_image):
+                        if isinstance(img_result, dict):
+                            if "summary" in img_result:
+                                image_summaries.append(f"Image {i+1}: {img_result['summary']}")
+                            elif "cell_count" in img_result:
+                                cell_count = img_result['cell_count']
+                                image_summaries.append(f"Image {i+1}: {cell_count} cells")
+                            elif "error" in img_result:
+                                image_summaries.append(f"Image {i+1}: Error")
+                    if image_summaries:
+                        summary_parts.append(f"Processed {len(per_image)} image(s)")
             return "; ".join(summary_parts) if summary_parts else "Tool executed successfully"
         else:
             return str(result)[:200] + "..." if len(str(result)) > 200 else str(result)

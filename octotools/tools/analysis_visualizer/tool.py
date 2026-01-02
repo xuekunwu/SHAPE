@@ -333,8 +333,28 @@ class Analysis_Visualizer_Tool(BaseTool):
         
         # Convert to DataFrame for easier manipulation
         if isinstance(analysis_data, dict):
-            # Try to extract data from common structures
-            if 'per_image' in analysis_data:
+            # Check if it's a column-oriented dict (keys are column names, values are lists)
+            is_column_oriented = (
+                len(analysis_data) > 0 and
+                all(isinstance(v, list) for v in analysis_data.values() if v is not None) and
+                all(len(v) == len(list(analysis_data.values())[0]) for v in analysis_data.values() if isinstance(v, list) and v)
+            )
+            
+            if is_column_oriented:
+                # Column-oriented dict: convert to row-oriented for DataFrame
+                # Ensure all lists have the same length
+                max_len = max(len(v) if isinstance(v, list) else 1 for v in analysis_data.values())
+                records = []
+                for i in range(max_len):
+                    record = {}
+                    for key, value in analysis_data.items():
+                        if isinstance(value, list):
+                            record[key] = value[i] if i < len(value) else None
+                        else:
+                            record[key] = value
+                    records.append(record)
+                df = pd.DataFrame(records)
+            elif 'per_image' in analysis_data:
                 # Multi-image results
                 records = []
                 for img_result in analysis_data['per_image']:
@@ -388,6 +408,15 @@ class Analysis_Visualizer_Tool(BaseTool):
                             raise ValueError("Unable to parse analysis data structure")
                     else:
                         raise ValueError("Unable to parse analysis data structure")
+        elif isinstance(analysis_data, list):
+            # List of records (row-oriented)
+            if len(analysis_data) == 0:
+                raise ValueError("Empty data list provided")
+            # Check if it's a list of dicts
+            if all(isinstance(item, dict) for item in analysis_data):
+                df = pd.DataFrame(analysis_data)
+            else:
+                raise ValueError(f"List must contain dictionaries, got {type(analysis_data[0])}")
         else:
             raise ValueError(f"Unsupported data type: {type(analysis_data)}")
         
@@ -399,6 +428,12 @@ class Analysis_Visualizer_Tool(BaseTool):
         
         if comparison_metric not in df.columns:
             raise ValueError(f"Comparison metric '{comparison_metric}' not found in data")
+        
+        # Convert any list/array values in group_column to strings to avoid unhashable type errors
+        if df[group_column].dtype == 'object':
+            has_list_values = df[group_column].apply(lambda x: isinstance(x, (list, np.ndarray))).any()
+            if has_list_values:
+                df[group_column] = df[group_column].apply(lambda x: str(x) if isinstance(x, (list, np.ndarray)) else x)
         
         # Group data
         groups = df[group_column].unique().tolist()
