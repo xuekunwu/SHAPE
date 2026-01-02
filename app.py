@@ -539,7 +539,13 @@ def _check_tool_execution_error(result, tool_name: str) -> tuple[bool, str]:
             return True, f"Tool '{tool_name}' returned empty response."
         return False, ""  # Valid string response
     elif isinstance(result, dict) and "error" in result:
-        return True, result.get("error", "Unknown error")
+        error_msg = result.get("error", "Unknown error")
+        # Include error_details if available for better debugging
+        if "error_details" in result:
+            error_details = result.get("error_details", {})
+            details_str = ", ".join([f"{k}={v}" for k, v in error_details.items()])
+            error_msg = f"{error_msg} (Details: {details_str})"
+        return True, error_msg
     return False, ""  # No error detected
 
 

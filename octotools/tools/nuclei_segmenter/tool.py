@@ -125,6 +125,20 @@ class Nuclei_Segmenter_Tool(BaseTool):
             
             img = img.astype(np.float32)
             
+            # Handle diameter parameter: convert 'auto' string to None, ensure None or numeric
+            if diameter is None or (isinstance(diameter, str) and diameter.lower() == 'auto'):
+                diameter = None
+            elif isinstance(diameter, str):
+                # Try to convert string to float if it's a numeric string
+                try:
+                    diameter = float(diameter)
+                except ValueError:
+                    print(f"Warning: Invalid diameter value '{diameter}', using None for auto-detection")
+                    diameter = None
+            elif not isinstance(diameter, (int, float)):
+                print(f"Warning: Unexpected diameter type {type(diameter)}, using None for auto-detection")
+                diameter = None
+            
             # Run segmentation
             masks, flows, styles = self.model.eval(
                 [img],
@@ -191,12 +205,21 @@ class Nuclei_Segmenter_Tool(BaseTool):
             }
             
         except Exception as e:
-            print(f"Nuclei_Segmenter_Tool: Error in nuclei segmentation: {e}")
+            error_msg = str(e)
+            error_traceback = traceback.format_exc()
+            print(f"Nuclei_Segmenter_Tool: Error in nuclei segmentation: {error_msg}")
+            print(f"Nuclei_Segmenter_Tool: Traceback: {error_traceback}")
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
             return {
-                "error": f"Error during nuclei segmentation: {str(e)}",
-                "summary": "Failed to process image"
+                "error": f"Error during nuclei segmentation: {error_msg}",
+                "summary": "Failed to process image",
+                "error_details": {
+                    "image_path": image_path if 'image_path' in locals() else str(image),
+                    "diameter": diameter if 'diameter' in locals() else "unknown",
+                    "flow_threshold": flow_threshold if 'flow_threshold' in locals() else "unknown",
+                    "cellprob_threshold": cellprob_threshold if 'cellprob_threshold' in locals() else "unknown"
+                }
             }
 
     def get_metadata(self):
