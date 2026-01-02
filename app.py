@@ -550,23 +550,43 @@ def _check_tool_execution_error(result, tool_name: str) -> tuple[bool, str]:
 
 
 def _collect_visual_outputs(result, visual_outputs_list):
-    """Collect visual outputs from tool result and add to visual_outputs_list."""
+    """
+    Collect visual outputs from tool result and add to visual_outputs_list.
+    Unified collection logic: handles both single image and per_image structures.
+    """
     visual_output_files = []
+    seen_paths = set()  # Track seen paths to avoid duplicates
+    
+    def add_path(path):
+        """Helper to add path if valid and not duplicate."""
+        if path and path not in seen_paths and isinstance(path, str):
+            visual_output_files.append(path)
+            seen_paths.add(path)
+    
     if isinstance(result, dict):
-        # Collect visual outputs from top level
-        if "visual_outputs" in result:
-            visual_output_files.extend(result["visual_outputs"])
-        # Collect visual outputs from per_image structure
+        # Handle per_image structure (multi-image results)
         if "per_image" in result:
             for img_result in result["per_image"]:
                 if isinstance(img_result, dict):
+                    # Collect from visual_outputs list
                     if "visual_outputs" in img_result:
-                        visual_output_files.extend(img_result["visual_outputs"])
-                    # Also check for individual visual output keys
+                        for path in img_result["visual_outputs"]:
+                            add_path(path)
+                    # Collect from individual keys
                     for key in ["overlay_path", "mask_path", "processed_image_path", "output_path"]:
-                        if key in img_result and img_result[key]:
-                            visual_output_files.append(img_result[key])
+                        if key in img_result:
+                            add_path(img_result[key])
+        else:
+            # Single image result: collect from top level
+            if "visual_outputs" in result:
+                for path in result["visual_outputs"]:
+                    add_path(path)
+            # Also check individual keys for single results
+            for key in ["overlay_path", "mask_path", "processed_image_path", "output_path"]:
+                if key in result:
+                    add_path(result[key])
     
+    # Process collected files
     for file_path in visual_output_files:
         try:
             # Don't skip comparison charts - they are important visualizations
@@ -593,20 +613,36 @@ def _collect_visual_outputs(result, visual_outputs_list):
                 continue
             
             filename = os.path.basename(file_path)
-            label_map = {
-                "processed": f"Processed Image: {filename}",
-                "corrected": f"Illumination Corrected: {filename}",
-                "segmented": f"Segmented Result: {filename}",
-                "detected": f"Detection Result: {filename}",
-                "zoomed": f"Zoomed Region: {filename}",
-                "crop": f"Single Cell Crop: {filename}",
-                "comparison": f"Comparison Chart: {filename}",
-                "bar": f"Bar Chart: {filename}",
-                "overlay": f"Segmentation Overlay: {filename}",
-                "mask": f"Segmentation Mask: {filename}"
-            }
-            # Check for keywords in filename to determine label
-            label = next((label_map[k] for k in label_map if k in filename.lower()), f"Analysis Result: {filename}")
+            filename_lower = filename.lower()
+            
+            # Extract image identifier from filename (consistent naming: tool_type_imageid.ext)
+            # Patterns: nuclei_overlay_<image_id>.png, nuclei_mask_<image_id>.png, <image_id>_default_processed.png
+            image_id = None
+            if "_overlay_" in filename_lower or "_mask_" in filename_lower:
+                # Pattern: nuclei_overlay_<image_id>.png
+                parts = filename.rsplit(".", 1)[0].split("_")
+                if len(parts) >= 3:
+                    image_id = "_".join(parts[2:])  # Everything after tool_type
+            elif "_processed" in filename_lower:
+                # Pattern: <image_id>_default_processed.png
+                parts = filename.split("_")
+                if len(parts) >= 2:
+                    image_id = parts[0]
+            
+            # Format label with image identifier
+            image_id_display = f" ({image_id[:8]}...)" if image_id and len(image_id) > 8 else (f" ({image_id})" if image_id else "")
+            
+            # Generate descriptive label
+            if "overlay" in filename_lower:
+                label = f"Segmentation Overlay{image_id_display}"
+            elif "mask" in filename_lower and "viz" not in filename_lower:
+                label = f"Segmentation Mask{image_id_display}"
+            elif "processed" in filename_lower:
+                label = f"Processed Image{image_id_display}"
+            elif "comparison" in filename_lower or "bar" in filename_lower:
+                label = f"Comparison Chart: {filename}"
+            else:
+                label = f"Analysis Result{image_id_display}" if image_id_display else f"Analysis Result: {filename}"
             
             visual_outputs_list.append((image, label))
         except Exception as e:
@@ -1026,7 +1062,13 @@ class Solver:
                     ))
                     print(f"Reused cached artifact for {tool_name} (key={artifact_key}, source={cache_source})")
                 else:
-                    tool_command = self.executor.generate_tool_command(user_query, safe_path, context, sub_goal, self.planner.toolbox_metadata[tool_name], self.memory, conversation_context=conversation_text)
+                    # Pass image_id for consistent file naming
+                    image_id = img_item.get("image_id")
+                    tool_command = self.executor.generate_tool_command(
+                        user_query, safe_path, context, sub_goal, 
+                        self.planner.toolbox_metadata[tool_name], self.memory, 
+                        conversation_context=conversation_text, image_id=image_id
+                    )
                     analysis, explanation, command = self.executor.extract_explanation_and_command(tool_command)
                     result = self.executor.execute_tool_command(tool_name, command)
                     result = make_json_serializable(result)

@@ -81,7 +81,7 @@ class Nuclei_Segmenter_Tool(BaseTool):
                 print(f"Nuclei_Segmenter_Tool: Error initializing model even on CPU: {cpu_e}")
                 raise
 
-    def execute(self, image, diameter=25, flow_threshold=0.6, cellprob_threshold=0, query_cache_dir=None):
+    def execute(self, image, diameter=25, flow_threshold=0.6, cellprob_threshold=0, query_cache_dir=None, image_id=None):
         """
         Execute nuclei segmentation on the input image.
         
@@ -91,6 +91,7 @@ class Nuclei_Segmenter_Tool(BaseTool):
             flow_threshold (float): Flow threshold for cell detection
             cellprob_threshold (float): Cell probability threshold
             query_cache_dir (str): Directory to save outputs
+            image_id (str): Optional image identifier for consistent file naming
             
         Returns:
             dict: Segmentation results with cell count and visualization paths
@@ -98,6 +99,16 @@ class Nuclei_Segmenter_Tool(BaseTool):
         try:
             # Normalize path for cross-platform compatibility
             image_path = os.path.normpath(image) if isinstance(image, str) else str(image)
+            
+            # Extract image identifier: use provided image_id, or extract from filename
+            if image_id:
+                image_identifier = image_id
+            else:
+                # Fallback: extract from filename (e.g., "a23b168beeda4d69b4e75fab887e349e.jpg" -> "a23b168beeda4d69b4e75fab887e349e")
+                filename = os.path.basename(image_path)
+                image_identifier = os.path.splitext(filename)[0]
+                # Sanitize: keep only alphanumeric and common separators, limit length
+                image_identifier = "".join(c for c in image_identifier if c.isalnum() or c in ('-', '_'))[:50]
             
             # Check if file exists
             if not os.path.exists(image_path):
@@ -154,8 +165,8 @@ class Nuclei_Segmenter_Tool(BaseTool):
             # Setup output directory using centralized configuration
             output_dir = VisualizationConfig.get_output_dir(query_cache_dir)
             
-            # Save overlay visualization with professional styling
-            output_path = os.path.join(output_dir, f"nuclei_overlay_{uuid4().hex[:8]}.png")
+            # Save overlay visualization with professional styling using image identifier
+            output_path = os.path.join(output_dir, f"nuclei_overlay_{image_identifier}.png")
             fig, ax = VisualizationConfig.create_professional_figure(figsize=(12, 8))
             # Ensure overlay has same brightness as original image
             overlay_normalized = overlay.astype(np.float32) / 255.0
@@ -170,15 +181,15 @@ class Nuclei_Segmenter_Tool(BaseTool):
             # Count nuclei (unique mask values, excluding background 0)
             n_nuclei = len(np.unique(mask)) - 1 if mask is not None else 0
             
-            # Save mask as separate visualization with professional styling
-            mask_path = os.path.join(output_dir, f"nuclei_mask_{uuid4().hex[:8]}.png")
+            # Save mask as separate visualization with professional styling using image identifier
+            mask_path = os.path.join(output_dir, f"nuclei_mask_{image_identifier}.png")
             
             # Save the original mask array (not matplotlib visualization)
             # This ensures Single_Cell_Cropper_Tool can properly process it
             cv2.imwrite(mask_path, mask.astype(np.uint8))
             
             # Also save a visualization version for display with professional styling
-            viz_mask_path = os.path.join(output_dir, f"nuclei_mask_viz_{uuid4().hex[:8]}.png")
+            viz_mask_path = os.path.join(output_dir, f"nuclei_mask_viz_{image_identifier}.png")
             fig, ax = VisualizationConfig.create_professional_figure(figsize=(12, 8))
             ax.imshow(mask, cmap='tab20')
             ax.axis('off')

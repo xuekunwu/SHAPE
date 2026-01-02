@@ -52,7 +52,7 @@ class Executor:
         print(f"Executor: Updated query_cache_dir to {self.query_cache_dir}")
         print(f"Executor: Updated tool_cache_dir to {self.tool_cache_dir}")
     
-    def generate_tool_command(self, question: str, image: str, context: str, sub_goal: str, tool_name: str, tool_metadata: Dict[str, Any], memory=None, bytes_mode:bool = False, conversation_context: str = "", **kwargs) -> ToolCommand:
+    def generate_tool_command(self, question: str, image: str, context: str, sub_goal: str, tool_name: str, tool_metadata: Dict[str, Any], memory=None, bytes_mode:bool = False, conversation_context: str = "", image_id: str = None, **kwargs) -> ToolCommand:
         """
         Generate a tool command based on the given information.
         
@@ -146,10 +146,12 @@ else:
             else:
                 # Escape backslashes for Python string in command
                 safe_processed_path = processed_image_path.replace("\\", "\\\\")
+                # Include image_id if available for consistent naming
+                image_id_param = f', image_id="{image_id}"' if image_id else ''
                 return ToolCommand(
                     analysis="Using the processed image from Image_Preprocessor_Tool for nuclei segmentation",
                     explanation=f"Using the processed image path '{processed_image_path}' from the previous Image_Preprocessor_Tool step",
-                    command=f"""execution = tool.execute(image="{safe_processed_path}")"""
+                    command=f"""execution = tool.execute(image="{safe_processed_path}"{image_id_param})"""
                 )
         
         # Special handling for Single_Cell_Cropper_Tool to use nuclei mask from Nuclei_Segmenter_Tool
@@ -184,6 +186,7 @@ Conversation so far:
 
 Query: {question}
 Image Path: {safe_path}
+Image ID: {image_id if image_id else "Not provided"}
 Context: {context}
 Sub-Goal: {sub_goal}
 Selected Tool: {tool_name}
@@ -191,6 +194,7 @@ Tool Metadata: {tool_metadata}
 Previous Tool Outputs (summary only, file paths available for tool chaining): {previous_outputs_for_llm}
 
 IMPORTANT: When the tool requires an image parameter, you MUST use the exact image path provided above: "{safe_path}"
+{"IMPORTANT: When the tool generates output files (e.g., Nuclei_Segmenter_Tool, Image_Preprocessor_Tool), include image_id parameter if available for consistent file naming." if image_id else ""}
 
 CRITICAL TOOL DEPENDENCY RULES:
 - Fibroblast_Activation_Scorer_Tool MUST use the h5ad file output from Fibroblast_State_Analyzer_Tool
