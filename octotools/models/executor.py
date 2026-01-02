@@ -7,12 +7,12 @@ from datetime import datetime
 
 from octotools.engine.openai import ChatOpenAI 
 from octotools.models.formatters import ToolCommand
+from octotools.models.utils import get_llm_safe_result
 
 import signal
 from typing import Dict, Any, List, Optional
 import uuid
 from contextlib import redirect_stdout, redirect_stderr
-import traceback
 
 class TimeoutError(Exception):
     pass
@@ -35,10 +35,22 @@ class Executor:
     def set_query_cache_dir(self, query_cache_dir):
         if query_cache_dir:
             self.query_cache_dir = query_cache_dir
+            # Also update tool_cache_dir to use the new query_cache_dir
+            # If query_cache_dir already contains "tool_cache", use it directly
+            # Otherwise, append "tool_cache" to it
+            if "tool_cache" in query_cache_dir:
+                self.tool_cache_dir = query_cache_dir
+            else:
+                self.tool_cache_dir = os.path.join(query_cache_dir, "tool_cache")
         else:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             self.query_cache_dir = os.path.join(self.query_cache_dir, timestamp)
+            self.tool_cache_dir = os.path.join(self.query_cache_dir, "tool_cache")
+        # Ensure both directories exist
         os.makedirs(self.query_cache_dir, exist_ok=True)
+        os.makedirs(self.tool_cache_dir, exist_ok=True)
+        print(f"Executor: Updated query_cache_dir to {self.query_cache_dir}")
+        print(f"Executor: Updated tool_cache_dir to {self.tool_cache_dir}")
     
     def generate_tool_command(self, question: str, image: str, context: str, sub_goal: str, tool_name: str, tool_metadata: Dict[str, Any], memory=None, bytes_mode:bool = False, conversation_context: str = "", **kwargs) -> ToolCommand:
         """
@@ -61,14 +73,18 @@ class Executor:
         safe_path = actual_image_path.replace("\\", "\\\\") if actual_image_path else ""
         
         # Extract previous outputs from memory for tool chaining
+        # Use full results (not LLM-safe) to get file paths for tool chaining
         previous_outputs = {}
+        previous_outputs_for_llm = {}  # LLM-safe version (no file paths)
         if memory and hasattr(memory, 'get_actions'):
-            actions = memory.get_actions()
+            actions = memory.get_actions(llm_safe=False)  # Get full results for executor use
             if actions:
                 # Get the most recent action's result
                 last_action = actions[-1]
                 if 'result' in last_action:
                     previous_outputs = last_action['result']
+                    # Create LLM-safe version (summary only, no file paths)
+                    previous_outputs_for_llm = get_llm_safe_result(previous_outputs)
                     print(f"DEBUG: Extracted previous outputs: {list(previous_outputs.keys()) if isinstance(previous_outputs, dict) else 'Not a dict'}")
         
         # Special handling for Fibroblast_State_Analyzer_Tool to use dynamic metadata file discovery
@@ -120,11 +136,21 @@ else:
         # Special handling for Nuclei_Segmenter_Tool to use processed image from Image_Preprocessor_Tool
         if tool_name == "Nuclei_Segmenter_Tool" and previous_outputs and 'processed_image_path' in previous_outputs:
             processed_image_path = previous_outputs['processed_image_path']
-            return ToolCommand(
-                analysis="Using the processed image from Image_Preprocessor_Tool for nuclei segmentation",
-                explanation=f"Using the processed image path '{processed_image_path}' from the previous Image_Preprocessor_Tool step",
-                command=f"""execution = tool.execute(image="{processed_image_path}")"""
-            )
+            # Normalize path for cross-platform compatibility
+            import os
+            processed_image_path = os.path.normpath(processed_image_path) if isinstance(processed_image_path, str) else str(processed_image_path)
+            # Verify file exists before using it
+            if not os.path.exists(processed_image_path):
+                print(f"Warning: processed_image_path does not exist: {processed_image_path}")
+                # Fall through to standard command generation
+            else:
+                # Escape backslashes for Python string in command
+                safe_processed_path = processed_image_path.replace("\\", "\\\\")
+                return ToolCommand(
+                    analysis="Using the processed image from Image_Preprocessor_Tool for nuclei segmentation",
+                    explanation=f"Using the processed image path '{processed_image_path}' from the previous Image_Preprocessor_Tool step",
+                    command=f"""execution = tool.execute(image="{safe_processed_path}")"""
+                )
         
         # Special handling for Single_Cell_Cropper_Tool to use nuclei mask from Nuclei_Segmenter_Tool
         if tool_name == "Single_Cell_Cropper_Tool" and previous_outputs and 'visual_outputs' in previous_outputs:
@@ -162,7 +188,7 @@ Context: {context}
 Sub-Goal: {sub_goal}
 Selected Tool: {tool_name}
 Tool Metadata: {tool_metadata}
-Previous Tool Outputs: {previous_outputs}
+Previous Tool Outputs (summary only, file paths available for tool chaining): {previous_outputs_for_llm}
 
 IMPORTANT: When the tool requires an image parameter, you MUST use the exact image path provided above: "{safe_path}"
 
@@ -469,16 +495,32 @@ Remember: Your <command> field MUST be valid Python code including any necessary
     def execute_tool_command(self, tool_name: str, command: str) -> Any:
         def execute_with_timeout(block: str, local_context: dict) -> Optional[str]:
             output_file = f"temp_output_{uuid.uuid4()}.txt"
-            with open(output_file, "w") as f, redirect_stdout(f), redirect_stderr(f):
-                try:
-                    exec(block, local_context)
-                except Exception as e:
-                    print(traceback.format_exc())
-                    raise e
-            with open(output_file, "r") as f:
-                output = f.read()
-            os.remove(output_file)
-            return local_context.get("execution", output)
+            try:
+                with open(output_file, "w", encoding="utf-8") as f, redirect_stdout(f), redirect_stderr(f):
+                    try:
+                        # Use globals() like octotools_original to allow access to global namespace
+                        exec(block, globals(), local_context)
+                    except Exception as e:
+                        # Store error in local_context so it can be retrieved
+                        local_context["_execution_error"] = str(e)
+                        raise e
+                with open(output_file, "r", encoding="utf-8") as f:
+                    output = f.read()
+                # Check if execution variable exists, otherwise check for error
+                if "execution" in local_context:
+                    return local_context["execution"]
+                elif "_execution_error" in local_context:
+                    return f"Error executing tool command: {local_context['_execution_error']}"
+                else:
+                    # If no execution variable and no error, return output or None
+                    return output if output.strip() else None
+            finally:
+                # Clean up temp file
+                if os.path.exists(output_file):
+                    try:
+                        os.remove(output_file)
+                    except Exception:
+                        pass
 
         # Import the tool module and instantiate it
         module_name = f"tools.{tool_name.lower().replace('_tool', '')}.tool"
@@ -503,6 +545,8 @@ Remember: Your <command> field MUST be valid Python code including any necessary
             if hasattr(tool, 'set_custom_output_dir'):
                 tool.set_custom_output_dir(self.tool_cache_dir)
             
+            # Create local context with tool object
+            # Using globals() in exec() matches the approach in octotools_original
             local_context = {"tool": tool}
             
             # Execute the entire command as a single block to preserve variable definitions
@@ -532,8 +576,6 @@ Remember: Your <command> field MUST be valid Python code including any necessary
                         
                 except Exception as e:
                     print(f"Error saving h5ad file: {e}")
-                    import traceback
-                    traceback.print_exc()
                     # Don't fail the entire execution, just log the error
                     if 'analyzed_h5ad_path' not in result:
                         result['analyzed_h5ad_path'] = None

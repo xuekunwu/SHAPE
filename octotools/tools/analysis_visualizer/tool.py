@@ -1,0 +1,591 @@
+#!/usr/bin/env python3
+"""
+Analysis Visualizer Tool - Creates statistical visualizations for multi-group comparison analysis.
+"""
+
+import os
+import sys
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from scipy import stats
+from typing import List, Dict, Any, Optional, Union
+from pathlib import Path
+import json
+from collections import Counter, defaultdict
+
+# Add the project root to the Python path
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(current_dir))))
+sys.path.insert(0, project_root)
+
+from octotools.tools.base import BaseTool
+
+
+class Analysis_Visualizer_Tool(BaseTool):
+    """
+    Creates statistical visualizations for pipeline analysis results, especially for multi-group comparisons.
+    Supports various chart types (bar charts, pie charts, etc.) with automatic statistical testing.
+    """
+    
+    def __init__(self):
+        super().__init__(
+            tool_name="Analysis_Visualizer_Tool",
+            tool_description="Creates statistical visualizations for analysis results with multi-group comparisons. Supports bar charts, pie charts, and other visualization types with automatic statistical testing (t-test for 2 groups, ANOVA for 3+ groups).",
+            tool_version="1.0.0",
+            input_types={
+                "analysis_data": "dict or str - Analysis results data (dict) or path to JSON file containing analysis results.",
+                "chart_type": "str - Type of chart to create ('auto', 'bar', 'pie', 'box', 'violin', 'scatter', 'line'). Default: 'auto'.",
+                "comparison_metric": "str - Metric to compare across groups (e.g., 'cell_count', 'cell_type_distribution', 'confidence_mean'). Default: 'cell_count'.",
+                "group_column": "str - Column name in data that contains group labels. Default: 'group'.",
+                "output_dir": "str - Directory to save visualization outputs. Default: 'output_visualizations'.",
+                "figure_size": "tuple - Figure size (width, height) in inches. Default: (10, 6).",
+                "dpi": "int - Resolution for saved figures. Default: 300."
+            },
+            output_type="dict - Visualization results with chart paths and statistical test results.",
+            demo_commands=[
+                "Create a bar chart comparing cell counts across groups",
+                "Visualize cell type distribution using a pie chart",
+                "Generate statistical comparison of confidence scores between groups",
+                "Create automatic visualization for multi-group analysis results"
+            ],
+            user_metadata={
+                "limitation": "Requires analysis data with group labels. Statistical tests assume normal distribution for t-test and ANOVA.",
+                "best_practice": "Use 'auto' chart type to let the tool automatically select the most appropriate visualization based on data characteristics. For cell counts, bar charts are recommended. For proportions, pie charts work well.",
+                "statistical_tests": "Automatically performs t-test for 2 groups and ANOVA for 3+ groups. Results are included in the output.",
+                "color_scheme": "Automatically uses tab10 colors for ≤10 groups and tab20 colors for >10 groups."
+            }
+        )
+        
+        # Color schemes
+        self.tab10_colors = plt.cm.tab10.colors
+        self.tab20_colors = plt.cm.tab20.colors
+        
+    def _get_color_scheme(self, n_groups: int) -> List[tuple]:
+        """
+        Get color scheme based on number of groups.
+        
+        Args:
+            n_groups: Number of groups to visualize
+            
+        Returns:
+            List of color tuples (RGBA)
+        """
+        if n_groups <= 10:
+            return [self.tab10_colors[i % 10] for i in range(n_groups)]
+        else:
+            return [self.tab20_colors[i % 20] for i in range(n_groups)]
+    
+    def _perform_statistical_test(self, data_by_group: Dict[str, List[float]]) -> Dict[str, Any]:
+        """
+        Perform appropriate statistical test based on number of groups.
+        
+        Args:
+            data_by_group: Dictionary mapping group names to lists of values
+            
+        Returns:
+            Dictionary with test results
+        """
+        groups = list(data_by_group.keys())
+        n_groups = len(groups)
+        
+        if n_groups < 2:
+            return {
+                "test_type": "none",
+                "message": "Insufficient groups for statistical comparison (need at least 2 groups)"
+            }
+        
+        # Prepare data for testing
+        group_data = [data_by_group[g] for g in groups]
+        
+        # Remove groups with insufficient data
+        valid_groups = []
+        valid_data = []
+        for i, (g, d) in enumerate(zip(groups, group_data)):
+            if len(d) >= 2:  # Need at least 2 samples for variance
+                valid_groups.append(g)
+                valid_data.append(d)
+        
+        if len(valid_groups) < 2:
+            return {
+                "test_type": "none",
+                "message": "Insufficient data for statistical comparison (need at least 2 groups with 2+ samples each)"
+            }
+        
+        if len(valid_groups) == 2:
+            # Two-sample t-test
+            try:
+                stat, p_value = stats.ttest_ind(valid_data[0], valid_data[1])
+                return {
+                    "test_type": "t-test (independent samples)",
+                    "statistic": float(stat),
+                    "p_value": float(p_value),
+                    "groups": valid_groups,
+                    "significant": p_value < 0.05,
+                    "interpretation": f"Groups {'differ significantly' if p_value < 0.05 else 'do not differ significantly'} (p={p_value:.4f})"
+                }
+            except Exception as e:
+                return {
+                    "test_type": "t-test (failed)",
+                    "error": str(e)
+                }
+        else:
+            # One-way ANOVA
+            try:
+                stat, p_value = stats.f_oneway(*valid_data)
+                return {
+                    "test_type": "ANOVA (one-way)",
+                    "statistic": float(stat),
+                    "p_value": float(p_value),
+                    "groups": valid_groups,
+                    "n_groups": len(valid_groups),
+                    "significant": p_value < 0.05,
+                    "interpretation": f"Groups {'differ significantly' if p_value < 0.05 else 'do not differ significantly'} (p={p_value:.4f})"
+                }
+            except Exception as e:
+                return {
+                    "test_type": "ANOVA (failed)",
+                    "error": str(e)
+                }
+    
+    def _recommend_chart_type(self, data: pd.DataFrame, comparison_metric: str, group_column: str) -> str:
+        """
+        Recommend appropriate chart type based on data characteristics.
+        
+        Args:
+            data: DataFrame with analysis data
+            comparison_metric: Metric to compare
+            group_column: Column containing group labels
+            
+        Returns:
+            Recommended chart type
+        """
+        if comparison_metric in ['cell_count', 'count', 'total', 'number']:
+            return 'bar'
+        elif comparison_metric in ['distribution', 'proportion', 'percentage', 'composition']:
+            return 'pie'
+        elif 'confidence' in comparison_metric.lower() or 'score' in comparison_metric.lower():
+            # For continuous metrics, use box or violin plot
+            if len(data[group_column].unique()) <= 5:
+                return 'box'
+            else:
+                return 'violin'
+        else:
+            # Default to bar chart
+            return 'bar'
+    
+    def _create_bar_chart(self, data_by_group: Dict[str, float], colors: List[tuple], 
+                          title: str, ylabel: str, output_path: str, 
+                          figure_size: tuple, dpi: int, stats_result: Optional[Dict] = None) -> str:
+        """Create a bar chart comparing groups."""
+        fig, ax = plt.subplots(figsize=figure_size, dpi=dpi)
+        
+        groups = list(data_by_group.keys())
+        values = [data_by_group[g] for g in groups]
+        
+        bars = ax.bar(groups, values, color=colors[:len(groups)], alpha=0.7, edgecolor='black', linewidth=1.5)
+        
+        # Add value labels on bars
+        for bar, val in zip(bars, values):
+            height = bar.get_height()
+            ax.text(bar.get_x() + bar.get_width()/2., height,
+                   f'{val:.2f}' if isinstance(val, float) else f'{val}',
+                   ha='center', va='bottom', fontsize=10, fontweight='bold')
+        
+        ax.set_xlabel('Group', fontsize=12, fontweight='bold')
+        ax.set_ylabel(ylabel, fontsize=12, fontweight='bold')
+        ax.set_title(title, fontsize=14, fontweight='bold', pad=20)
+        ax.grid(axis='y', alpha=0.3, linestyle='--')
+        
+        # Add statistical test result
+        if stats_result and stats_result.get('test_type') != 'none':
+            test_info = f"{stats_result['test_type']}: p={stats_result['p_value']:.4f}"
+            if stats_result.get('significant'):
+                test_info += " *"
+            ax.text(0.02, 0.98, test_info, transform=ax.transAxes,
+                   fontsize=9, verticalalignment='top',
+                   bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+        
+        plt.xticks(rotation=45, ha='right')
+        plt.tight_layout()
+        plt.savefig(output_path, dpi=dpi, bbox_inches='tight')
+        plt.close()
+        
+        return output_path
+    
+    def _create_pie_chart(self, data_by_group: Dict[str, float], colors: List[tuple],
+                         title: str, output_path: str, figure_size: tuple, dpi: int) -> str:
+        """Create a pie chart showing group composition."""
+        fig, ax = plt.subplots(figsize=figure_size, dpi=dpi)
+        
+        groups = list(data_by_group.keys())
+        values = [data_by_group[g] for g in groups]
+        total = sum(values)
+        
+        # Calculate percentages
+        percentages = [v/total*100 for v in values]
+        
+        # Create pie chart with labels
+        wedges, texts, autotexts = ax.pie(values, labels=groups, colors=colors[:len(groups)],
+                                          autopct='%1.1f%%', startangle=90,
+                                          textprops={'fontsize': 10, 'fontweight': 'bold'})
+        
+        ax.set_title(title, fontsize=14, fontweight='bold', pad=20)
+        
+        plt.tight_layout()
+        plt.savefig(output_path, dpi=dpi, bbox_inches='tight')
+        plt.close()
+        
+        return output_path
+    
+    def _create_box_plot(self, data_by_group: Dict[str, List[float]], colors: List[tuple],
+                        title: str, ylabel: str, output_path: str, 
+                        figure_size: tuple, dpi: int, stats_result: Optional[Dict] = None) -> str:
+        """Create a box plot comparing distributions across groups."""
+        fig, ax = plt.subplots(figsize=figure_size, dpi=dpi)
+        
+        groups = list(data_by_group.keys())
+        data_list = [data_by_group[g] for g in groups]
+        
+        bp = ax.boxplot(data_list, labels=groups, patch_artist=True,
+                       showmeans=True, meanline=True)
+        
+        # Color the boxes
+        for patch, color in zip(bp['boxes'], colors[:len(groups)]):
+            patch.set_facecolor(color)
+            patch.set_alpha(0.7)
+        
+        ax.set_xlabel('Group', fontsize=12, fontweight='bold')
+        ax.set_ylabel(ylabel, fontsize=12, fontweight='bold')
+        ax.set_title(title, fontsize=14, fontweight='bold', pad=20)
+        ax.grid(axis='y', alpha=0.3, linestyle='--')
+        
+        # Add statistical test result
+        if stats_result and stats_result.get('test_type') != 'none':
+            test_info = f"{stats_result['test_type']}: p={stats_result['p_value']:.4f}"
+            if stats_result.get('significant'):
+                test_info += " *"
+            ax.text(0.02, 0.98, test_info, transform=ax.transAxes,
+                   fontsize=9, verticalalignment='top',
+                   bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+        
+        plt.xticks(rotation=45, ha='right')
+        plt.tight_layout()
+        plt.savefig(output_path, dpi=dpi, bbox_inches='tight')
+        plt.close()
+        
+        return output_path
+    
+    def _create_violin_plot(self, data_by_group: Dict[str, List[float]], colors: List[tuple],
+                           title: str, ylabel: str, output_path: str,
+                           figure_size: tuple, dpi: int, stats_result: Optional[Dict] = None) -> str:
+        """Create a violin plot comparing distributions across groups."""
+        fig, ax = plt.subplots(figsize=figure_size, dpi=dpi)
+        
+        groups = list(data_by_group.keys())
+        data_list = [data_by_group[g] for g in groups]
+        
+        parts = ax.violinplot(data_list, positions=range(len(groups)), showmeans=True, showmedians=True)
+        
+        # Color the violins
+        for pc, color in zip(parts['bodies'], colors[:len(groups)]):
+            pc.set_facecolor(color)
+            pc.set_alpha(0.7)
+        
+        ax.set_xticks(range(len(groups)))
+        ax.set_xticklabels(groups)
+        ax.set_xlabel('Group', fontsize=12, fontweight='bold')
+        ax.set_ylabel(ylabel, fontsize=12, fontweight='bold')
+        ax.set_title(title, fontsize=14, fontweight='bold', pad=20)
+        ax.grid(axis='y', alpha=0.3, linestyle='--')
+        
+        # Add statistical test result
+        if stats_result and stats_result.get('test_type') != 'none':
+            test_info = f"{stats_result['test_type']}: p={stats_result['p_value']:.4f}"
+            if stats_result.get('significant'):
+                test_info += " *"
+            ax.text(0.02, 0.98, test_info, transform=ax.transAxes,
+                   fontsize=9, verticalalignment='top',
+                   bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+        
+        plt.xticks(rotation=45, ha='right')
+        plt.tight_layout()
+        plt.savefig(output_path, dpi=dpi, bbox_inches='tight')
+        plt.close()
+        
+        return output_path
+    
+    def _prepare_data(self, analysis_data: Union[Dict, str], comparison_metric: str, 
+                     group_column: str) -> tuple:
+        """
+        Prepare data for visualization.
+        
+        Returns:
+            Tuple of (data_by_group dict, stats_result dict, groups list)
+        """
+        # Load data if it's a file path
+        if isinstance(analysis_data, str):
+            if os.path.exists(analysis_data):
+                with open(analysis_data, 'r') as f:
+                    analysis_data = json.load(f)
+            else:
+                raise ValueError(f"Analysis data file not found: {analysis_data}")
+        
+        # Convert to DataFrame for easier manipulation
+        if isinstance(analysis_data, dict):
+            # Try to extract data from common structures
+            if 'per_image' in analysis_data:
+                # Multi-image results
+                records = []
+                for img_result in analysis_data['per_image']:
+                    group = img_result.get(group_column, img_result.get('group', 'default'))
+                    if comparison_metric in img_result:
+                        records.append({
+                            group_column: group,
+                            comparison_metric: img_result[comparison_metric]
+                        })
+                    elif 'statistics' in img_result and comparison_metric in img_result['statistics']:
+                        records.append({
+                            group_column: group,
+                            comparison_metric: img_result['statistics'][comparison_metric]
+                        })
+                df = pd.DataFrame(records)
+            elif 'results' in analysis_data:
+                # Results list
+                records = []
+                for result in analysis_data['results']:
+                    group = result.get(group_column, result.get('group', 'default'))
+                    if comparison_metric in result:
+                        records.append({
+                            group_column: group,
+                            comparison_metric: result[comparison_metric]
+                        })
+                df = pd.DataFrame(records)
+            elif 'cell_metadata' in analysis_data:
+                # Cell metadata structure
+                records = []
+                for metadata in analysis_data['cell_metadata']:
+                    group = metadata.get(group_column, metadata.get('group', 'default'))
+                    if comparison_metric in metadata:
+                        records.append({
+                            group_column: group,
+                            comparison_metric: metadata[comparison_metric]
+                        })
+                df = pd.DataFrame(records)
+            else:
+                # Try to convert directly to DataFrame
+                try:
+                    df = pd.DataFrame([analysis_data])
+                except:
+                    # If that fails, try to extract summary statistics
+                    if 'statistics' in analysis_data:
+                        stats_dict = analysis_data['statistics']
+                        if isinstance(stats_dict, dict):
+                            # Create a single-row DataFrame
+                            group = analysis_data.get(group_column, analysis_data.get('group', 'default'))
+                            df = pd.DataFrame([{group_column: group, **stats_dict}])
+                        else:
+                            raise ValueError("Unable to parse analysis data structure")
+                    else:
+                        raise ValueError("Unable to parse analysis data structure")
+        else:
+            raise ValueError(f"Unsupported data type: {type(analysis_data)}")
+        
+        if df.empty:
+            raise ValueError("No data found for visualization")
+        
+        if group_column not in df.columns:
+            raise ValueError(f"Group column '{group_column}' not found in data")
+        
+        if comparison_metric not in df.columns:
+            raise ValueError(f"Comparison metric '{comparison_metric}' not found in data")
+        
+        # Group data
+        groups = df[group_column].unique().tolist()
+        data_by_group = {}
+        
+        # Check if metric is continuous (list/array) or scalar
+        first_value = df[comparison_metric].iloc[0]
+        is_continuous = isinstance(first_value, (list, np.ndarray)) or (
+            isinstance(first_value, (int, float)) and len(df[df[group_column] == groups[0]]) > 1
+        )
+        
+        if is_continuous:
+            # For continuous data, collect all values per group
+            for group in groups:
+                group_data = df[df[group_column] == group][comparison_metric]
+                # Flatten if it's a list of lists
+                values = []
+                for val in group_data:
+                    if isinstance(val, (list, np.ndarray)):
+                        values.extend(list(val))
+                    else:
+                        values.append(val)
+                data_by_group[group] = values
+        else:
+            # For scalar data, aggregate (sum or mean)
+            for group in groups:
+                group_data = df[df[group_column] == group][comparison_metric]
+                # If all values are the same or it's a count, use sum
+                if group_data.nunique() == 1 or 'count' in comparison_metric.lower():
+                    data_by_group[group] = group_data.sum()
+                else:
+                    data_by_group[group] = group_data.mean()
+        
+        # Perform statistical test if we have continuous data
+        stats_result = None
+        if is_continuous:
+            stats_result = self._perform_statistical_test(data_by_group)
+        elif len(groups) > 1:
+            # For scalar data, convert to lists for statistical testing
+            scalar_data_by_group = {}
+            for group in groups:
+                group_data = df[df[group_column] == group][comparison_metric]
+                scalar_data_by_group[group] = group_data.tolist()
+            stats_result = self._perform_statistical_test(scalar_data_by_group)
+        
+        return data_by_group, stats_result, groups
+    
+    def execute(self, analysis_data: Union[Dict, str], 
+                chart_type: str = 'auto',
+                comparison_metric: str = 'cell_count',
+                group_column: str = 'group',
+                output_dir: str = 'output_visualizations',
+                figure_size: tuple = (10, 6),
+                dpi: int = 300) -> Dict[str, Any]:
+        """
+        Execute visualization generation.
+        
+        Args:
+            analysis_data: Analysis results data (dict) or path to JSON file
+            chart_type: Type of chart ('auto', 'bar', 'pie', 'box', 'violin')
+            comparison_metric: Metric to compare across groups
+            group_column: Column name containing group labels
+            output_dir: Directory to save outputs
+            figure_size: Figure size (width, height) in inches
+            dpi: Resolution for saved figures
+            
+        Returns:
+            Dictionary with visualization results
+        """
+        try:
+            # Create output directory
+            os.makedirs(output_dir, exist_ok=True)
+            
+            # Prepare data
+            data_by_group, stats_result, groups = self._prepare_data(
+                analysis_data, comparison_metric, group_column
+            )
+            
+            n_groups = len(groups)
+            colors = self._get_color_scheme(n_groups)
+            
+            # Determine chart type
+            if chart_type == 'auto':
+                # Try to infer from data structure
+                first_value = list(data_by_group.values())[0]
+                if isinstance(first_value, list):
+                    # Continuous data - use box or violin
+                    chart_type = 'box' if n_groups <= 5 else 'violin'
+                else:
+                    # Scalar data - recommend based on metric name
+                    if 'count' in comparison_metric.lower():
+                        chart_type = 'bar'
+                    elif 'distribution' in comparison_metric.lower() or 'proportion' in comparison_metric.lower():
+                        chart_type = 'pie'
+                    else:
+                        chart_type = 'bar'
+            
+            # Generate title and labels
+            title = f"{comparison_metric.replace('_', ' ').title()} Comparison Across Groups"
+            ylabel = comparison_metric.replace('_', ' ').title()
+            
+            # Generate output filename
+            safe_metric = comparison_metric.replace(' ', '_').replace('/', '_')
+            output_filename = f"{chart_type}_{safe_metric}_comparison.png"
+            output_path = os.path.join(output_dir, output_filename)
+            
+            # Create visualization
+            visual_outputs = []
+            
+            if chart_type == 'bar':
+                if isinstance(list(data_by_group.values())[0], list):
+                    # Convert lists to means for bar chart
+                    bar_data = {k: np.mean(v) if isinstance(v, list) else v 
+                               for k, v in data_by_group.items()}
+                else:
+                    bar_data = data_by_group
+                chart_path = self._create_bar_chart(
+                    bar_data, colors, title, ylabel, output_path, figure_size, dpi, stats_result
+                )
+                visual_outputs.append(chart_path)
+                
+            elif chart_type == 'pie':
+                if isinstance(list(data_by_group.values())[0], list):
+                    # Convert lists to sums for pie chart
+                    pie_data = {k: np.sum(v) if isinstance(v, list) else v 
+                               for k, v in data_by_group.items()}
+                else:
+                    pie_data = data_by_group
+                chart_path = self._create_pie_chart(
+                    pie_data, colors, title, output_path, figure_size, dpi
+                )
+                visual_outputs.append(chart_path)
+                
+            elif chart_type == 'box':
+                if not isinstance(list(data_by_group.values())[0], list):
+                    # Convert scalars to lists
+                    box_data = {k: [v] if not isinstance(v, list) else v 
+                               for k, v in data_by_group.items()}
+                else:
+                    box_data = data_by_group
+                chart_path = self._create_box_plot(
+                    box_data, colors, title, ylabel, output_path, figure_size, dpi, stats_result
+                )
+                visual_outputs.append(chart_path)
+                
+            elif chart_type == 'violin':
+                if not isinstance(list(data_by_group.values())[0], list):
+                    # Convert scalars to lists
+                    violin_data = {k: [v] if not isinstance(v, list) else v 
+                                  for k, v in data_by_group.items()}
+                else:
+                    violin_data = data_by_group
+                chart_path = self._create_violin_plot(
+                    violin_data, colors, title, ylabel, output_path, figure_size, dpi, stats_result
+                )
+                visual_outputs.append(chart_path)
+                
+            else:
+                raise ValueError(f"Unsupported chart type: {chart_type}")
+            
+            # Prepare result
+            result = {
+                "summary": f"Successfully created {chart_type} chart comparing {comparison_metric} across {n_groups} groups",
+                "chart_type": chart_type,
+                "comparison_metric": comparison_metric,
+                "groups": groups,
+                "n_groups": n_groups,
+                "visual_outputs": visual_outputs,
+                "output_path": output_path,
+                "statistical_test": stats_result if stats_result else {"message": "No statistical test performed"},
+                "data_summary": {
+                    group: {
+                        "mean": float(np.mean(v)) if isinstance(v, list) else float(v),
+                        "std": float(np.std(v)) if isinstance(v, list) else None,
+                        "n": len(v) if isinstance(v, list) else 1
+                    } for group, v in data_by_group.items()
+                }
+            }
+            
+            return result
+            
+        except Exception as e:
+            import traceback
+            error_msg = f"Error creating visualization: {str(e)}\n{traceback.format_exc()}"
+            print(error_msg)
+            return {
+                "error": error_msg,
+                "summary": "Visualization generation failed"
+            }
+

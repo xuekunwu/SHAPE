@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import torch
 from huggingface_hub import hf_hub_download
 from octotools.models.utils import VisualizationConfig
+import traceback
 
 class Nuclei_Segmenter_Tool(BaseTool):
     def __init__(self, model_path=None):
@@ -95,13 +96,32 @@ class Nuclei_Segmenter_Tool(BaseTool):
             dict: Segmentation results with cell count and visualization paths
         """
         try:
-            # Load and preprocess image
-            img = cv2.imread(image, cv2.IMREAD_GRAYSCALE)
-            if img is None:
+            # Normalize path for cross-platform compatibility
+            image_path = os.path.normpath(image) if isinstance(image, str) else str(image)
+            
+            # Check if file exists
+            if not os.path.exists(image_path):
                 return {
-                    "error": f"Failed to load image: {image}",
-                    "summary": "Image loading failed"
+                    "error": f"Image file not found: {image_path}",
+                    "summary": "Image file does not exist"
                 }
+            
+            # Load and preprocess image
+            img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+            if img is None:
+                # Try alternative: use PIL to load and convert
+                try:
+                    from PIL import Image
+                    pil_img = Image.open(image_path)
+                    if pil_img.mode != 'L':
+                        pil_img = pil_img.convert('L')
+                    img = np.array(pil_img)
+                    print(f"Loaded image using PIL: {image_path}")
+                except Exception as pil_error:
+                    return {
+                        "error": f"Failed to load image: {image_path}. cv2.imread returned None, PIL also failed: {str(pil_error)}",
+                        "summary": "Image loading failed with both cv2 and PIL"
+                    }
             
             img = img.astype(np.float32)
             

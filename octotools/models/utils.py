@@ -304,5 +304,122 @@ def normalize_tool_name(tool_name: str, available_tools=None) -> str:
         if tool.lower() in tool_name.lower():
             return tool
     return "No matched tool given: " + tool_name
+
+def sanitize_tool_output_for_llm(result: Any) -> Dict[str, Any]:
+    """
+    Sanitize tool output to separate LLM-visible summary from artifacts (file paths).
+    
+    CRITICAL: Local image paths must NEVER be sent to the LLM as image inputs.
+    This function separates:
+    - summary: Text/numeric data safe for LLM (no file paths)
+    - artifacts: File paths for executor/cache only (not sent to LLM)
+    
+    Args:
+        result: Raw tool output (dict, list, or other)
+        
+    Returns:
+        dict with 'summary' (LLM-safe) and 'artifacts' (paths only)
+    """
+    if not isinstance(result, dict):
+        # For non-dict results, return as summary with no artifacts
+        return {
+            "summary": result,
+            "artifacts": {}
+        }
+    
+    # Image path keys that should be moved to artifacts
+    image_path_keys = [
+        'processed_image_path', 'visual_outputs', 'output_path', 'mask_path',
+        'image_path', 'nuclei_mask', 'comparison_plot', 'analyzed_h5ad_path',
+        'h5ad_path', 'output_file', 'result_path', 'visualization_path'
+    ]
+    
+    summary = {}
+    artifacts = {}
+    
+    for key, value in result.items():
+        # Check if key suggests it's an image path
+        is_image_path = any(path_key in key.lower() for path_key in ['path', 'output', 'visual', 'image', 'mask', 'plot', 'file'])
+        
+        # Check if value is a file path (string ending with image extensions)
+        is_file_path = False
+        if isinstance(value, str):
+            # Check if it looks like a file path
+            is_file_path = (
+                value.endswith(('.png', '.jpg', '.jpeg', '.tif', '.tiff', '.h5ad', '.json', '.csv')) or
+                os.path.sep in value or
+                '/' in value or
+                '\\' in value
+            )
+        
+        # Check if value is a list of file paths
+        is_path_list = False
+        if isinstance(value, list):
+            is_path_list = all(
+                isinstance(item, str) and (
+                    item.endswith(('.png', '.jpg', '.jpeg', '.tif', '.tiff', '.h5ad', '.json', '.csv')) or
+                    os.path.sep in item or '/' in item or '\\' in item
+                )
+                for item in value
+            )
+        
+        # Move image paths to artifacts
+        if (key in image_path_keys or (is_image_path and is_file_path)) and isinstance(value, str):
+            artifacts[key] = value
+        elif (key in image_path_keys or (is_image_path and is_path_list)) and isinstance(value, list):
+            artifacts[key] = value
+        else:
+            # Keep in summary, but recursively sanitize nested dicts
+            if isinstance(value, dict):
+                sanitized = sanitize_tool_output_for_llm(value)
+                summary[key] = sanitized['summary']
+                if sanitized['artifacts']:
+                    artifacts[f"{key}_artifacts"] = sanitized['artifacts']
+            elif isinstance(value, list) and len(value) > 0 and isinstance(value[0], dict):
+                # List of dicts - sanitize each
+                sanitized_list = []
+                for i, item in enumerate(value):
+                    if isinstance(item, dict):
+                        sanitized = sanitize_tool_output_for_llm(item)
+                        sanitized_list.append(sanitized['summary'])
+                        if sanitized['artifacts']:
+                            artifacts[f"{key}_{i}_artifacts"] = sanitized['artifacts']
+                    else:
+                        sanitized_list.append(item)
+                summary[key] = sanitized_list
+            else:
+                # Safe to include in summary (text, numbers, etc.)
+                summary[key] = value
+    
+    return {
+        "summary": summary,
+        "artifacts": artifacts
+    }
+
+def get_llm_safe_result(result: Any) -> Any:
+    """
+    Get LLM-safe version of tool result (summary only, no file paths).
+    
+    Args:
+        result: Raw tool output
+        
+    Returns:
+        LLM-safe result (summary only)
+    """
+    sanitized = sanitize_tool_output_for_llm(result)
+    return sanitized['summary']
+
+def get_tool_artifacts(result: Any) -> Dict[str, Any]:
+    """
+    Extract artifacts (file paths) from tool result for executor/cache use.
+    
+    Args:
+        result: Raw tool output
+        
+    Returns:
+        dict of artifacts (file paths)
+    """
+    sanitized = sanitize_tool_output_for_llm(result)
+    return sanitized['artifacts']
     
     

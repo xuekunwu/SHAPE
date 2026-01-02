@@ -21,9 +21,10 @@ class Image_Preprocessor_Tool(BaseTool):
             tool_version="1.0.0",
             input_types={
                 "image": "str - The path to the input image file.",
+                "groups": "dict | list | str | None - Optional grouping for each image.",
                 "target_brightness": "int - Target brightness level (0-255, default: 120).",
                 "gaussian_kernel_size": "int - Size of Gaussian kernel for illumination correction (default: 151).",
-                "output_format": "str - Output format: 'png', 'jpg', or 'tiff' (default: 'png').",
+                "output_format": "str - Output format: Always use 'png' for Visual Outputs display compatibility (default: 'png', will be forced to 'png' regardless of input).",
                 "save_intermediate": "bool - Whether to save intermediate processing steps (default: False)."
             },
             output_type="dict - A dictionary containing processed image paths and processing statistics.",
@@ -89,7 +90,7 @@ class Image_Preprocessor_Tool(BaseTool):
         
         return adjusted_image
 
-    def create_comparison_plot(self, original, corrected, normalized, filename, vis_config):
+    def create_comparison_plot(self, original, corrected, normalized, filename, vis_config, group=None):
         """
         Create a comparison plot of original, corrected, and normalized images with professional styling.
         
@@ -105,6 +106,9 @@ class Image_Preprocessor_Tool(BaseTool):
         """
         # Use centralized output directory from the vis_config instance
         output_dir = vis_config.get_output_dir()
+        if group:
+            output_dir = os.path.join(output_dir, group)
+            os.makedirs(output_dir, exist_ok=True)
         
         # Create figure with professional styling
         fig, axs = vis_config.create_professional_figure(figsize=(18, 6), ncols=3)
@@ -131,13 +135,47 @@ class Image_Preprocessor_Tool(BaseTool):
         plt.tight_layout()
         
         # Save with professional settings
-        plot_path = os.path.join(output_dir, f"comparison_{os.path.splitext(os.path.basename(filename))[0]}.png")
+        group_suffix = f"_{group}" if group else ""
+        plot_path = os.path.join(
+            output_dir,
+            f"comparison_{os.path.splitext(os.path.basename(filename))[0]}{group_suffix}.png",
+        )
         vis_config.save_professional_figure(fig, plot_path)
         plt.close(fig)
         
         return plot_path
 
-    def execute(self, image, target_brightness=120, gaussian_kernel_size=151, output_format='png', save_intermediate=False):
+    def _resolve_groups(self, images, groups):
+        """
+        Resolve group assignment for each image.
+        """
+        if not isinstance(images, list):
+            images = [images]
+        if groups is None:
+            if len(images) > 1:
+                raise ValueError("Groups must be provided when processing multiple images.")
+            return {img: "default" for img in images}
+        if isinstance(groups, str):
+            return {img: groups for img in images}
+        if isinstance(groups, list):
+            if len(groups) != len(images):
+                raise ValueError("Length of groups list must match images list.")
+            return dict(zip(images, groups))
+
+        if isinstance(groups, dict):
+            mapping = {}
+            for img in images:
+                key = os.path.basename(img)
+                if img in groups:
+                    mapping[img] = groups[img]
+                elif key in groups:
+                    mapping[img] = groups[key]
+                else:
+                    raise ValueError(f"Missing group for image: {img}")
+            return mapping
+        raise ValueError("Unsupported groups format.")
+
+    def execute(self, image, target_brightness=120, gaussian_kernel_size=151, output_format='png', save_intermediate=False, groups=None):
         """
         Execute the image preprocessing pipeline.
         
@@ -145,117 +183,102 @@ class Image_Preprocessor_Tool(BaseTool):
             image: Path to input image
             target_brightness: Target brightness level (0-255)
             gaussian_kernel_size: Size of Gaussian kernel for illumination correction
-            output_format: Output image format
+            output_format: Output image format (forced to 'png' for Visual Outputs compatibility)
             save_intermediate: Whether to save intermediate processing steps
             
         Returns:
             Dictionary containing processing results and file paths
         """
-        try:
-            # Ensure output directory exists
-            os.makedirs(self.output_dir, exist_ok=True)
-            
-            # Read the input image
-            if isinstance(image, str):
-                # Read as grayscale
-                original_image = cv2.imread(image, cv2.IMREAD_GRAYSCALE)
-                if original_image is None:
-                    raise ValueError(f"Cannot read image: {image}")
-                filename = os.path.basename(image)
-            else:
-                # Handle PIL Image or other formats
-                if hasattr(image, 'convert'):
-                    # Convert PIL Image to numpy array
-                    original_image = np.array(image.convert('L'))
-                else:
-                    raise ValueError("Unsupported image format")
-                filename = "processed_image"
-            
-            # Step 1: Global illumination correction
-            corrected_image = self.global_illumination_correction(original_image, gaussian_kernel_size)
-            
-            # Step 2: Brightness adjustment
-            normalized_image = self.adjust_brightness(corrected_image, target_brightness)
-            
-            # Calculate processing statistics
-            original_brightness = np.mean(original_image)
-            corrected_brightness = np.mean(corrected_image)
-            final_brightness = np.mean(normalized_image)
-            
-            # Save processed images
+        # Force output_format to 'png' for Visual Outputs compatibility
+        # PNG format is required for proper display in Gradio Gallery
+        output_format = 'png'
+        
+        # Ensure output directory exists
+        images = image if isinstance(image, list) else [image]
+        group_map = self._resolve_groups(images, groups)
+        os.makedirs(self.output_dir, exist_ok=True)
+        all_results = []
+        for img_path in images:
+            group = group_map[img_path]
+            # Normalize path separators for cross-platform compatibility
+            img_path = os.path.normpath(img_path) if isinstance(img_path, str) else str(img_path)
+            # Check if file exists
+            if not os.path.exists(img_path):
+                raise ValueError(f"Image file not found: {img_path}")
+            original_image = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
+            if original_image is None:
+                raise ValueError(f"Cannot read image: {img_path}. Please check if the file is a valid image format.")
+            filename = os.path.basename(img_path)
             base_name = os.path.splitext(filename)[0]
+            corrected_image = self.global_illumination_correction(original_image, gaussian_kernel_size)
+            normalized_image = self.adjust_brightness(corrected_image, target_brightness)
+
+            group_dir = os.path.join(self.output_dir, group)
+            os.makedirs(group_dir, exist_ok=True)
+
+            final_output_path = os.path.join(group_dir, f"{base_name}_{group}_processed.{output_format}")
+            # Normalize path for cross-platform compatibility
+            final_output_path = os.path.normpath(final_output_path)
             
-            # Save final processed image using PIL for better format support
-            final_output_path = os.path.join(self.output_dir, f"{base_name}_processed.{output_format}")
-            final_pil_image = Image.fromarray(normalized_image)
-            if output_format.lower() == 'png':
-                final_pil_image.save(final_output_path, 'PNG', optimize=True)
-            elif output_format.lower() == 'jpg':
-                final_pil_image.save(final_output_path, 'JPEG', quality=95)
-            elif output_format.lower() == 'tiff':
-                final_pil_image.save(final_output_path, 'TIFF', compression='tiff_lzw')
-            else:
-                final_pil_image.save(final_output_path, 'PNG', optimize=True)
-            
-            # Save intermediate images if requested
-            intermediate_paths = {}
-            if save_intermediate:
-                corrected_path = os.path.join(self.output_dir, f"{base_name}_corrected.{output_format}")
-                corrected_pil_image = Image.fromarray(corrected_image)
-                if output_format.lower() == 'png':
-                    corrected_pil_image.save(corrected_path, 'PNG', optimize=True)
-                elif output_format.lower() == 'jpg':
-                    corrected_pil_image.save(corrected_path, 'JPEG', quality=95)
-                elif output_format.lower() == 'tiff':
-                    corrected_pil_image.save(corrected_path, 'TIFF', compression='tiff_lzw')
-                else:
-                    corrected_pil_image.save(corrected_path, 'PNG', optimize=True)
-                intermediate_paths["corrected"] = corrected_path
-            
-            # Prepare results
-            results = {
-                "original_image_path": image if isinstance(image, str) else "input_image",
+            # Save the processed image
+            try:
+                Image.fromarray(normalized_image).save(final_output_path)
+                # Verify file was saved
+                if not os.path.exists(final_output_path):
+                    raise ValueError(f"File was not created: {final_output_path}")
+                file_size = os.path.getsize(final_output_path)
+                if file_size == 0:
+                    raise ValueError(f"File is empty: {final_output_path}")
+                print(f"Successfully saved processed image to: {final_output_path} (size: {file_size} bytes)")
+            except Exception as save_error:
+                error_msg = f"Failed to save processed image to {final_output_path}: {str(save_error)}"
+                print(f"Error: {error_msg}")
+                raise ValueError(error_msg)
+
+            stats = {
+                "original_brightness": round(float(np.mean(original_image)), 2),
+                "corrected_brightness": round(float(np.mean(corrected_image)), 2),
+                "final_brightness": round(float(np.mean(normalized_image)), 2),
+                "target_brightness": target_brightness,
+                "brightness_delta": round(
+                    float(np.mean(normalized_image) - np.mean(original_image)), 2
+                ),
+            }
+
+            vis_config = VisualizationConfig()
+            comparison_plot = self.create_comparison_plot(
+                original_image,
+                corrected_image,
+                normalized_image,
+                filename,
+                vis_config,
+                group=group,
+            )
+
+            # Build result in FBagent_250627 compatible format (flat structure)
+            result = {
+                "original_image_path": img_path,
                 "processed_image_path": final_output_path,
-                "processing_statistics": {
-                    "original_brightness": round(original_brightness, 2),
-                    "corrected_brightness": round(corrected_brightness, 2),
-                    "final_brightness": round(final_brightness, 2),
-                    "target_brightness": target_brightness,
-                    "brightness_improvement": round(final_brightness - original_brightness, 2)
-                },
+                "processing_statistics": stats,
                 "parameters_used": {
                     "target_brightness": target_brightness,
                     "gaussian_kernel_size": gaussian_kernel_size,
-                    "output_format": output_format
-                }
+                    "output_format": output_format,
+                },
+                "visual_outputs": [
+                    p for p in [comparison_plot, final_output_path if output_format in ("png", "jpg", "jpeg") else None] if p is not None
+                ],
             }
-            
-            # Add intermediate paths if saved
-            if save_intermediate:
-                results["intermediate_paths"] = intermediate_paths
-            
-            # Create an instance of the visualization config
-            vis_config = VisualizationConfig()
-            
-            # Create the comparison plot for visualization
-            comparison_plot_path = self.create_comparison_plot(
-                original_image, corrected_image, normalized_image, filename, vis_config
-            )
-            
-            # Add visual outputs for Gradio
-            visual_outputs = [comparison_plot_path, final_output_path]
-            if save_intermediate:
-                visual_outputs.append(intermediate_paths["corrected"])
-            results["visual_outputs"] = visual_outputs
-            
-            return results
-            
-        except Exception as e:
-            print(f"Error in image preprocessing: {e}")
-            return {
-                "error": str(e),
-                "status": "failed"
-            }
+            all_results.append(result)
+        
+        # Return single result if only one image, otherwise return first result (for backward compatibility)
+        # Note: Multiple images support can be added later if needed
+        if len(all_results) == 1:
+            return all_results[0]
+        else:
+            # For multiple images, return the first one (maintain backward compatibility)
+            # Future: could return aggregated result
+            return all_results[0]
 
     def get_metadata(self):
         """Return tool metadata."""

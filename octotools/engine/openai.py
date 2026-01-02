@@ -7,6 +7,8 @@ import os
 import json
 import base64
 import platformdirs
+from PIL import Image
+from io import BytesIO
 from tenacity import (
     retry,
     stop_after_attempt,
@@ -30,7 +32,15 @@ class DefaultFormat(BaseModel):
     response: str
 
 # Define global constant for structured models
-OPENAI_STRUCTURED_MODELS = ['gpt-4o', 'gpt-4o-2024-08-06','gpt-4o-mini',  'gpt-4o-mini-2024-07-18','deepseek']
+# GPT-5 mini and GPT-5 support structured outputs like GPT-4o
+OPENAI_STRUCTURED_MODELS = ['gpt-4o', 'gpt-4o-2024-08-06','gpt-4o-mini',  'gpt-4o-mini-2024-07-18','gpt-5-mini', 'gpt-5','deepseek']
+
+# Models that require max_completion_tokens instead of max_tokens
+MODELS_REQUIRING_MAX_COMPLETION_TOKENS = ['o1', 'o1-mini', 'gpt-5-mini', 'gpt-5']
+
+# Models that only support temperature=1 (default) and cannot accept custom temperature/top_p values
+# These models should not have temperature or top_p parameters set (similar to o1/o1-mini)
+MODELS_REQUIRING_TEMPERATURE_1 = ['gpt-5-mini', 'gpt-5']
 
 
 class ChatOpenAI(EngineLM, CachedEngine):
@@ -129,6 +139,11 @@ class ChatOpenAI(EngineLM, CachedEngine):
 
         sys_prompt_arg = system_prompt if system_prompt else self.system_prompt
 
+        # Check if model requires max_completion_tokens instead of max_tokens
+        use_max_completion_tokens = self.model_string in MODELS_REQUIRING_MAX_COMPLETION_TOKENS
+        # Check if model only supports temperature=1 (default)
+        require_temperature_1 = self.model_string in MODELS_REQUIRING_TEMPERATURE_1
+
         if self.enable_cache:
             cache_key = sys_prompt_arg + prompt
             cache_or_none = self._check_cache(cache_key)
@@ -168,20 +183,27 @@ class ChatOpenAI(EngineLM, CachedEngine):
             # For structured models with response_format, we need to use parse method
             # but we also need to get usage information
             try:
-                response = self.client.beta.chat.completions.parse(
-                    model=self.model_string,
-                    messages=[
+                # Use max_completion_tokens for GPT-5 models, max_tokens for others
+                api_params = {
+                    "model": self.model_string,
+                    "messages": [
                         {"role": "system", "content": sys_prompt_arg},
                         {"role": "user", "content": prompt},
                     ],
-                    frequency_penalty=0,
-                    presence_penalty=0,
-                    stop=None,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    top_p=top_p,
-                    response_format=response_format
-                )
+                    "frequency_penalty": 0,
+                    "presence_penalty": 0,
+                    "stop": None,
+                    "response_format": response_format
+                }
+                # Only set temperature and top_p if model supports custom values
+                if not require_temperature_1:
+                    api_params["temperature"] = temperature
+                    api_params["top_p"] = top_p
+                if use_max_completion_tokens:
+                    api_params["max_completion_tokens"] = max_tokens
+                else:
+                    api_params["max_tokens"] = max_tokens
+                response = self.client.beta.chat.completions.parse(**api_params)
                 response_content = response.choices[0].message.parsed
                 
                 # Try to get usage information from the response
@@ -208,22 +230,32 @@ class ChatOpenAI(EngineLM, CachedEngine):
                     "usage": usage_info
                 }
             except Exception as e:
-                print(f"Error in structured model parse: {e}")
+                error_details = str(e)
+                print(f"Error in structured model parse: {error_details}")
+                import traceback
+                traceback.print_exc()
                 # Fallback to regular chat completion for usage tracking
                 try:
-                    response = self.client.chat.completions.create(
-                        model=self.model_string,
-                        messages=[
+                    # Use max_completion_tokens for GPT-5 models, max_tokens for others
+                    api_params = {
+                        "model": self.model_string,
+                        "messages": [
                             {"role": "system", "content": sys_prompt_arg},
                             {"role": "user", "content": prompt},
                         ],
-                        frequency_penalty=0,
-                        presence_penalty=0,
-                        stop=None,
-                        temperature=temperature,
-                        max_tokens=max_tokens,
-                        top_p=top_p,
-                    )
+                        "frequency_penalty": 0,
+                        "presence_penalty": 0,
+                        "stop": None,
+                    }
+                    # Only set temperature and top_p if model supports custom values
+                    if not require_temperature_1:
+                        api_params["temperature"] = temperature
+                        api_params["top_p"] = top_p
+                    if use_max_completion_tokens:
+                        api_params["max_completion_tokens"] = max_tokens
+                    else:
+                        api_params["max_tokens"] = max_tokens
+                    response = self.client.chat.completions.create(**api_params)
                     response_content = response.choices[0].message.content
                     
                     # Return both content and usage info
@@ -238,26 +270,38 @@ class ChatOpenAI(EngineLM, CachedEngine):
                     print(f"Fallback usage info: {result['usage']}")
                     return result
                 except Exception as fallback_error:
-                    print(f"Fallback error: {fallback_error}")
+                    fallback_error_details = str(fallback_error)
+                    print(f"Fallback error: {fallback_error_details}")
+                    import traceback
+                    traceback.print_exc()
+                    # Return detailed error message instead of generic one
+                    error_message = f"Error in structured generation: Structured parse failed ({error_details}); Fallback also failed ({fallback_error_details})"
                     return {
-                        "content": "Error in structured generation",
+                        "content": error_message,
                         "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
                     }
         else:
             # print(f"Using non-structured model: {self.model_string}")
-            response = self.client.chat.completions.create(
-                model=self.model_string,
-                messages=[
+            # Use max_completion_tokens for GPT-5 models, max_tokens for others
+            api_params = {
+                "model": self.model_string,
+                "messages": [
                     {"role": "system", "content": sys_prompt_arg},
                     {"role": "user", "content": prompt},
                 ],
-                frequency_penalty=0,
-                presence_penalty=0,
-                stop=None,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                top_p=top_p,
-            )
+                "frequency_penalty": 0,
+                "presence_penalty": 0,
+                "stop": None,
+            }
+            # Only set temperature and top_p if model supports custom values
+            if not require_temperature_1:
+                api_params["temperature"] = temperature
+                api_params["top_p"] = top_p
+            if use_max_completion_tokens:
+                api_params["max_completion_tokens"] = max_tokens
+            else:
+                api_params["max_tokens"] = max_tokens
+            response = self.client.chat.completions.create(**api_params)
             response_content = response.choices[0].message.content
             
             # Return both content and usage info
@@ -281,13 +325,77 @@ class ChatOpenAI(EngineLM, CachedEngine):
 
     def _format_content(self, content: List[Union[str, bytes]]) -> List[dict]:
         formatted_content = []
+        # OpenAI supported image formats
+        SUPPORTED_FORMATS = ['png', 'jpeg', 'gif', 'webp']
+        
         for item in content:
             if isinstance(item, bytes):
-                base64_image = base64.b64encode(item).decode('utf-8')
+                # Detect image format using PIL
+                try:
+                    img = Image.open(BytesIO(item))
+                    original_format = img.format.lower() if img.format else None
+                    
+                    # Map PIL format to MIME type
+                    mime_type_map = {
+                        'jpeg': 'jpeg',
+                        'jpg': 'jpeg',
+                        'png': 'png',
+                        'gif': 'gif',
+                        'webp': 'webp'
+                    }
+                    
+                    # Check if format is supported
+                    if original_format and original_format in mime_type_map:
+                        mime_type = mime_type_map[original_format]
+                        # Use original bytes if format is supported
+                        base64_image = base64.b64encode(item).decode('utf-8')
+                    else:
+                        # Convert unsupported formats (e.g., TIFF, BMP) to PNG
+                        print(f"Warning: Image format '{original_format}' is not supported by OpenAI API. Converting to PNG.")
+                        output_buffer = BytesIO()
+                        # Convert to RGB if necessary (for formats like RGBA)
+                        if img.mode in ('RGBA', 'LA', 'P'):
+                            # Create white background for transparent images
+                            rgb_img = Image.new('RGB', img.size, (255, 255, 255))
+                            if img.mode == 'P':
+                                img = img.convert('RGBA')
+                            rgb_img.paste(img, mask=img.split()[-1] if img.mode in ('RGBA', 'LA') else None)
+                            img = rgb_img
+                        elif img.mode != 'RGB':
+                            img = img.convert('RGB')
+                        img.save(output_buffer, format='PNG')
+                        converted_bytes = output_buffer.getvalue()
+                        base64_image = base64.b64encode(converted_bytes).decode('utf-8')
+                        mime_type = 'png'
+                except Exception as e:
+                    print(f"Error processing image: {e}. Attempting to convert to PNG.")
+                    # Fallback: try to open and convert to PNG
+                    try:
+                        img = Image.open(BytesIO(item))
+                        output_buffer = BytesIO()
+                        # Convert to RGB if necessary
+                        if img.mode in ('RGBA', 'LA', 'P'):
+                            rgb_img = Image.new('RGB', img.size, (255, 255, 255))
+                            if img.mode == 'P':
+                                img = img.convert('RGBA')
+                            rgb_img.paste(img, mask=img.split()[-1] if img.mode in ('RGBA', 'LA') else None)
+                            img = rgb_img
+                        elif img.mode != 'RGB':
+                            img = img.convert('RGB')
+                        img.save(output_buffer, format='PNG')
+                        converted_bytes = output_buffer.getvalue()
+                        base64_image = base64.b64encode(converted_bytes).decode('utf-8')
+                        mime_type = 'png'
+                    except Exception as convert_error:
+                        print(f"Failed to convert image: {convert_error}. Using original bytes as JPEG.")
+                        # Last resort: use original bytes as JPEG
+                        base64_image = base64.b64encode(item).decode('utf-8')
+                        mime_type = 'jpeg'
+                
                 formatted_content.append({
                     "type": "image_url",
                     "image_url": {
-                        "url": f"data:image/jpeg;base64,{base64_image}"
+                        "url": f"data:image/{mime_type};base64,{base64_image}"
                     }
                 })
             elif isinstance(item, str):
@@ -315,6 +423,11 @@ class ChatOpenAI(EngineLM, CachedEngine):
                         cache_or_none['usage'] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
                     cache_or_none['usage']['from_cache'] = True
                 return cache_or_none
+
+        # Check if model requires max_completion_tokens instead of max_tokens
+        use_max_completion_tokens = self.model_string in MODELS_REQUIRING_MAX_COMPLETION_TOKENS
+        # Check if model only supports temperature=1 (default)
+        require_temperature_1 = self.model_string in MODELS_REQUIRING_TEMPERATURE_1
 
         if self.model_string in ['o1', 'o1-mini']: # only supports base response currently
             # print(f"Using structured model: {self.model_string}")
@@ -345,17 +458,24 @@ class ChatOpenAI(EngineLM, CachedEngine):
             # For structured models with response_format, we need to use parse method
             # but we also need to get usage information
             try:
-                response = self.client.beta.chat.completions.parse(
-                    model=self.model_string,
-                    messages=[
+                # Use max_completion_tokens for GPT-5 models, max_tokens for others
+                api_params = {
+                    "model": self.model_string,
+                    "messages": [
                         {"role": "system", "content": sys_prompt_arg},
                         {"role": "user", "content": formatted_content},
                     ],
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    top_p=top_p,
-                    response_format=response_format
-                )
+                    "response_format": response_format
+                }
+                # Only set temperature and top_p if model supports custom values
+                if not require_temperature_1:
+                    api_params["temperature"] = temperature
+                    api_params["top_p"] = top_p
+                if use_max_completion_tokens:
+                    api_params["max_completion_tokens"] = max_tokens
+                else:
+                    api_params["max_tokens"] = max_tokens
+                response = self.client.beta.chat.completions.parse(**api_params)
                 response_text = response.choices[0].message.parsed
                 
                 # Try to get usage information from the response
@@ -382,19 +502,29 @@ class ChatOpenAI(EngineLM, CachedEngine):
                     "usage": usage_info
                 }
             except Exception as e:
-                print(f"Error in multimodal structured model parse: {e}")
+                error_details = str(e)
+                print(f"Error in multimodal structured model parse: {error_details}")
+                import traceback
+                traceback.print_exc()
                 # Fallback to regular chat completion for usage tracking
                 try:
-                    response = self.client.chat.completions.create(
-                        model=self.model_string,
-                        messages=[
+                    # Use max_completion_tokens for GPT-5 models, max_tokens for others
+                    api_params = {
+                        "model": self.model_string,
+                        "messages": [
                             {"role": "system", "content": sys_prompt_arg},
                             {"role": "user", "content": formatted_content},
                         ],
-                        temperature=temperature,
-                        max_tokens=max_tokens,
-                        top_p=top_p,
-                    )
+                    }
+                    # Only set temperature and top_p if model supports custom values
+                    if not require_temperature_1:
+                        api_params["temperature"] = temperature
+                        api_params["top_p"] = top_p
+                    if use_max_completion_tokens:
+                        api_params["max_completion_tokens"] = max_tokens
+                    else:
+                        api_params["max_tokens"] = max_tokens
+                    response = self.client.chat.completions.create(**api_params)
                     response_text = response.choices[0].message.content
                     
                     # Return both content and usage info
@@ -409,23 +539,35 @@ class ChatOpenAI(EngineLM, CachedEngine):
                     print(f"Multimodal fallback usage info: {result['usage']}")
                     return result
                 except Exception as fallback_error:
-                    print(f"Multimodal fallback error: {fallback_error}")
+                    fallback_error_details = str(fallback_error)
+                    print(f"Multimodal fallback error: {fallback_error_details}")
+                    import traceback
+                    traceback.print_exc()
+                    # Return detailed error message instead of generic one
+                    error_message = f"Error in multimodal generation: Structured parse failed ({error_details}); Fallback also failed ({fallback_error_details})"
                     return {
-                        "content": "Error in multimodal structured generation",
+                        "content": error_message,
                         "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
                     }
         else:
             # print(f"Using non-structured model: {self.model_string}")
-            response = self.client.chat.completions.create(
-                model=self.model_string,
-                messages=[
+            # Use max_completion_tokens for GPT-5 models, max_tokens for others
+            api_params = {
+                "model": self.model_string,
+                "messages": [
                     {"role": "system", "content": sys_prompt_arg},
                     {"role": "user", "content": formatted_content},
                 ],
-                temperature=temperature,
-                max_tokens=max_tokens,
-                top_p=top_p,
-            )
+            }
+            # Only set temperature and top_p if model supports custom values
+            if not require_temperature_1:
+                api_params["temperature"] = temperature
+                api_params["top_p"] = top_p
+            if use_max_completion_tokens:
+                api_params["max_completion_tokens"] = max_tokens
+            else:
+                api_params["max_tokens"] = max_tokens
+            response = self.client.chat.completions.create(**api_params)
             response_text = response.choices[0].message.content
             
             # Return both content and usage info

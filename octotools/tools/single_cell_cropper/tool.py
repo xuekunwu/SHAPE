@@ -9,6 +9,7 @@ from skimage.measure import label, regionprops
 from pathlib import Path
 import json
 from octotools.models.utils import VisualizationConfig
+from octotools.models.task_state import CellCrop
 
 class Single_Cell_Cropper_Tool(BaseTool):
     def __init__(self):
@@ -19,6 +20,8 @@ class Single_Cell_Cropper_Tool(BaseTool):
             input_types={
                 "original_image": "str - Path to the original image (brightfield/phase contrast).",
                 "nuclei_mask": "str - Path to the nuclei segmentation mask image or mask array.",
+                "source_image_id": "str - Optional source image ID for cell tracking (default: extracted from image path).",
+                "group": "str - Optional group/condition label for multi-group analysis (default: 'default').",
                 "min_area": "int - Minimum area threshold for valid nuclei (default: 50 pixels).",
                 "margin": "int - Margin around each nucleus for cropping (default: 25 pixels).",
                 "output_format": "str - Output format for crops ('tif', 'png', 'jpg', default: 'tif')."
@@ -40,20 +43,25 @@ class Single_Cell_Cropper_Tool(BaseTool):
             }
         )
 
-    def execute(self, original_image, nuclei_mask, min_area=50, margin=25, output_format='png', query_cache_dir=None):
+    def execute(self, original_image, nuclei_mask, source_image_id=None, group="default", min_area=50, margin=25, output_format='png', query_cache_dir=None):
         """
         Execute single-cell cropping from nuclei segmentation results.
+        
+        This is a Stage 2 (cell-level) tool. It operates on segmentation results (masks)
+        and produces CellCrop objects as the atomic data units for downstream analysis.
         
         Args:
             original_image: Path to original brightfield image (should be query_image_processed.png)
             nuclei_mask: Path to nuclei segmentation mask
+            source_image_id: Optional source image ID for tracking (default: extracted from path)
+            group: Optional group/condition label (default: 'default')
             min_area: Minimum area threshold for valid nuclei
             margin: Margin around each nucleus for cropping
             output_format: Output image format ('png', 'tif', 'jpg')
             query_cache_dir: Directory for caching results
             
         Returns:
-            dict: Cropping results with cell crops and metadata
+            dict: Cropping results with cell crops, CellCrop objects, and metadata
         """
         try:
             # Check if we should use processed image instead of original
@@ -85,9 +93,13 @@ class Single_Cell_Cropper_Tool(BaseTool):
             tool_cache_dir = os.path.join(query_cache_dir, "tool_cache")
             os.makedirs(tool_cache_dir, exist_ok=True)
             
-            # Generate cell crops
-            cell_crops, cell_metadata, stats = self._generate_cell_crops(
-                original_img, mask, min_area, margin, tool_cache_dir, output_format
+            # Extract source_image_id from path if not provided
+            if source_image_id is None:
+                source_image_id = Path(original_image).stem
+            
+            # Generate cell crops and CellCrop objects
+            cell_crops, cell_metadata, cell_crop_objects, stats = self._generate_cell_crops(
+                original_img, mask, original_image, source_image_id, group, min_area, margin, tool_cache_dir, output_format
             )
             
             if not cell_crops:
@@ -96,6 +108,7 @@ class Single_Cell_Cropper_Tool(BaseTool):
                     "cell_count": 0,
                     "cell_crops": [],
                     "cell_metadata": [],
+                    "cell_crop_objects": [],  # Empty list of CellCrop objects
                     "visual_outputs": [],
                     "parameters": {
                         "min_area": min_area,
@@ -105,11 +118,12 @@ class Single_Cell_Cropper_Tool(BaseTool):
                     "statistics": stats
                 }
             
-            # Combine paths and metadata for JSON output
+            # Combine paths and metadata for JSON output (backward compatibility)
             output_data = {
                 'cell_count': stats['final_cell_count'],
                 'cell_crops_paths': cell_crops,
                 'cell_metadata': cell_metadata,
+                'cell_crop_objects': [cell.to_dict() for cell in cell_crop_objects],  # Serialize CellCrop objects
                 'statistics': stats,
                 "parameters": {
                     "min_area": min_area,
@@ -126,9 +140,10 @@ class Single_Cell_Cropper_Tool(BaseTool):
             )
             
             return {
-                "summary": f"Successfully generated {stats['final_cell_count']} single-cell crops. All paths and metadata are saved in '{Path(metadata_path).name}'.",
+                "summary": f"Successfully generated {stats['final_cell_count']} single-cell crops. All paths and metadata are saved in '{Path(metadata_path).name}'.", 
                 "cell_count": stats['final_cell_count'],
                 "cell_crops_metadata_path": metadata_path,
+                "cell_crop_objects": cell_crop_objects,  # Return CellCrop objects for Stage 2 tools
                 "visual_outputs": [summary_viz_path] if summary_viz_path else [],
             }
             
@@ -139,25 +154,30 @@ class Single_Cell_Cropper_Tool(BaseTool):
                 "summary": "Failed to process image"
             }
 
-    def _generate_cell_crops(self, original_img, mask, min_area, margin, output_dir, output_format):
+    def _generate_cell_crops(self, original_img, mask, original_image_path, source_image_id, group, min_area, margin, output_dir, output_format):
         """
-        Generate individual cell crops from the mask.
+        Generate individual cell crops from the mask and create CellCrop objects.
+        
+        This method produces CellCrop objects as atomic data units for Stage 2 analysis.
         
         Args:
             original_img: Original image array
             mask: Binary mask array
+            original_image_path: Path to the original source image
+            source_image_id: Source image ID for tracking
+            group: Group/condition label
             min_area: Minimum area threshold
             margin: Margin around each nucleus
             output_dir: Output directory
             output_format: Output image format
             
         Returns:
-            tuple: (list of crop paths, list of metadata, dict of statistics)
+            tuple: (list of crop paths, list of metadata dicts, list of CellCrop objects, dict of statistics)
         """
         # Validate input images
         if original_img is None or mask is None:
             print("Error: Input images are None")
-            return [], [], {}
+            return [], [], [], {}
         
         # Ensure images are numpy arrays
         original_img = np.asarray(original_img)
@@ -166,7 +186,7 @@ class Single_Cell_Cropper_Tool(BaseTool):
         # Check image dimensions
         if original_img.shape != mask.shape:
             print(f"Error: Image shape mismatch - original: {original_img.shape}, mask: {mask.shape}")
-            return [], [], {}
+            return [], [], [], {}
         
         # Ensure mask is binary
         if len(np.unique(mask)) > 2:
@@ -184,6 +204,7 @@ class Single_Cell_Cropper_Tool(BaseTool):
 
         cell_crops = []
         cell_metadata = []
+        cell_crop_objects = []  # List of CellCrop objects
         
         for idx, region in enumerate(cell_properties):
             if region.area < min_area:
@@ -275,19 +296,73 @@ class Single_Cell_Cropper_Tool(BaseTool):
                 print(f"Error saving crop for cell {idx}: {e}")
                 continue
             
-            # Create metadata for this crop
+            # Create cell ID
+            cell_id = f"cell_{idx:04d}"
+            crop_id = cell_id  # For now, crop_id same as cell_id
+            
+            # Create metadata for this crop (backward compatibility)
             crop_metadata = {
                 "cell_id": idx,
                 "crop_path": crop_path,
                 "original_bbox": [minr, minc, maxr, maxc],
                 "crop_bbox": [new_minr, new_minc, new_maxr, new_maxc],
                 "area": region.area,
-                "centroid": region.centroid,
+                "centroid": list(region.centroid),  # Convert tuple to list for JSON serialization
                 "crop_size": cell_crop.shape
             }
             
+            # Create CellCrop object (atomic data unit for Stage 2)
+            # Extract individual cell mask
+            # regionprops iterates in label order, where labels start at 1
+            # We need to get the label value for this region
+            region_label = labeled_mask[int(region.centroid[0]), int(region.centroid[1])]
+            cell_mask = np.zeros_like(mask)
+            cell_mask[labeled_mask == region_label] = 255
+            cell_mask_crop = cell_mask[new_minr:new_maxr, new_minc:new_maxc]
+            
+            # Save cell mask if needed
+            mask_filename = f"cell_{idx:04d}_mask.{output_format}"
+            mask_path = os.path.join(output_dir, mask_filename)
+            try:
+                if len(cell_mask_crop.shape) == 2:
+                    mask_pil = Image.fromarray(cell_mask_crop, mode='L')
+                else:
+                    mask_pil = Image.fromarray(cell_mask_crop)
+                
+                if output_format.lower() == 'tif':
+                    mask_pil.save(mask_path, 'TIFF', compression='tiff_lzw')
+                elif output_format.lower() == 'png':
+                    mask_pil.save(mask_path, 'PNG', optimize=True)
+                elif output_format.lower() == 'jpg':
+                    mask_pil.save(mask_path, 'JPEG', quality=95, optimize=True)
+                else:
+                    mask_pil.save(mask_path, 'PNG', optimize=True)
+            except Exception as e:
+                print(f"Warning: Failed to save mask for cell {idx}: {e}")
+                mask_path = None
+            
+            cell_crop_obj = CellCrop(
+                cell_id=cell_id,
+                crop_id=crop_id,
+                source_image_id=source_image_id,
+                source_image_path=original_image_path,
+                group=group,
+                crop_path=crop_path,
+                mask_path=mask_path,
+                bbox=[new_minr, new_minc, new_maxr, new_maxc],
+                centroid=list(region.centroid),
+                area=int(region.area),
+                metadata={
+                    "original_bbox": [int(minr), int(minc), int(maxr), int(maxc)],
+                    "crop_size": list(cell_crop.shape),
+                    "min_area": min_area,
+                    "margin": margin
+                }
+            )
+            
             cell_crops.append(crop_path)
             cell_metadata.append(crop_metadata)
+            cell_crop_objects.append(cell_crop_obj)
         
         stats = {
             "initial_cell_count": initial_cell_count,
@@ -297,7 +372,7 @@ class Single_Cell_Cropper_Tool(BaseTool):
             "final_cell_count": len(cell_crops)
         }
 
-        return cell_crops, cell_metadata, stats
+        return cell_crops, cell_metadata, cell_crop_objects, stats
 
     def _create_summary_visualization(self, original_img, mask, cell_crops, stats, output_dir, min_area, margin):
         """Creates a professional and highly robust summary visualization of the cropping process."""

@@ -70,6 +70,19 @@ class Planner:
     def analyze_query(self, question: str, image: str, bytes_mode: bool = False, conversation_context: str = "", **kwargs) -> str:
         image_info = self.get_image_info(image)
         print("image_info: ", image_info)
+        
+        # Filter tools for bioimage tasks: exclude Relevant_Patch_Zoomer_Tool
+        available_tools = self.available_tools.copy()
+        toolbox_metadata = self.toolbox_metadata.copy()
+        
+        # Create a temporary memory to check if it's a bioimage task
+        from octotools.models.memory import Memory
+        temp_memory = Memory()
+        if self._is_bioimage_task(question, "", temp_memory):
+            if "Relevant_Patch_Zoomer_Tool" in available_tools:
+                available_tools.remove("Relevant_Patch_Zoomer_Tool")
+                toolbox_metadata.pop("Relevant_Patch_Zoomer_Tool", None)
+                print("Bioimage task detected in query analysis: Excluding Relevant_Patch_Zoomer_Tool")
 
         query_prompt = f"""
 Task: Analyze the given query with accompanying inputs and determine the skills and tools needed to address it effectively.
@@ -77,9 +90,9 @@ Task: Analyze the given query with accompanying inputs and determine the skills 
 Conversation so far:
 {conversation_context}
 
-Available tools: {self.available_tools}
+Available tools: {available_tools}
 
-Metadata for the tools: {self.toolbox_metadata}
+Metadata for the tools: {toolbox_metadata}
 
 Image: {image_info}
 
@@ -92,24 +105,10 @@ Instructions:
 4. Examine the available tools in the toolbox and determine which ones are relevant and useful for addressing the query. Make sure to consider the user metadata for each tool, including limitations and potential applications (if available).
 5. Provide a brief explanation for each skill and tool you've identified, describing how it would contribute to answering the query.
 
-SPECIAL CONSIDERATIONS FOR FIBROBLAST ANALYSIS:
-- If the query involves fibroblast analysis, cell state analysis, or activation scoring, you MUST include the complete analysis pipeline tools
-- For fibroblast analysis tasks, the relevant tools should include: Image_Preprocessor_Tool, Nuclei_Segmenter_Tool, Single_Cell_Cropper_Tool, Fibroblast_State_Analyzer_Tool
-- If the query specifically asks for activation scoring, quantification, or numerical analysis, also include Fibroblast_Activation_Scorer_Tool
-- The tools should be listed in the logical order they would be used in the analysis pipeline
-
-TASK RECOGNITION GUIDELINES:
-- Cell analysis tasks: Include preprocessing, segmentation, and analysis tools
-- Image processing tasks: Include preprocessing and relevant analysis tools
-- Object detection tasks: Include detection and analysis tools
-- Text extraction tasks: Include text detection and extraction tools
-- Research tasks: Include search and knowledge tools
-- General analysis tasks: Include appropriate preprocessing and analysis tools
-
 Your response should include:
 1. A concise summary of the query's main points and objectives, as well as content in any accompanying inputs.
 2. A list of required skills, with a brief explanation for each.
-3. A list of relevant tools from the toolbox, with a brief explanation of how each tool would be utilized and its potential limitations. List tools in the logical order they would be used.
+3. A list of relevant tools from the toolbox, with a brief explanation of how each tool would be utilized and its potential limitations.
 4. Any additional considerations that might be important for addressing the query effectively.
 
 Please present your analysis in a clear, structured format.
@@ -225,114 +224,57 @@ Please present your analysis in a clear, structured format.
             print(f"Error in extract_context_subgoal_and_tool: {e}")
             return "", "", "Error extracting tool name"
     
+    def _is_bioimage_task(self, question: str, query_analysis: str, memory: Memory) -> bool:
+        """Detect if the task is related to bioimage/single-cell analysis."""
+        # Bioimage-related keywords
+        bioimage_keywords = [
+            'cell', 'nucleus', 'nuclei', 'fibroblast', 'segment', 'crop', 
+            'microscopy', 'microscope', 'phase contrast', 'fluorescence',
+            'single cell', 'cell state', 'activation', 'morphology'
+        ]
+        
+        # Bioimage-specific tools
+        bioimage_tools = [
+            'Nuclei_Segmenter_Tool', 'Single_Cell_Cropper_Tool',
+            'Fibroblast_State_Analyzer_Tool', 'Fibroblast_Activation_Scorer_Tool',
+            'Image_Preprocessor_Tool'
+        ]
+        
+        # Check query content
+        query_lower = question.lower()
+        if any(keyword in query_lower for keyword in bioimage_keywords):
+            return True
+        
+        # Check query analysis
+        if query_analysis:
+            analysis_lower = query_analysis.lower()
+            if any(keyword in analysis_lower for keyword in bioimage_keywords):
+                return True
+        
+        # Check if bioimage tools have been used
+        actions = memory.get_actions()
+        for action in actions:
+            tool_name = action.get('tool_name', '')
+            if any(bio_tool in tool_name for bio_tool in bioimage_tools):
+                return True
+        
+        return False
+    
     def generate_next_step(self, question: str, image: str, query_analysis: str, memory: Memory, step_count: int, max_step_count: int, bytes_mode: bool = False, conversation_context: str = "", **kwargs) -> NextStep:
-        # --- Enforce strict tool dependency chain ---
-        TOOL_CHAIN = [
-            "Image_Preprocessor_Tool",
-            "Nuclei_Segmenter_Tool",
-            "Single_Cell_Cropper_Tool",
-            "Fibroblast_State_Analyzer_Tool",
-            "Fibroblast_Activation_Scorer_Tool"
-        ]
+        image_info = self.get_image_info(image) if not bytes_mode else self.get_image_info_bytes(image)
         
-        # Check if this is a fibroblast analysis query (contains keywords)
-        fibroblast_keywords = ["fibroblast", "activation", "cell state", "cell analysis", "quantify", "score", "cell", "microscopy", "image analysis"]
-        is_fibroblast_query = any(keyword.lower() in question.lower() for keyword in fibroblast_keywords)
+        # Filter tools for bioimage tasks: exclude Relevant_Patch_Zoomer_Tool
+        available_tools = self.available_tools.copy()
+        toolbox_metadata = self.toolbox_metadata.copy()
         
-        # Get finished tools from memory
-        finished_tools = [action['tool_name'] for action in memory.get_actions() if 'tool_name' in action]
-        print(f"DEBUG: Finished tools: {finished_tools}")
-        print(f"DEBUG: Available tools: {self.available_tools}")
+        if self._is_bioimage_task(question, query_analysis, memory):
+            if "Relevant_Patch_Zoomer_Tool" in available_tools:
+                available_tools.remove("Relevant_Patch_Zoomer_Tool")
+                toolbox_metadata.pop("Relevant_Patch_Zoomer_Tool", None)
+                print("Bioimage task detected: Excluding Relevant_Patch_Zoomer_Tool from available tools")
         
-        # Also check if we're already in a fibroblast analysis pipeline
-        fibroblast_tools = ["Image_Preprocessor_Tool", "Nuclei_Segmenter_Tool", "Single_Cell_Cropper_Tool", "Fibroblast_State_Analyzer_Tool", "Fibroblast_Activation_Scorer_Tool"]
-        is_in_fibroblast_pipeline = any(tool in finished_tools for tool in fibroblast_tools)
-        
-        # If we're already in the pipeline or the query is fibroblast-related, enforce the chain
-        is_fibroblast_analysis = is_fibroblast_query or is_in_fibroblast_pipeline
-        print(f"DEBUG: is_fibroblast_query: {is_fibroblast_query}")
-        print(f"DEBUG: is_in_fibroblast_pipeline: {is_in_fibroblast_pipeline}")
-        print(f"DEBUG: is_fibroblast_analysis: {is_fibroblast_analysis}")
-        print(f"DEBUG: TOOL_CHAIN: {TOOL_CHAIN}")
-        
-        # Check if we need activation scoring based on question content
-        activation_scoring_keywords = [
-            "activation score", "activation level", "quantify activation", "activation quantification",
-            "score", "scoring", "quantitative", "quantification", "measure activation", "activation measure",
-            "activation degree", "activation intensity", "activation magnitude", "activation value",
-            "numerical", "numeric", "number", "value", "metric", "measurement"
-        ]
-        
-        needs_activation_scoring = any(keyword.lower() in question.lower() for keyword in activation_scoring_keywords)
-        
-        # STRICT TOOL CHAIN ENFORCEMENT for fibroblast analysis
-        if is_fibroblast_analysis:
-            print(f"DEBUG: Fibroblast analysis detected - enforcing strict tool chain")
-            print(f"DEBUG: Checking each tool in TOOL_CHAIN...")
-            
-            # Check if we're trying to skip Fibroblast_State_Analyzer_Tool
-            if ("Single_Cell_Cropper_Tool" in finished_tools and 
-                "Fibroblast_State_Analyzer_Tool" not in finished_tools and
-                "Fibroblast_Activation_Scorer_Tool" in self.available_tools):
-                print(f"DEBUG: CRITICAL: Attempting to skip Fibroblast_State_Analyzer_Tool - FORCING execution")
-                justification = "Fibroblast analysis pipeline requires Fibroblast_State_Analyzer_Tool to generate h5ad file before activation scoring."
-                context = "Use the cell crops from Single_Cell_Cropper_Tool as input for Fibroblast_State_Analyzer_Tool."
-                sub_goal = "Run Fibroblast_State_Analyzer_Tool on the cell crops to generate h5ad file for downstream activation scoring."
-                return NextStep(
-                    justification=justification,
-                    context=context,
-                    sub_goal=sub_goal,
-                    tool_name="Fibroblast_State_Analyzer_Tool"
-                )
-            
-            for i, tool in enumerate(TOOL_CHAIN):
-                print(f"DEBUG: Tool {i+1}: {tool}")
-                print(f"DEBUG:   - Available: {tool in self.available_tools}")
-                print(f"DEBUG:   - Finished: {tool in finished_tools}")
-                if tool in self.available_tools and tool not in finished_tools:
-                    justification = f"Fibroblast analysis pipeline requires running {tool} after {finished_tools[-1] if finished_tools else 'start'}."
-                    context = f"Use output of previous step as input for {tool}."
-                    sub_goal = f"Run {tool} on the output of previous step."
-                    print(f"DEBUG: Enforcing dependency chain - next tool: {tool}")
-                    return NextStep(
-                        justification=justification,
-                        context=context,
-                        sub_goal=sub_goal,
-                        tool_name=tool
-                    )
-            print(f"DEBUG: All tools in fibroblast chain finished, falling back to LLM logic")
-        else:
-            print(f"DEBUG: NOT a fibroblast analysis - using LLM logic")
-            print(f"DEBUG: is_fibroblast_query: {is_fibroblast_query}")
-            print(f"DEBUG: is_in_fibroblast_pipeline: {is_in_fibroblast_pipeline}")
-            print(f"DEBUG: finished_tools: {finished_tools}")
-            print(f"DEBUG: fibroblast_tools: {fibroblast_tools}")
-        
-        # Auto-continue to activation scorer after state analyzer completion (only for non-fibroblast queries)
-        # This ensures the complete fibroblast analysis pipeline runs
-        if (
-            not is_fibroblast_analysis and
-            "Fibroblast_State_Analyzer_Tool" in finished_tools and
-            "Fibroblast_Activation_Scorer_Tool" not in finished_tools and
-            "Fibroblast_Activation_Scorer_Tool" in self.available_tools
-        ):
-            print(f"DEBUG: State analyzer finished - automatically continuing to Fibroblast_Activation_Scorer_Tool")
-            justification = "State analysis completed. Now automatically running activation scoring to complete the fibroblast analysis pipeline."
-            context = "Use the output of Fibroblast_State_Analyzer_Tool as input for Fibroblast_Activation_Scorer_Tool."
-            sub_goal = "Run Fibroblast_Activation_Scorer_Tool to provide quantitative activation scores and complete the analysis."
-            return NextStep(
-                justification=justification,
-                context=context,
-                sub_goal=sub_goal,
-                tool_name="Fibroblast_Activation_Scorer_Tool"
-            )
-        
-        # If not a fibroblast query or all tools finished, use LLM logic
         prompt_generate_next_step = f"""
 Task: Determine the optimal next step to address the given query based on the provided analysis, available tools, and previous steps taken.
-
-Conversation so far:
-{conversation_context}
 
 Context:
 Query: {question}
@@ -340,23 +282,16 @@ Image: {image if not bytes_mode else 'image.jpg'}
 Query Analysis: {query_analysis}
 
 Available Tools:
-{self.available_tools}
+{available_tools}
 
 Tool Metadata:
-{self.toolbox_metadata}
+{toolbox_metadata}
 
 Previous Steps and Their Results:
 {memory.get_actions()}
 
 Current Step: {step_count} in {max_step_count} steps
 Remaining Steps: {max_step_count - step_count}
-
-CRITICAL RULES FOR FIBROBLAST ANALYSIS:
-1. If the query involves cell analysis, microscopy, or fibroblast analysis, follow this EXACT sequence:
-   - Image_Preprocessor_Tool → Nuclei_Segmenter_Tool → Single_Cell_Cropper_Tool → Fibroblast_State_Analyzer_Tool → Fibroblast_Activation_Scorer_Tool
-2. NEVER skip Fibroblast_State_Analyzer_Tool when doing cell analysis
-3. Fibroblast_Activation_Scorer_Tool requires h5ad file from Fibroblast_State_Analyzer_Tool
-4. If Single_Cell_Cropper_Tool has been executed but Fibroblast_State_Analyzer_Tool has not, ALWAYS choose Fibroblast_State_Analyzer_Tool next
 
 Instructions:
 1. Analyze the context thoroughly, including the query, its analysis, any image, available tools and their metadata, and previous steps taken.
@@ -368,14 +303,9 @@ Instructions:
    - Outcomes from previous steps
    - Current step count and remaining steps
 
-3. IMPORTANT: For analysis tasks, distinguish between:
-   - Data preparation steps (preprocessing, segmentation, cropping, etc.)
-   - Actual analysis steps (classification, state analysis, feature extraction, etc.)
-   - If data preparation is complete but analysis hasn't been performed, prioritize analysis tools
+3. Select ONE tool best suited for the next step, keeping in mind the limited number of remaining steps.
 
-4. Select ONE tool best suited for the next step, keeping in mind the limited number of remaining steps.
-
-5. Formulate a specific, achievable sub-goal for the selected tool that maximizes progress towards answering the query.
+4. Formulate a specific, achievable sub-goal for the selected tool that maximizes progress towards answering the query.
 
 Output Format:
 <justification>: detailed explanation of why the selected tool is the best choice for the next step, considering the context and previous outcomes.
@@ -391,9 +321,8 @@ Rules:
 - Select only ONE tool for this step.
 - The sub-goal MUST directly address the query and be achievable by the selected tool.
 - The Context section MUST include ALL necessary information for the tool to function, including ALL relevant file paths, data, and variables from previous steps.
-- The tool name MUST exactly match one from the available tools list: {self.available_tools}.
+- The tool name MUST exactly match one from the available tools list: {available_tools}.
 - Avoid redundancy by considering previous steps and building on prior results.
-- For analysis workflows: If data is prepared (e.g., cell crops generated), prioritize analysis tools over further data preparation.
 
 Example (do not copy, use only as reference):
 <justification>: [Your detailed explanation here]
@@ -401,129 +330,19 @@ Example (do not copy, use only as reference):
 <sub_goal>: Detect and count the number of specific objects in the image "example/image.jpg"
 <tool_name>: Object_Detector_Tool
 """
-        next_step_response = self.llm_engine.generate(prompt_generate_next_step, response_format=NextStep)
+        llm_response = self.llm_engine.generate(prompt_generate_next_step, response_format=NextStep)
         
         # Extract content and usage from response
-        if isinstance(next_step_response, dict) and 'content' in next_step_response:
-            next_step = next_step_response['content']
+        if isinstance(llm_response, dict) and 'content' in llm_response:
+            next_step = llm_response['content']
             # Store usage info for later access
-            self.last_usage = next_step_response.get('usage', {})
+            self.last_usage = llm_response.get('usage', {})
             print(f"Next step usage: {self.last_usage}")
         else:
-            next_step = next_step_response
+            next_step = llm_response
             self.last_usage = {}
         
-        # Check if we got a string response (non-structured model like gpt-4-turbo) instead of NextStep object
-        if isinstance(next_step, str):
-            print("WARNING: Received string response instead of NextStep object")
-            # Try to parse the string response to extract justification, context, sub_goal, and tool_name
-            try:
-                lines = next_step.split('\n')
-                justification = ""
-                context = ""
-                sub_goal = ""
-                tool_name = ""
-                
-                for line in lines:
-                    line = line.strip()
-                    if line.lower().startswith('<justification>') and not line.lower().startswith('<justification>:'):
-                        justification = line.split('<justification>')[1].split('</justification>')[0].strip()
-                    elif line.lower().startswith('justification:'):
-                        parts = line.split('justification:', 1)
-                        if len(parts) > 1:
-                            justification = parts[1].lstrip(' :')
-                        else:
-                            justification = ""
-                    elif line.lower().startswith('<context>') and not line.lower().startswith('<context>:'):
-                        context = line.split('<context>')[1].split('</context>')[0].strip()
-                    elif line.lower().startswith('context:'):
-                        parts = line.split('context:', 1)
-                        if len(parts) > 1:
-                            context = parts[1].lstrip(' :')
-                        else:
-                            context = ""
-                    elif line.lower().startswith('<sub_goal>') and not line.lower().startswith('<sub_goal>:'):
-                        sub_goal = line.split('<sub_goal>')[1].split('</sub_goal>')[0].strip()
-                    elif line.lower().startswith('sub_goal:'):
-                        parts = line.split('sub_goal:', 1)
-                        if len(parts) > 1:
-                            sub_goal = parts[1].lstrip(' :')
-                        else:
-                            sub_goal = ""
-                    elif line.lower().startswith('<tool_name>') and not line.lower().startswith('<tool_name>:'):
-                        tool_name = line.split('<tool_name>')[1].split('</tool_name>')[0].strip()
-                    elif line.lower().startswith('tool_name:'):
-                        parts = line.split('tool_name:', 1)
-                        if len(parts) > 1:
-                            tool_name = parts[1].lstrip(' :')
-                        else:
-                            tool_name = ""
-                
-                # Normalize tool name
-                tool_name = normalize_tool_name(tool_name)
-                
-                print(f"DEBUG: Parsed string response - tool_name: {tool_name}")
-                
-                # CRITICAL: Check if LLM is trying to skip Fibroblast_State_Analyzer_Tool
-                if (tool_name == "Fibroblast_Activation_Scorer_Tool" and 
-                    "Single_Cell_Cropper_Tool" in finished_tools and 
-                    "Fibroblast_State_Analyzer_Tool" not in finished_tools):
-                    print(f"DEBUG: CRITICAL: LLM trying to skip Fibroblast_State_Analyzer_Tool - OVERRIDING")
-                    justification = "Fibroblast analysis pipeline requires Fibroblast_State_Analyzer_Tool to generate h5ad file before activation scoring."
-                    context = "Use the cell crops from Single_Cell_Cropper_Tool as input for Fibroblast_State_Analyzer_Tool."
-                    sub_goal = "Run Fibroblast_State_Analyzer_Tool on the cell crops to generate h5ad file for downstream activation scoring."
-                    tool_name = "Fibroblast_State_Analyzer_Tool"
-                
-                return NextStep(
-                    justification=justification,
-                    context=context,
-                    sub_goal=sub_goal,
-                    tool_name=tool_name
-                )
-            except Exception as parse_error:
-                print(f"Error parsing string response: {parse_error}")
-                # Fallback to a safe default
-                return NextStep(
-                    justification="Error parsing LLM response, using fallback",
-                    context="Previous steps completed",
-                    sub_goal="Continue analysis with available tools",
-                    tool_name="Generalist_Solution_Generator_Tool" if "Generalist_Solution_Generator_Tool" in self.available_tools else self.available_tools[0] if self.available_tools else "No tool available"
-                )
-        
-        # For NextStep objects, extract the values directly without re-normalizing
-        if hasattr(next_step, 'context') and hasattr(next_step, 'sub_goal') and hasattr(next_step, 'tool_name'):
-            context = next_step.context.strip()
-            sub_goal = next_step.sub_goal.strip()
-            tool_name = normalize_tool_name(next_step.tool_name.strip())
-            justification = getattr(next_step, 'justification', 'No justification provided')
-            
-            print(f"DEBUG: Extracted from NextStep object - tool_name: {tool_name}")
-            
-            # CRITICAL: Final check to prevent skipping Fibroblast_State_Analyzer_Tool
-            if (tool_name == "Fibroblast_Activation_Scorer_Tool" and 
-                "Single_Cell_Cropper_Tool" in finished_tools and 
-                "Fibroblast_State_Analyzer_Tool" not in finished_tools):
-                print(f"DEBUG: CRITICAL: Final override - forcing Fibroblast_State_Analyzer_Tool")
-                justification = "Fibroblast analysis pipeline requires Fibroblast_State_Analyzer_Tool to generate h5ad file before activation scoring."
-                context = "Use the cell crops from Single_Cell_Cropper_Tool as input for Fibroblast_State_Analyzer_Tool."
-                sub_goal = "Run Fibroblast_State_Analyzer_Tool on the cell crops to generate h5ad file for downstream activation scoring."
-                tool_name = "Fibroblast_State_Analyzer_Tool"
-            
-            return NextStep(
-                justification=justification,
-                context=context,
-                sub_goal=sub_goal,
-                tool_name=tool_name
-            )
-        
-        # Fallback for unknown response types
-        print(f"WARNING: Unknown response type: {type(next_step)}")
-        return NextStep(
-            justification="Unknown response type, using fallback",
-            context="Previous steps completed",
-            sub_goal="Continue analysis with available tools",
-            tool_name="Generalist_Solution_Generator_Tool" if "Generalist_Solution_Generator_Tool" in self.available_tools else self.available_tools[0] if self.available_tools else "No tool available"
-        )
+        return next_step
 
     def verificate_memory(self, question: str, image: str, query_analysis: str, memory: Memory, bytes_mode: bool = False, conversation_context: str = "", **kwargs) -> MemoryVerification:
         if bytes_mode:
@@ -566,7 +385,7 @@ Image: {image_info}
 Available Tools: {self.available_tools}
 Toolbox Metadata: {self.toolbox_metadata}
 Initial Analysis: {query_analysis}
-Memory (tools used and results): {memory.get_actions()}
+Memory (tools used and results): {memory.get_actions(llm_safe=True)}
 
 Detailed Instructions:
 1. Carefully analyze the query, initial analysis, and image (if provided):

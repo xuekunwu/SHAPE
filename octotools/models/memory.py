@@ -1,5 +1,6 @@
 from typing import Dict, Any, List, Union, Optional
 import os
+from octotools.models.utils import sanitize_tool_output_for_llm, get_llm_safe_result
 
 class Memory:
     # TODO Need to fix this to support multiple data sources (e.g. images, pdf, txt, etc.)
@@ -64,11 +65,15 @@ class Memory:
             })
 
     def add_action(self, step_count: int, tool_name: str, sub_goal: str, command: str, result: Any) -> None:
+        # Sanitize result to separate summary (LLM-safe) from artifacts (file paths)
+        sanitized = sanitize_tool_output_for_llm(result)
         action = {
             'tool_name': tool_name,
             'sub_goal': sub_goal,
             'command': command,
-            'result': result,
+            'result': result,  # Keep full result for executor/cache use
+            'result_summary': sanitized['summary'],  # LLM-safe summary only
+            'artifacts': sanitized['artifacts']  # File paths for executor/cache
         }
         step_name = f"Action Step {step_count}"
         self.actions[step_name] = action
@@ -79,6 +84,29 @@ class Memory:
     def get_files(self) -> List[Dict[str, str]]:
         return self.files
     
-    def get_actions(self) -> List[Dict[str, Any]]:
-        return list(self.actions.values())
+    def get_actions(self, llm_safe: bool = False) -> List[Dict[str, Any]]:
+        """
+        Get list of actions.
+        
+        Args:
+            llm_safe: If True, return only LLM-safe summaries (no file paths).
+                     If False, return full results (for executor/cache use).
+        
+        Returns:
+            List of action dictionaries
+        """
+        actions = list(self.actions.values())
+        if llm_safe:
+            # Return LLM-safe version with only summaries, no file paths
+            safe_actions = []
+            for action in actions:
+                safe_action = {
+                    'tool_name': action.get('tool_name'),
+                    'sub_goal': action.get('sub_goal'),
+                    'command': action.get('command'),
+                    'result': action.get('result_summary', action.get('result'))  # Use summary if available
+                }
+                safe_actions.append(safe_action)
+            return safe_actions
+        return actions
     

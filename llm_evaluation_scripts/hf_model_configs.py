@@ -31,6 +31,14 @@ Always maintain scientific accuracy and provide clear, evidence-based interpreta
 
 # Hugging Face Model Configurations
 HF_MODEL_CONFIGS = {
+    "gpt-5-mini": {
+        "model_id": "gpt-5-mini",
+        "model_type": "openai",
+        "hardware_requirements": "OpenAI API",
+        "is_multimodal": True,
+        "input_cost_per_1k_tokens": 0.00025,  # $0.25 per 1M tokens
+        "output_cost_per_1k_tokens": 0.002    # $2.00 per 1M tokens
+    },
     "gpt-4o": {
         "model_id": "gpt-4o",
         "model_type": "openai",

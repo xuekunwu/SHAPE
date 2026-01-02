@@ -9,27 +9,6 @@ import argparse
 import time
 import io
 import uuid
-AVAILABLE_TOOLS = [
-    "Image_Preprocessor_Tool",
-    "Nuclei_Segmenter_Tool",
-    "Single_Cell_Cropper_Tool",
-    "Fibroblast_State_Analyzer_Tool",
-    "Fibroblast_Activation_Scorer_Tool",
-    "Generalist_Solution_Generator_Tool",
-    "Python_Code_Generator_Tool",
-    "ArXiv_Paper_Searcher_Tool",
-    "Pubmed_Search_Tool",
-    "Nature_News_Fetcher_Tool",
-    "Google_Search_Tool",
-    "Wikipedia_Knowledge_Searcher_Tool",
-    "URL_Text_Extractor_Tool",
-    "Object_Detector_Tool",
-    "Image_Captioner_Tool",
-    "Relevant_Patch_Zoomer_Tool",
-    "Text_Detector_Tool",
-    "Advanced_Object_Detector_Tool"
-]
-
 try:
     import torch
     TORCH_AVAILABLE = True
@@ -52,13 +31,42 @@ from huggingface_hub import CommitScheduler
 from octotools.models.formatters import ToolCommand
 import random
 import traceback
-import psutil  # For memory usage
+import psutil
 from llm_evaluation_scripts.hf_model_configs import HF_MODEL_CONFIGS
 from datetime import datetime
 from octotools.models.utils import make_json_serializable, VisualizationConfig, normalize_tool_name
 from dataclasses import dataclass, field
 
-# Add the project root to the Python path
+_AVAILABLE_TOOLS_CACHE = None
+
+def get_available_tools() -> List[str]:
+    """Dynamically discover all available tools from octotools/tools directory."""
+    global _AVAILABLE_TOOLS_CACHE
+    if _AVAILABLE_TOOLS_CACHE is not None:
+        return _AVAILABLE_TOOLS_CACHE
+    
+    tools = []
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    tools_dir = os.path.join(current_dir, 'octotools', 'tools')
+    
+    if not os.path.exists(tools_dir):
+        print(f"Warning: Tools directory not found: {tools_dir}")
+        return tools
+    
+    for item in os.listdir(tools_dir):
+        tool_dir = os.path.join(tools_dir, item)
+        if not os.path.isdir(tool_dir) or item.startswith('_') or item.startswith('.'):
+            continue
+        
+        if os.path.isfile(os.path.join(tool_dir, 'tool.py')):
+            parts = item.split('_')
+            class_name = '_'.join([p.capitalize() for p in parts]) + '_Tool'
+            tools.append(class_name)
+    
+    tools.sort()
+    _AVAILABLE_TOOLS_CACHE = tools
+    return tools
+
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_dir)))
 sys.path.insert(0, project_root)
@@ -68,11 +76,10 @@ from octotools.models.planner import Planner
 from octotools.models.memory import Memory
 from octotools.models.executor import Executor
 
-# Custom JSON encoder to handle ToolCommand objects
 class CustomEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, ToolCommand):
-            return str(obj)  # Convert ToolCommand to its string representation
+            return str(obj)
         return super().default(obj)
 
 def make_json_serializable(obj):
@@ -85,7 +92,6 @@ def make_json_serializable(obj):
     elif isinstance(obj, list):
         return [make_json_serializable(item) for item in obj]
     elif hasattr(obj, '__class__') and 'AnnData' in obj.__class__.__name__:
-        # Convert AnnData objects to a serializable representation
         return {
             "type": "AnnData",
             "shape": f"{obj.n_obs}x{obj.n_vars}",
@@ -94,7 +100,6 @@ def make_json_serializable(obj):
             "message": "AnnData object (removed for JSON serialization)"
         }
     elif hasattr(obj, '__dict__'):
-        # For other objects, try to convert to dict
         try:
             return make_json_serializable(obj.__dict__)
         except:
@@ -102,40 +107,26 @@ def make_json_serializable(obj):
     else:
         return obj
 
-# Filter model configs to only include OpenAI models
 def get_openai_model_configs():
     from llm_evaluation_scripts.hf_model_configs import HF_MODEL_CONFIGS
     return {k: v for k, v in HF_MODEL_CONFIGS.items() if v.get('model_type') == 'openai'}
 
 OPENAI_MODEL_CONFIGS = get_openai_model_configs()
 
-# In Gradio UI and all inference logic, only use OPENAI_MODEL_CONFIGS
-# Example: model selection dropdown
-# model_choices = list(OPENAI_MODEL_CONFIGS.keys())
-
-# In the main inference logic, always use OpenAI API
-# Remove any local/huggingface model inference branches
-
-# Get Huggingface token from environment variable
 HF_TOKEN = os.getenv("HUGGINGFACE_TOKEN")
 IS_SPACES = os.getenv('SPACE_ID') is not None
-DATASET_DIR = Path("solver_cache")  # the directory to save the dataset
+
+if IS_SPACES:
+    DATASET_DIR = Path("/tmp/solver_cache")
+else:
+    DATASET_DIR = Path("solver_cache")
+
 DATASET_DIR.mkdir(parents=True, exist_ok=True) 
 global QUERY_ID
 QUERY_ID = None
 
-# Comment out problematic CommitScheduler to avoid permission issues
-# scheduler = CommitScheduler(
-#     repo_id="lupantech/OctoTools-Gradio-Demo-User-Data",
-#     repo_type="dataset",
-#     folder_path=DATASET_DIR,
-#     path_in_repo="solver_cache",  # Update path in repo
-#     token=HF_TOKEN
-# )
-
 def save_query_data(query_id: str, query: str, image_path: str) -> None:
     """Save query data to Huggingface dataset"""
-    # Save query metadata
     query_cache_dir = DATASET_DIR / query_id
     query_cache_dir.mkdir(parents=True, exist_ok=True)
     query_file = query_cache_dir / "query_metadata.json"
@@ -150,12 +141,6 @@ def save_query_data(query_id: str, query: str, image_path: str) -> None:
     print(f"Saving query metadata to {query_file}")
     with query_file.open("w") as f:
         json.dump(query_metadata, f, indent=4)
-    
-    # # NOTE: As we are using the same name for the query cache directory as the dataset directory,
-    # # NOTE: we don't need to copy the content from the query cache directory to the query directory.
-    # # Copy all content from root_cache_dir to query_dir
-    # import shutil
-    # shutil.copytree(args.root_cache_dir, query_data_dir, dirs_exist_ok=True)
 
 
 def save_feedback(query_id: str, feedback_type: str, feedback_text: str = None) -> None:
@@ -182,17 +167,14 @@ def save_feedback(query_id: str, feedback_type: str, feedback_text: str = None) 
     feedback_file = feedback_data_dir / "feedback.json"
     print(f"Saving feedback to {feedback_file}")
     
-    # If feedback file exists, update it
     if feedback_file.exists():
         with feedback_file.open("r") as f:
             existing_feedback = json.load(f)
-            # Convert to list if it's a single feedback entry
             if not isinstance(existing_feedback, list):
                 existing_feedback = [existing_feedback]
             existing_feedback.append(feedback_data)
             feedback_data = existing_feedback
     
-    # Write feedback data
     with feedback_file.open("w") as f:
         json.dump(feedback_data, f, indent=4)
 
@@ -202,7 +184,7 @@ def save_steps_data(query_id: str, memory: Memory) -> None:
     steps_file = DATASET_DIR / query_id / "all_steps.json"
 
     memory_actions = memory.get_actions()
-    memory_actions = make_json_serializable(memory_actions) # NOTE: make the memory actions serializable
+    memory_actions = make_json_serializable(memory_actions)
     print("Memory actions: ", memory_actions)
 
     with steps_file.open("w") as f:
@@ -214,12 +196,11 @@ def save_module_data(query_id: str, key: str, value: Any) -> None:
     try:
         key = key.replace(" ", "_").lower()
         module_file = DATASET_DIR / query_id / f"{key}.json"
-        value = make_json_serializable(value)  # NOTE: make the value serializable
+        value = make_json_serializable(value)
         with module_file.open("a") as f:
             json.dump(value, f, indent=4, cls=CustomEncoder)
     except Exception as e:
         print(f"Warning: Failed to save as JSON: {e}")
-        # Fallback to saving as text file
         text_file = DATASET_DIR / query_id / f"{key}.txt"
         try:
             with text_file.open("a") as f:
@@ -238,7 +219,6 @@ def ensure_session_dirs(session_id: str):
     images_dir.mkdir(parents=True, exist_ok=True)
     features_dir.mkdir(parents=True, exist_ok=True)
     return session_dir, images_dir, features_dir
-
 
 def compute_image_fingerprint(image) -> str:
     """Return a stable hash for the uploaded image to detect reuse."""
@@ -287,6 +267,11 @@ def encode_image_features(image_path: str, features_dir: Path) -> str:
         return ""
 
 
+# Global cross-session cache: {fingerprint: {tool_name: [artifacts]}}
+# This allows reusing tool results across different conversation sessions for the same image
+_global_artifact_cache: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
+
+
 def make_artifact_key(tool_name: str, image_path: str, context: str = "", sub_goal: str = "", image_id: str = "") -> str:
     """Deterministic key for caching tool outputs tied to inputs (image-aware)."""
     hasher = hashlib.sha256()
@@ -298,16 +283,61 @@ def make_artifact_key(tool_name: str, image_path: str, context: str = "", sub_go
     return hasher.hexdigest()
 
 
-def get_cached_artifact(state: "AgentState", group_name: str, tool_name: str, key: str):
+def make_fingerprint_based_key(tool_name: str, image_fingerprint: str) -> str:
+    """
+    Create a cache key based on image fingerprint for cross-session caching.
+    Only uses tool_name and image_fingerprint to maximize cache hit rate.
+    For the same image and tool, the result should be the same regardless of context/sub_goal.
+    """
+    hasher = hashlib.sha256()
+    hasher.update(tool_name.encode())
+    hasher.update(str(image_fingerprint or "").encode())
+    return hasher.hexdigest()
+
+
+def get_cached_artifact(state: "AgentState", group_name: str, tool_name: str, key: str, image_fingerprint: str = None):
+    """
+    Get cached artifact from current session or global cross-session cache.
+    
+    Args:
+        state: Current AgentState
+        group_name: Image group name
+        tool_name: Tool name
+        key: Artifact key (session-specific)
+        image_fingerprint: Image fingerprint for cross-session lookup
+    """
+    # First, check current session cache
     group = state.image_groups.get(group_name, {})
     artifacts = group.get("artifacts", {}).get(tool_name, [])
     for art in artifacts:
         if art.get("key") == key:
             return art
+    
+    # If not found in current session and fingerprint is provided, check global cache
+    if image_fingerprint:
+        fingerprint_key = make_fingerprint_based_key(tool_name, image_fingerprint)
+        global_artifacts = _global_artifact_cache.get(image_fingerprint, {}).get(tool_name, [])
+        for art in global_artifacts:
+            if art.get("fingerprint_key") == fingerprint_key:
+                print(f"Found cached artifact in global cache for fingerprint {image_fingerprint[:8]}... and tool {tool_name}")
+                return art
+    
     return None
 
 
-def store_artifact(state: "AgentState", group_name: str, tool_name: str, key: str, result: Any):
+def store_artifact(state: "AgentState", group_name: str, tool_name: str, key: str, result: Any, image_fingerprint: str = None):
+    """
+    Store artifact in both current session and global cross-session cache.
+    
+    Args:
+        state: Current AgentState
+        group_name: Image group name
+        tool_name: Tool name
+        key: Artifact key (session-specific)
+        result: Tool execution result
+        image_fingerprint: Image fingerprint for cross-session caching
+    """
+    # Store in current session
     state.image_groups.setdefault(group_name, {"images": [], "features": [], "artifacts": {}})
     state.image_groups[group_name].setdefault("artifacts", {}).setdefault(tool_name, [])
     entry = {
@@ -316,6 +346,32 @@ def store_artifact(state: "AgentState", group_name: str, tool_name: str, key: st
         "created_at": time.time()
     }
     state.image_groups[group_name]["artifacts"][tool_name].append(entry)
+    
+    # Also store in global cross-session cache if fingerprint is provided
+    if image_fingerprint:
+        fingerprint_key = make_fingerprint_based_key(tool_name, image_fingerprint)
+        if image_fingerprint not in _global_artifact_cache:
+            _global_artifact_cache[image_fingerprint] = {}
+        if tool_name not in _global_artifact_cache[image_fingerprint]:
+            _global_artifact_cache[image_fingerprint][tool_name] = []
+        
+        existing = False
+        for art in _global_artifact_cache[image_fingerprint][tool_name]:
+            if art.get("fingerprint_key") == fingerprint_key:
+                art["result"] = result
+                art["created_at"] = time.time()
+                existing = True
+                break
+        
+        if not existing:
+            global_entry = {
+                "fingerprint_key": fingerprint_key,
+                "result": result,
+                "created_at": time.time(),
+                "tool_name": tool_name
+            }
+            _global_artifact_cache[image_fingerprint][tool_name].append(global_entry)
+            print(f"Stored artifact in global cache for fingerprint {image_fingerprint[:8]}... and tool {tool_name}")
 
 
 def get_question_result(state: "AgentState", question: str) -> QuestionResult | None:
@@ -411,8 +467,6 @@ def add_image_to_group(group_name: str, user_image, state: "AgentState", images_
         return f"♻️ Reused {reused} existing image(s) in group '{group}'."
     return f"⚠️ No images added."
 
-########### End of Test Huggingface Dataset ###########
-
 
 @dataclass
 class ImageContext:
@@ -457,6 +511,85 @@ def normalize_tool_name(tool_name: str, available_tools=None) -> str:
             return tool
     return "No matched tool given: " + tool_name
 
+
+def _read_group_table_rows(group_table):
+    """Extract rows from group_table (DataFrame or list format)."""
+    import pandas as pd
+    if isinstance(group_table, pd.DataFrame) and not group_table.empty:
+        rows = []
+        for row_values in group_table.values:
+            image_name = str(row_values[0]).strip() if len(row_values) > 0 and row_values[0] is not None else ""
+            group = str(row_values[1]).strip() if len(row_values) > 1 and row_values[1] is not None and str(row_values[1]).strip() else ""
+            rows.append([image_name, group])
+        return rows
+    elif isinstance(group_table, list):
+        return group_table
+    else:
+        return []
+
+
+def _check_tool_execution_error(result, tool_name: str) -> tuple[bool, str]:
+    """Check if tool execution failed and return (is_error, error_message)."""
+    if result is None:
+        return True, f"Tool '{tool_name}' execution returned None (no output)."
+    elif isinstance(result, str):
+        if result.startswith("Error") or result.startswith("error"):
+            return True, result
+        elif len(result.strip()) == 0:
+            return True, f"Tool '{tool_name}' returned empty response."
+        return False, ""  # Valid string response
+    elif isinstance(result, dict) and "error" in result:
+        return True, result.get("error", "Unknown error")
+    return False, ""  # No error detected
+
+
+def _collect_visual_outputs(result, visual_outputs_list):
+    """Collect visual outputs from tool result and add to visual_outputs_list."""
+    visual_output_files = []
+    if isinstance(result, dict):
+        if "visual_outputs" in result:
+            visual_output_files.extend(result["visual_outputs"])
+        elif "per_image" in result:
+            for img_result in result["per_image"]:
+                if isinstance(img_result, dict) and "visual_outputs" in img_result:
+                    visual_output_files.extend(img_result["visual_outputs"])
+    
+    for file_path in visual_output_files:
+        try:
+            if "comparison" in os.path.basename(file_path).lower():
+                continue
+            if not file_path.lower().endswith(('.png', '.jpg', '.jpeg', '.tif', '.tiff')):
+                continue
+            if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
+                continue
+                
+            image = Image.open(file_path)
+            if image.size[0] == 0 or image.size[1] == 0:
+                continue
+            
+            if image.mode not in ['RGB', 'L', 'RGBA']:
+                image = image.convert('RGB')
+            
+            img_array = np.array(image)
+            if img_array.size == 0 or np.isnan(img_array).any():
+                continue
+            filename = os.path.basename(file_path)
+            label_map = {
+                "processed": f"Processed Image: {filename}",
+                "corrected": f"Illumination Corrected: {filename}",
+                "segmented": f"Segmented Result: {filename}",
+                "detected": f"Detection Result: {filename}",
+                "zoomed": f"Zoomed Region: {filename}",
+                "crop": f"Single Cell Crop: {filename}"
+            }
+            label = next((label_map[k] for k in label_map if k in filename.lower()), f"Analysis Result: {filename}")
+            
+            visual_outputs_list.append((image, label))
+        except Exception as e:
+            print(f"Warning: Failed to load image {file_path}: {e}")
+            continue
+
+
 class Solver:
     def __init__(
         self,
@@ -487,21 +620,17 @@ class Solver:
         self.agent_state = agent_state or AgentState()
         self.start_time = time.time()
         self.step_tokens = []
-        # Initialize visual_outputs_for_gradio as instance variable to accumulate all visual outputs
         self.visual_outputs_for_gradio = []
 
         self.output_types = output_types.lower().split(',')
         assert all(output_type in ["base", "final", "direct"] for output_type in self.output_types), "Invalid output type. Supported types are 'base', 'final', 'direct'."
 
-        # Add statistics for evaluation
         self.step_times = []
         self.step_memory = []
         self.max_memory = 0
         self.step_costs = []
         self.total_cost = 0.0
         self.end_time = None
-        
-        # Add step information tracking
         self.step_info = []  # Store detailed information for each step
         self.model_config = self._get_model_config(planner.llm_engine_name)
         self.default_cost_per_token = self._get_default_cost_per_token()
@@ -511,11 +640,35 @@ class Solver:
         history = self.agent_state.conversation or []
         lines = []
         for msg in history:
-            # ChatMessage stores role/content; be defensive about attributes
             role = getattr(msg, "role", "assistant")
             content = getattr(msg, "content", "")
             lines.append(f"{role}: {content}")
         return "\n".join(lines)
+    
+    def _extract_result_summary(self, result: Any) -> str:
+        """Extract a brief summary from tool execution result."""
+        if result is None:
+            return "No result"
+        elif isinstance(result, str):
+            return result[:200] + "..." if len(result) > 200 else result
+        elif isinstance(result, dict):
+            summary_parts = []
+            if "summary" in result:
+                summary_parts.append(f"Summary: {result['summary']}")
+            if "cell_count" in result:
+                summary_parts.append(f"Cells: {result['cell_count']}")
+            if "processing_statistics" in result:
+                stats = result["processing_statistics"]
+                if isinstance(stats, dict):
+                    if "final_brightness" in stats:
+                        summary_parts.append(f"Brightness: {stats['final_brightness']}")
+            if "visual_outputs" in result:
+                summary_parts.append(f"Generated {len(result['visual_outputs'])} visual output(s)")
+            if "per_image" in result:
+                summary_parts.append(f"Processed {len(result['per_image'])} image(s)")
+            return "; ".join(summary_parts) if summary_parts else "Tool executed successfully"
+        else:
+            return str(result)[:200] + "..." if len(str(result)) > 200 else str(result)
 
     def _get_model_config(self, model_id: str) -> dict:
         """Return the pricing config for the current model (cached on init)."""
@@ -581,50 +734,44 @@ class Solver:
         process = psutil.Process(os.getpid())
         visual_description = "*Ready to display analysis results and processed images.*"
 
-        # Build list of image paths/ids for this group
         image_items = group_images or []
         img_path_for_tools = image_items[0]["image_path"] if image_items else (image_context.image_path if image_context else None)
         img_id = image_items[0]["image_id"] if image_items else (image_context.image_id if image_context else None)
-        # NOTE: Features are for downstream reasoning/caching only; they must never replace images in vision prompts
         img_path_for_analysis = img_path_for_tools
         self.agent_state.image_context = image_context
         group_name = group_name or getattr(self.agent_state, "last_group_name", "")
         analysis_img_ref = img_path_for_tools
-        print(f"=== DEBUG: Image context ===")
-        print(f"DEBUG: img_path_for_tools: {img_path_for_tools}")
-        print(f"DEBUG: img_path_for_analysis: {img_path_for_analysis}")
-        print(f"DEBUG: image_id: {img_id}")
 
-        # Set tool cache directory
-        _tool_cache_dir = os.path.join(self.query_cache_dir, "tool_cache") # NOTE: This is the directory for tool cache
-        self.executor.set_query_cache_dir(_tool_cache_dir) # NOTE: set query cache directory
+        session_dir = os.path.join(str(DATASET_DIR), self.agent_state.session_id)
+        _tool_cache_dir = os.path.join(session_dir, "tool_cache")
+        os.makedirs(_tool_cache_dir, exist_ok=True)
+        print(f"Using persistent tool cache directory: {_tool_cache_dir} (session-based, won't be deleted)")
+        self.executor.set_query_cache_dir(_tool_cache_dir)
         
-        # Step 1: Display the received inputs
         if image_context and img_path_for_tools:
-            group_label = f" in group `{group_name}`" if group_name else ""
-            messages.append(ChatMessage(role="assistant", content=f"### 📝 Received Query:\n{user_query}\n### 🖼️ Using session image `{img_id}`{group_label}"))
+            if len(image_items) > 1:
+                groups_used = set(img.get("group", "") for img in image_items if img.get("group"))
+                group_label = f" ({len(image_items)} images from groups: {', '.join(sorted(groups_used))})" if groups_used else f" ({len(image_items)} images)"
+                messages.append(ChatMessage(role="assistant", content=f"### 📝 Received Query:\n{user_query}\n### 🖼️ Using session images{group_label}"))
+            else:
+                group_label = f" in group `{group_name}`" if group_name else ""
+                messages.append(ChatMessage(role="assistant", content=f"### 📝 Received Query:\n{user_query}\n### 🖼️ Using session image `{img_id}`{group_label}"))
         else:
             messages.append(ChatMessage(role="assistant", content=f"### 📝 Received Query:\n{user_query}"))
         yield messages, "", [], visual_description, "**Progress**: Input received"
 
-        # [Step 3] Initialize problem-solving state
         step_count = 0
         json_data = {"query": user_query, "image_id": img_id}
 
         messages.append(ChatMessage(role="assistant", content="<br>"))
         messages.append(ChatMessage(role="assistant", content="### 🐙 Deep Thinking:"))
         yield messages, "", [], visual_description, "**Progress**: Starting analysis"
-
-        # [Step 4] Query Analysis - This is the key step that should happen first
-        print(f"Debug - Starting query analysis for: {user_query}")
-        print(f"Debug - img_path for query analysis: {analysis_img_ref}")
         query_analysis_start = time.time()
         try:
             conversation_text = self._format_conversation_history()
             query_analysis = self.planner.analyze_query(user_query, analysis_img_ref, conversation_text)
             query_analysis_end = time.time()
             query_analysis_time = query_analysis_end - query_analysis_start
-            print(f"Debug - Query analysis completed: {len(query_analysis)} characters")
             
             # Track tokens for query analysis step
             planner_usage = self.planner.last_usage if hasattr(self.planner, 'last_usage') else None
@@ -664,14 +811,30 @@ class Solver:
             self.step_info.append(step_info)
             
             json_data["query_analysis"] = query_analysis
-            query_analysis = query_analysis.replace("Concise Summary:", "**Concise Summary:**\n")
-            query_analysis = query_analysis.replace("Required Skills:", "**Required Skills:**")
-            query_analysis = query_analysis.replace("Relevant Tools:", "**Relevant Tools:**")
-            query_analysis = query_analysis.replace("Additional Considerations:", "**Additional Considerations:**")
+            # Extract only Concise Summary section for display
+            concise_summary = ""
+            if "Concise Summary:" in query_analysis:
+                # Find the start of Concise Summary
+                start_idx = query_analysis.find("Concise Summary:")
+                # Find the end (next section or end of string)
+                end_markers = ["Required Skills:", "Relevant Tools:", "Additional Considerations:"]
+                end_idx = len(query_analysis)
+                for marker in end_markers:
+                    marker_idx = query_analysis.find(marker, start_idx)
+                    if marker_idx != -1 and marker_idx < end_idx:
+                        end_idx = marker_idx
+                # Extract the summary text (skip "Concise Summary:" label)
+                summary_text = query_analysis[start_idx + len("Concise Summary:"):end_idx].strip()
+                concise_summary = summary_text
+            else:
+                # Fallback: use original if pattern not found
+                concise_summary = query_analysis
+            
+            # Keep full query_analysis for internal use, but display only concise summary
             messages.append(ChatMessage(role="assistant", 
-                                        content=f"{query_analysis}",
+                                        content=f"{concise_summary}",
                                         metadata={"title": "### 🔍 Step 0: Query Analysis"}))
-            yield messages, query_analysis, [], visual_description, "**Progress**: Query analysis completed"
+            yield messages, concise_summary, self.visual_outputs_for_gradio, visual_description, "**Progress**: Query analysis completed"
 
             # Save the query analysis data
             query_analysis_data = {"query_analysis": query_analysis, "time": round(time.time() - self.start_time, 5)}
@@ -685,8 +848,74 @@ class Solver:
             yield messages, error_msg, [], visual_description, "**Progress**: Error in query analysis"
             return
 
+        if image_items and len(image_items) > 0:
+            for img_item in image_items:
+                original_img_path = img_item.get("image_path")
+                if original_img_path and os.path.exists(original_img_path):
+                    try:
+                        original_image = Image.open(original_img_path)
+                        
+                        supported_formats = ['PNG', 'JPEG', 'JPG', 'GIF', 'WEBP']
+                        file_ext = os.path.splitext(original_img_path)[1].upper().lstrip('.')
+                        
+                        if original_image.mode not in ['RGB', 'L', 'RGBA']:
+                            try:
+                                original_image = original_image.convert('RGB')
+                            except Exception as e:
+                                print(f"Warning: Failed to convert image {original_img_path} to RGB: {e}")
+                                continue
+                        
+                        if file_ext not in supported_formats:
+                            print(f"Converting unsupported format {file_ext} to PNG for display")
+                            from io import BytesIO
+                            png_buffer = BytesIO()
+                            if original_image.mode in ('RGBA', 'LA', 'P'):
+                                rgb_image = Image.new('RGB', original_image.size, (255, 255, 255))
+                                if original_image.mode == 'P':
+                                    original_image = original_image.convert('RGBA')
+                                rgb_image.paste(original_image, mask=original_image.split()[-1] if original_image.mode in ('RGBA', 'LA') else None)
+                                original_image = rgb_image
+                            elif original_image.mode != 'RGB':
+                                original_image = original_image.convert('RGB')
+                            original_image.save(png_buffer, format='PNG')
+                            png_buffer.seek(0)
+                            original_image = Image.open(png_buffer)
+                        
+                        if original_image.size[0] == 0 or original_image.size[1] == 0:
+                            print(f"Warning: Invalid image size: {original_img_path}")
+                            continue
+                        
+                        try:
+                            img_array = np.array(original_image)
+                            if img_array.size == 0 or np.isnan(img_array).any():
+                                print(f"Warning: Invalid image data in {original_img_path}")
+                                continue
+                        except Exception as e:
+                            print(f"Warning: Failed to validate image data for {original_img_path}: {e}")
+                            continue
+                        
+                        filename = os.path.basename(original_img_path)
+                        label = f"Original Image: {filename}"
+                        self.visual_outputs_for_gradio.insert(0, (original_image, label))
+                        print(f"Successfully added original image to visual outputs: {filename}")
+                        
+                    except Exception as e:
+                        print(f"Warning: Failed to load original image {original_img_path} for display. Error: {e}")
+                        import traceback
+                        print(f"Full traceback: {traceback.format_exc()}")
+                        continue
+        
+        # Update visual description after adding original images
+        if self.visual_outputs_for_gradio:
+            visual_description = f"*Displaying {len(self.visual_outputs_for_gradio)} image(s), including original and processed results.*"
+        
         # Execution loop (similar to your step-by-step solver)
-        while step_count < self.max_steps and (time.time() - self.start_time) < self.max_time:
+        execution_successful = False
+        tool_execution_failed = False
+        failed_tool_names = []
+        successful_steps = []  # Track successful steps: [{"step": N, "tool": "ToolName", "result": {...}}]
+        successful_tools = set()  # Track successfully executed tools
+        while step_count < self.max_steps:  # Removed time limit check
             step_count += 1
             step_start = time.time()
             mem_before = process.memory_info().rss / 1024 / 1024  # MB
@@ -695,7 +924,6 @@ class Solver:
                                         metadata={"title": f"🔄 Step {step_count}"}))
             yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count}"
 
-            # [Step 5] Generate the next step
             conversation_text = self._format_conversation_history()
             next_step = self.planner.generate_next_step(user_query, analysis_img_ref, query_analysis, self.memory, step_count, self.max_steps, conversation_context=conversation_text)
             context, sub_goal, tool_name = self.planner.extract_context_subgoal_and_tool(next_step)
@@ -717,38 +945,78 @@ class Solver:
 
             # Handle tool execution or errors
             if tool_name not in self.planner.available_tools:
+                tool_execution_failed = True
+                if tool_name not in failed_tool_names:
+                    failed_tool_names.append(tool_name)
                 messages.append(ChatMessage(
                     role="assistant", 
                     content=f"⚠️ Error: Tool '{tool_name}' is not available."))
                 yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Tool not available"
                 continue
 
-            # [Step 6-7] Generate and execute the tool command (with artifact reuse) for each image in the group
             results_per_image = []
+            tool_command = None  # Initialize tool_command outside loop
             for img_item in image_items:
                 safe_path = img_item["image_path"].replace("\\", "\\\\") if img_item.get("image_path") else None
                 conversation_text = self._format_conversation_history()
                 artifact_key = make_artifact_key(tool_name, safe_path, context, sub_goal, image_id=img_item.get("image_id"))
-                cached_artifact = get_cached_artifact(self.agent_state, group_name, tool_name, artifact_key)
+                
+                # Get image fingerprint for cross-session caching
+                image_fingerprint = img_item.get("fingerprint") or (image_context.fingerprint if image_context else None)
+                
+                # Check cache (both session and global cross-session)
+                cached_artifact = get_cached_artifact(self.agent_state, group_name, tool_name, artifact_key, image_fingerprint)
 
                 if cached_artifact:
                     result = cached_artifact.get("result")
                     analysis = "Cached result reused"
-                    explanation = "Found matching artifact in session; skipping execution."
+                    explanation = "Found matching artifact in session or previous conversation; skipping execution."
                     command = "execution = 'cached_artifact'"
+                    cache_source = "previous conversation" if image_fingerprint and cached_artifact.get("fingerprint_key") else "current session"
+                    
+                    # Create a ToolCommand object for memory consistency
+                    from octotools.models.formatters import ToolCommand
+                    tool_command = ToolCommand(
+                        analysis=analysis,
+                        explanation=explanation,
+                        command=command
+                    )
+                    
                     messages.append(ChatMessage(
                         role="assistant",
-                        content=f"♻️ Reusing cached {tool_name} result for image `{img_item.get('image_id')}`.",
+                        content=f"♻️ Reusing cached {tool_name} result for image `{img_item.get('image_id')}` (from {cache_source}).",
                         metadata={"title": f"### 🛠️ Step {step_count}: Cached Execution ({tool_name})"}
                     ))
-                    print(f"Reused cached artifact for {tool_name} (key={artifact_key})")
+                    print(f"Reused cached artifact for {tool_name} (key={artifact_key}, source={cache_source})")
                 else:
                     tool_command = self.executor.generate_tool_command(user_query, safe_path, context, sub_goal, self.planner.toolbox_metadata[tool_name], self.memory, conversation_context=conversation_text)
                     analysis, explanation, command = self.executor.extract_explanation_and_command(tool_command)
                     result = self.executor.execute_tool_command(tool_name, command)
                     result = make_json_serializable(result)
-                    store_artifact(self.agent_state, group_name, tool_name, artifact_key, result)
-                    print(f"Tool '{tool_name}' result for image {img_item.get('image_id')}: {result}")
+                    
+                    # Check if tool execution failed
+                    execution_failed, error_msg = _check_tool_execution_error(result, tool_name)
+                    
+                    if execution_failed:
+                        tool_execution_failed = True
+                        if tool_name not in failed_tool_names:
+                            failed_tool_names.append(tool_name)
+                        messages.append(ChatMessage(
+                            role="assistant",
+                            content=f"⚠️ **Tool Execution Failed:** {error_msg}\n\n**Tool:** `{tool_name}`\n**Command:**\n```python\n{command}\n```",
+                            metadata={"title": f"### ❌ Step {step_count}: Tool Execution Failed ({tool_name})"}
+                        ))
+                        yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Tool execution failed"
+                        # Store the error result
+                        store_artifact(self.agent_state, group_name, tool_name, artifact_key, {"error": error_msg, "result": None}, image_fingerprint)
+                        result = {"error": error_msg, "result": None}
+                    else:
+                        store_artifact(self.agent_state, group_name, tool_name, artifact_key, result, image_fingerprint)
+                        print(f"Tool '{tool_name}' result for image {img_item.get('image_id')}: {result}")
+                        # Track successful tool execution
+                        if tool_name not in successful_tools:
+                            successful_tools.add(tool_name)
+                    
                 results_per_image.append(result)
 
             # For downstream steps, if only one image use its result, else aggregate
@@ -757,81 +1025,23 @@ class Solver:
             # Generate dynamic visual description based on tool and results
             visual_description = self.generate_visual_description(tool_name, result, self.visual_outputs_for_gradio)
             
-            if isinstance(result, dict):
-                if "visual_outputs" in result:
-                    visual_output_files = result["visual_outputs"]
-                    # Append new visual outputs instead of reinitializing
-                    for file_path in visual_output_files:
-                        try:
-                            # Skip comparison plots and non-image files
-                            if "comparison" in os.path.basename(file_path).lower():
-                                continue
-                            if not file_path.lower().endswith(('.png', '.jpg', '.jpeg', '.tif', '.tiff')):
-                                continue
-                                
-                            # Check if file exists and is readable
-                            if not os.path.exists(file_path):
-                                print(f"Warning: Image file not found: {file_path}")
-                                continue
-                            
-                            # Check file size
-                            if os.path.getsize(file_path) == 0:
-                                print(f"Warning: Image file is empty: {file_path}")
-                                continue
-                                
-                            # Use (image, label) tuple format to preserve filename for download
-                            image = Image.open(file_path)
-                            
-                            # Validate image data
-                            if image.size[0] == 0 or image.size[1] == 0:
-                                print(f"Warning: Invalid image size: {file_path}")
-                                continue
-                            
-                            # Convert to RGB if necessary for Gradio compatibility
-                            if image.mode not in ['RGB', 'L', 'RGBA']:
-                                try:
-                                    image = image.convert('RGB')
-                                except Exception as e:
-                                    print(f"Warning: Failed to convert image {file_path} to RGB: {e}")
-                                    continue
-                            
-                            # Additional validation for image data
-                            try:
-                                # Test if image can be converted to array
-                                img_array = np.array(image)
-                                if img_array.size == 0 or np.isnan(img_array).any():
-                                    print(f"Warning: Invalid image data in {file_path}")
-                                    continue
-                            except Exception as e:
-                                print(f"Warning: Failed to validate image data for {file_path}: {e}")
-                                continue
-                            
-                            filename = os.path.basename(file_path)
-                            
-                            # Create descriptive label based on filename
-                            if "processed" in filename.lower():
-                                label = f"Processed Image: {filename}"
-                            elif "corrected" in filename.lower():
-                                label = f"Illumination Corrected: {filename}"
-                            elif "segmented" in filename.lower():
-                                label = f"Segmented Result: {filename}"
-                            elif "detected" in filename.lower():
-                                label = f"Detection Result: {filename}"
-                            elif "zoomed" in filename.lower():
-                                label = f"Zoomed Region: {filename}"
-                            elif "crop" in filename.lower():
-                                label = f"Single Cell Crop: {filename}"
-                            else:
-                                label = f"Analysis Result: {filename}"
-                            
-                            self.visual_outputs_for_gradio.append((image, label))
-                            print(f"Successfully loaded image for Gradio: {filename}")
-                            
-                        except Exception as e:
-                            print(f"Warning: Failed to load image {file_path} for Gradio. Error: {e}")
-                            import traceback
-                            print(f"Full traceback: {traceback.format_exc()}")
-                            continue
+            # Collect and add visual outputs
+            _collect_visual_outputs(result, self.visual_outputs_for_gradio)
+            
+            # Track successful step (if not failed in this iteration)
+            step_has_error = any(
+                isinstance(r, dict) and ("error" in r or r.get("result") is None) 
+                for r in results_per_image
+            ) if results_per_image else False
+            
+            if not step_has_error:
+                step_summary = {
+                    "step": step_count,
+                    "tool": tool_name,
+                    "sub_goal": sub_goal,
+                    "result_summary": self._extract_result_summary(result)
+                }
+                successful_steps.append(step_summary)
 
             # Display the command generation information
             messages.append(ChatMessage(
@@ -863,8 +1073,41 @@ class Solver:
             }
             save_module_data(QUERY_ID, f"step_{step_count}_command_execution", command_execution_data)
 
-            # [Step 8] Memory update and stopping condition
+            if tool_command is None:
+                # Fallback: create a minimal ToolCommand if somehow not set
+                from octotools.models.formatters import ToolCommand
+                tool_command = ToolCommand(
+                    analysis="Tool command not available",
+                    explanation="Command was not generated (possibly all cached)",
+                    command="execution = 'unknown'"
+                )
             self.memory.add_action(step_count, tool_name, sub_goal, tool_command, result)
+            
+            # Check if tool execution failed - if same tool failed multiple times, stop to avoid infinite loop
+            recent_actions = self.memory.get_actions()[-3:]  # Check last 3 actions
+            same_tool_failures = 0
+            for action in recent_actions:
+                if action.get('tool_name') == tool_name:
+                    action_result = action.get('result')
+                    # Check various failure conditions
+                    if action_result is None:
+                        same_tool_failures += 1
+                    elif isinstance(action_result, dict):
+                        if action_result.get('error') or action_result.get('result') is None:
+                            same_tool_failures += 1
+                    elif isinstance(action_result, str) and action_result.startswith("Error"):
+                        same_tool_failures += 1
+            
+            if same_tool_failures >= 2:
+                messages.append(ChatMessage(
+                    role="assistant",
+                    content=f"⚠️ **Stopping execution:** Tool '{tool_name}' has failed {same_tool_failures} times consecutively. Stopping to avoid infinite loop.\n\n**Possible reasons:**\n- Tool parameters may be incorrect\n- Required dependencies may be missing\n- Image format may not be supported\n- Tool may have internal errors",
+                    metadata={"title": f"### 🛑 Step {step_count}: Stopping due to repeated failures"}
+                ))
+                yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Stopping due to repeated tool failures"
+                execution_successful = False
+                break
+            
             conversation_text = self._format_conversation_history()
             stop_verification = self.planner.verificate_memory(user_query, analysis_img_ref, query_analysis, self.memory, conversation_context=conversation_text)
             context_verification, conclusion = self.planner.extract_conclusion(stop_verification)
@@ -924,11 +1167,24 @@ class Solver:
             self.step_info.append(step_info)
 
             if conclusion == 'STOP':
+                execution_successful = True
                 break
 
         self.end_time = time.time()
+        
+        # Determine if execution was successful
+        # Success means we stopped because conclusion == 'STOP', not because we ran out of steps or had tool errors
+        failure_reason = ""
+        if not execution_successful:
+            # Check why we exited the loop
+            if step_count >= self.max_steps:
+                failure_reason = f"Reached maximum step limit ({self.max_steps} steps) without completing the query."
+            else:
+                failure_reason = "Execution stopped unexpectedly."
+            
+            if tool_execution_failed:
+                failure_reason += f"\n\nAdditionally, {len(failed_tool_names)} tool(s) failed to execute: {', '.join(failed_tool_names)}"
 
-        # Step 7: Generate Final Output (if needed)
         final_answer = ""
         if 'direct' in self.output_types:
             messages.append(ChatMessage(role="assistant", content="<br>"))
@@ -984,14 +1240,9 @@ class Solver:
             else:
                 conclusion_text = str(direct_output)
             
-            # Step-by-step breakdown
             conclusion = f"🐙 **Conclusion:**\n{conclusion_text}\n\n---\n"
             conclusion += f"**📊 Detailed Performance Statistics**\n\n"
-            
-            # Step-by-step breakdown
             conclusion += f"**Step-by-Step Analysis:**\n"
-            
-            # Display detailed step information
             for i, step in enumerate(self.step_info):
                 conclusion += f"**Step {step['step_number']}: {step['step_type']}**\n"
                 conclusion += f"  • Tool: {step['tool_name']}\n"
@@ -1107,12 +1358,61 @@ class Solver:
             if not get_question_result(self.agent_state, user_query):
                 record_question_result(self.agent_state, user_query, status="SUCCESS", final_answer=str(final_output))
 
-        # Step 8: Completion Message
         messages.append(ChatMessage(role="assistant", content="<br>"))
-        messages.append(ChatMessage(role="assistant", content="### ✅ Query Solved!"))
-        # Use the final answer if available, otherwise use a default message
-        completion_text = final_answer if final_answer else "Analysis completed successfully"
-        yield messages, completion_text, self.visual_outputs_for_gradio, visual_description, "**Progress**: Analysis completed!"
+        if execution_successful:
+            messages.append(ChatMessage(role="assistant", content="### ✅ Query Solved!"))
+            # Use the final answer if available, otherwise use a default message
+            completion_text = final_answer if final_answer else "Analysis completed successfully"
+            yield messages, completion_text, self.visual_outputs_for_gradio, visual_description, "**Progress**: Analysis completed!"
+        else:
+            # Execution failed - provide comprehensive summary including successful parts
+            error_message = "### ⚠️ Partial Execution Summary\n\n"
+            
+            # Summary of successful parts
+            if successful_steps:
+                error_message += "## ✅ Successfully Completed Steps:\n\n"
+                for step_info in successful_steps:
+                    error_message += f"**Step {step_info['step']}: {step_info['tool']}**\n"
+                    error_message += f"- Sub-goal: {step_info['sub_goal']}\n"
+                    error_message += f"- Result: {step_info['result_summary']}\n\n"
+            
+            if successful_tools:
+                error_message += f"## ✅ Successfully Executed Tools: {', '.join(sorted(successful_tools))}\n\n"
+            
+            if self.visual_outputs_for_gradio:
+                error_message += f"## 🖼️ Generated Visual Outputs: {len(self.visual_outputs_for_gradio)} image(s)\n\n"
+            
+            # Failure information
+            error_message += "## ❌ Execution Issues:\n\n"
+            error_message += f"**Reason:** {failure_reason}\n\n"
+            
+            if tool_execution_failed:
+                error_message += f"**Failed Tools:** {', '.join(failed_tool_names)}\n\n"
+            
+            # Partial results guidance
+            if successful_steps:
+                error_message += "## 💡 Partial Results Available:\n\n"
+                error_message += "Although the query was not fully completed, the following results are available:\n"
+                error_message += "- Review the visual outputs above for processed images\n"
+                error_message += "- Check the successful steps for intermediate results\n"
+                error_message += "- You can use these partial results or retry with adjusted parameters\n\n"
+            
+            # Solutions
+            error_message += "## 🔧 Possible Solutions:\n"
+            error_message += "1. Check if all required tools are available and properly configured\n"
+            if tool_execution_failed:
+                error_message += "2. Verify the tool names and ensure they match the available tools list\n"
+            if step_count >= self.max_steps:
+                error_message += f"3. Try increasing the maximum step limit (currently {self.max_steps} steps)\n"
+                error_message += "4. Break down your query into smaller, more specific tasks\n"
+            error_message += "5. Review the error messages above for specific tool execution issues\n"
+            error_message += "6. Ensure all required input data (images, files, etc.) are properly provided\n"
+            
+            messages.append(ChatMessage(role="assistant", content=error_message))
+            # Record failure for this question if not already recorded
+            if not get_question_result(self.agent_state, user_query):
+                record_question_result(self.agent_state, user_query, status="FAILED", final_answer=error_message)
+            yield messages, error_message, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Partial execution - {len(successful_steps)} step(s) completed"
 
     def generate_visual_description(self, tool_name: str, result: dict, visual_outputs: list) -> str:
         """
@@ -1172,7 +1472,7 @@ class Solver:
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Run the OctoTools demo with specified parameters.")
-    parser.add_argument("--llm_engine_name", default="gpt-4o", help="LLM engine name.")
+    parser.add_argument("--llm_engine_name", default="gpt-5-mini", help="LLM engine name.")
     parser.add_argument("--max_tokens", type=int, default=2000, help="Maximum tokens for LLM generation.")
     parser.add_argument("--task", default="minitoolbench", help="Task to run.")
     parser.add_argument("--task_description", default="", help="Task description.")
@@ -1186,7 +1486,6 @@ def parse_arguments():
     parser.add_argument("--query_id", default=None, help="Query ID.")
     parser.add_argument("--verbose", type=bool, default=True, help="Enable verbose output.")
 
-    # NOTE: Add new arguments
     parser.add_argument("--run_baseline_only", type=bool, default=False, help="Run only the baseline (no toolbox).")
     parser.add_argument("--openai_api_source", default="we_provided", choices=["we_provided", "user_provided"], help="Source of OpenAI API key.")
     return parser.parse_args()
@@ -1197,14 +1496,15 @@ def prepare_group_assignment(uploaded_files, conversation_state):
     state: AgentState = conversation_state if isinstance(conversation_state, AgentState) else AgentState()
     state.upload_path_map = {}
     if not uploaded_files:
-        return gr.update(value=None, visible=False), "**Upload Status**: No files uploaded.", state
+        return gr.update(value=None, visible=True), "**Upload Status**: No files uploaded.", state
     files = uploaded_files if isinstance(uploaded_files, list) else [uploaded_files]
     if len(files) == 1:
         f = files[0]
         path = f if isinstance(f, str) else f.get("name", "")
         image_name = os.path.basename(path)
         state.upload_path_map[image_name] = path
-        return gr.update(value=None, visible=False), "**Upload Status**: Single image detected; it will be assigned to the default group automatically.", state
+        # Show table even for single image so user can edit group
+        return gr.update(value=[[image_name, "default"]], visible=True), "**Upload Status**: Single image detected. You can edit the group if needed.", state
     rows = []
     for f in files:
         path = f if isinstance(f, str) else f.get("name", "")
@@ -1221,42 +1521,164 @@ def upload_image_to_group(user_image, group_table, conversation_state):
 
     files = user_image if isinstance(user_image, list) else [user_image] if user_image else []
     if not files:
-        return state, "**Progress**: ⚠️ No image provided."
+        return state, "**Progress**: ⚠️ No image provided.", gr.update()
+    
+    # Build upload_path_map from user_image directly (don't rely on state)
+    # This ensures we always have the correct mapping even if state is out of sync
+    upload_path_map = {}
+    for f in files:
+        path = f if isinstance(f, str) else f.get("name", "")
+        if not path:
+            continue  # Skip invalid paths
+        image_name = os.path.basename(path)
+        if image_name:  # Only add if image_name is not empty
+            upload_path_map[image_name] = path
+    
+    # Update state's upload_path_map if it's empty or incomplete
+    if not state.upload_path_map or len(state.upload_path_map) < len(upload_path_map):
+        state.upload_path_map = upload_path_map
 
-    # If single image, auto-assign default group
+    # If single image, check if group_table has a group assignment
     if len(files) == 1:
-        status = add_image_to_group("default", files[0], state, images_dir, features_dir)
-        return state, f"**Progress**: {status}"
+        # Check if group_table exists and has a group value
+        import pandas as pd
+        if group_table is not None:
+            if isinstance(group_table, pd.DataFrame) and not group_table.empty:
+                # Extract group from the table
+                group = str(group_table.iloc[0, 1]).strip() if len(group_table.columns) > 1 and len(group_table) > 0 else "default"
+            elif isinstance(group_table, list) and len(group_table) > 0 and len(group_table[0]) > 1:
+                # Extract group from list format
+                group = str(group_table[0][1]).strip() if group_table[0][1] else "default"
+            else:
+                group = "default"
+        else:
+            group = "default"
+        status = add_image_to_group(group or "default", files[0], state, images_dir, features_dir)
+        if status.startswith("✅") or status.startswith("♻️"):
+            import pandas as pd
+            if group_table is not None and isinstance(group_table, pd.DataFrame) and not group_table.empty:
+                return state, f"**Progress**: {status}", gr.update(value=group_table.values.tolist(), visible=True)
+        return state, f"**Progress**: {status}", gr.update()
 
     # Multiple images: require group_table rows [filepath, group]
     import pandas as pd
-    if group_table is None or (isinstance(group_table, pd.DataFrame) and group_table.empty):
-        return state, "**Progress**: ⚠️ Multiple images uploaded. Please assign a group per image before adding."
+    if group_table is None:
+        return state, "**Progress**: ⚠️ Multiple images uploaded. Please assign a group per image before adding.", gr.update()
+    
+    # Convert group_table to proper format
+    import pandas as pd
+    if isinstance(group_table, pd.DataFrame) and group_table.empty:
+        return state, "**Progress**: ⚠️ Multiple images uploaded. Please assign a group per image before adding.", gr.update()
+    
+    rows = _read_group_table_rows(group_table)
+    
     added_msgs = []
-    for row in group_table:
-        if not row or len(row) < 2:
-            continue
-        image_name, group = row[0], (row[1] or "").strip()
-        if not image_name or not group:
-            added_msgs.append(f"⚠️ Skipped file '{image_name}' due to missing group.")
-            continue
-        full_path = state.upload_path_map.get(image_name)
-        if not full_path:
-            added_msgs.append(f"⚠️ Skipped file '{image_name}' because original path not found.")
-            continue
-        status = add_image_to_group(group, full_path, state, images_dir, features_dir)
-        added_msgs.append(status)
+    # Find first valid group as default (but don't use for last row)
+    default_group = "default"
+    for row in rows:
+        if len(row) >= 2 and row[1]:
+            default_group = str(row[1]).strip()
+            break
+    
+    # Process twice to handle Gradio DataFrame sync issues with last cell
+    # add_image_to_group has deduplication, so repeated calls are safe
+    processed_images = set()  # Track which images have been successfully processed
+    
+    for attempt in range(2):
+        if attempt > 0:
+            # Second attempt: re-read group_table values in case they were updated
+            rows = _read_group_table_rows(group_table)
+        
+        updated_rows = []
+        
+        for i, row in enumerate(rows):
+            if len(row) < 2:
+                updated_rows.append(row)
+                continue
+            image_name = str(row[0]).strip() if row[0] else ""
+            original_group = str(row[1]).strip() if row[1] else ""
+            is_last_row = (i == len(rows) - 1)
+            
+            # Special handling for last row: if empty, skip on first attempt, use second attempt value
+            # For non-last rows, use default_group if empty
+            if is_last_row and not original_group and attempt == 0:
+                # Last row is empty on first attempt - skip it, will try again on second attempt
+                updated_rows.append(row)
+                continue
+            
+            # Use original_group if available, otherwise default_group (but not for last row on first attempt)
+            group = original_group if original_group else (default_group if not is_last_row else "default")
+            
+            if not image_name:
+                updated_rows.append(row)
+                continue
+            
+            # Skip if already successfully processed in first attempt
+            if image_name in processed_images:
+                updated_rows.append([image_name, original_group if original_group else group])
+                continue
+            
+            # Use the local upload_path_map (built from user_image) instead of state
+            full_path = upload_path_map.get(image_name)
+            if not full_path:
+                # Try case-insensitive match
+                for key, path in upload_path_map.items():
+                    if key.lower() == image_name.lower():
+                        full_path = path
+                        break
+            
+            if not full_path:
+                if attempt == 0:  # Only show error on first attempt
+                    added_msgs.append(f"⚠️ Skipped file '{image_name}' because original path not found.")
+                updated_rows.append(row)
+                continue
+            
+            try:
+                # For last row, skip if group is still "default" (meaning it was empty)
+                if is_last_row and group == "default" and not original_group:
+                    if attempt == 1:  # Second attempt and still empty
+                        added_msgs.append(f"⚠️ Last image '{image_name}' has no group assigned, skipped.")
+                    updated_rows.append(row)
+                    continue
+                
+                status = add_image_to_group(group, full_path, state, images_dir, features_dir)
+                if attempt == 0 or image_name not in processed_images:
+                    added_msgs.append(status)
+                
+                # Check if addition was successful (status starts with ✅ or ♻️)
+                if status.startswith("✅") or status.startswith("♻️"):
+                    processed_images.add(image_name)
+                    updated_rows.append([image_name, original_group if original_group else group])
+                else:
+                    updated_rows.append(row)
+            except Exception as e:
+                error_msg = f"⚠️ Error processing '{image_name}': {str(e)}"
+                if attempt == 0:  # Only show error on first attempt
+                    print(f"Error processing image '{image_name}': {e}")
+                    traceback.print_exc()
+                    added_msgs.append(error_msg)
+                updated_rows.append(row)
+    
+    # Update group_table
+    import pandas as pd
+    updated_table = pd.DataFrame(updated_rows, columns=["image_name", "group"]) if updated_rows else None
+    
     progress = "**Progress**:\n" + "\n".join(f"- {m}" for m in added_msgs) if added_msgs else "**Progress**: ⚠️ No images processed."
-    return state, progress
+    
+    if updated_table is not None and not updated_table.empty:
+        return state, progress, gr.update(value=updated_table.values.tolist(), visible=True)
+    elif rows:
+        return state, progress, gr.update(value=rows, visible=True)
+    else:
+        return state, progress, gr.update()
 
 
-def solve_problem_gradio(user_query, group_name, llm_model_engine=None, conversation_history=None):
+def solve_problem_gradio(user_query, llm_model_engine=None, conversation_history=None):
     """
     Solve a problem using the Gradio interface with optional visualization clearing.
     
     Args:
         user_query: The user's query
-        group_name: The target image group name to analyze
         llm_model_engine: Language model engine (model_id from dropdown)
         conversation_history: Persistent chat history to keep context across runs
     """
@@ -1266,7 +1688,19 @@ def solve_problem_gradio(user_query, group_name, llm_model_engine=None, conversa
     session_dir, images_dir, features_dir = ensure_session_dirs(state.session_id)
 
     # Start with prior conversation so the session feels continuous
-    messages: List[ChatMessage] = list(state.conversation)
+    # Ensure messages is a list of ChatMessage objects
+    messages: List[ChatMessage] = []
+    if state.conversation:
+        # Convert state.conversation to list of ChatMessage objects if needed
+        for msg in state.conversation:
+            if isinstance(msg, ChatMessage):
+                messages.append(msg)
+            elif isinstance(msg, dict):
+                messages.append(ChatMessage(role=msg.get('role', 'assistant'), content=msg.get('content', '')))
+            else:
+                # Fallback: try to create ChatMessage from object
+                messages.append(ChatMessage(role=getattr(msg, 'role', 'assistant'), content=str(getattr(msg, 'content', ''))))
+    
     if user_query:
         messages.append(ChatMessage(role="user", content=str(user_query)))
 
@@ -1275,7 +1709,7 @@ def solve_problem_gradio(user_query, group_name, llm_model_engine=None, conversa
     if cached_qr and cached_qr.status == "SUCCESS":
         reuse_msg = f"♻️ Previously answered this question. Reusing stored result."
         answer_msg = cached_qr.final_answer or "Stored result (no answer text)."
-        new_history = messages + [gr.ChatMessage(role="assistant", content=reuse_msg), gr.ChatMessage(role="assistant", content=answer_msg)]
+        new_history = messages + [ChatMessage(role="assistant", content=reuse_msg), ChatMessage(role="assistant", content=answer_msg)]
         state.conversation = new_history
         return new_history, cached_qr.final_answer, [], "**Progress**: Reused prior answer", state
     
@@ -1292,30 +1726,10 @@ def solve_problem_gradio(user_query, group_name, llm_model_engine=None, conversa
     # Get API key from environment
     api_key = os.getenv("OPENAI_API_KEY")
     
-    # Combine the tool lists
-    enabled_tools = AVAILABLE_TOOLS
-
-    # Generate a unique query ID
-    query_id = time.strftime("%Y%m%d_%H%M%S") + "_" + str(uuid.uuid4())[:8] # e.g, 20250217_062225_612f2474
-    print(f"Query ID: {query_id}")
-
-    # NOTE: update the global variable to save the query ID
-    global QUERY_ID
-    QUERY_ID = query_id
-    # Legacy logging directory (keeps previous dataset layout)
-    os.makedirs(DATASET_DIR / query_id, exist_ok=True)
-
-    # Always preserve output directory (no user toggle)
-    output_viz_dir = os.path.join(os.getcwd(), 'output_visualizations')
-    os.makedirs(output_viz_dir, exist_ok=True)
-    print("✅ Output directory preserved - all charts will be retained")
-
-    # Create a directory for the query ID
-    query_cache_dir = os.path.join(str(session_dir), query_id) # scoped per session + query
-    os.makedirs(query_cache_dir, exist_ok=True)
-
+    # Check API key early and return error message if missing
     if api_key is None or api_key.strip() == "":
-        new_history = messages + [gr.ChatMessage(role="assistant", content="""⚠️ **API Key Configuration Required**
+        print("⚠️ OPENAI_API_KEY not found in environment variables")
+        api_key_error_msg = """⚠️ **API Key Configuration Required**
 
 To use this application, you need to set up your OpenAI API key as an environment variable:
 
@@ -1325,12 +1739,38 @@ Set the `OPENAI_API_KEY` environment variable:
 export OPENAI_API_KEY="your-api-key-here"
 ```
 
+For Windows PowerShell:
+```powershell
+$env:OPENAI_API_KEY="your-api-key-here"
+```
+
 For Hugging Face Spaces, add this as a secret in your Space settings.
 
 For more information about obtaining an OpenAI API key, visit: https://platform.openai.com/api-keys
-""")]
+"""
+        new_history = messages + [ChatMessage(role="assistant", content=api_key_error_msg)]
         state.conversation = new_history
-        return new_history, "", [], "**Progress**: Ready", state
+        return new_history, "", [], "**Progress**: API Key Required", state
+    
+    # Get available tools dynamically
+    enabled_tools = get_available_tools()
+
+    # Generate a unique query ID
+    query_id = time.strftime("%Y%m%d_%H%M%S") + "_" + str(uuid.uuid4())[:8] # e.g, 20250217_062225_612f2474
+    print(f"Query ID: {query_id}")
+
+    global QUERY_ID
+    QUERY_ID = query_id
+    os.makedirs(DATASET_DIR / query_id, exist_ok=True)
+    if IS_SPACES:
+        output_viz_dir = "/tmp/output_visualizations"
+    else:
+        output_viz_dir = os.path.join(os.getcwd(), 'output_visualizations')
+    os.makedirs(output_viz_dir, exist_ok=True)
+    print(f"✅ Output directory: {output_viz_dir}")
+
+    query_cache_dir = os.path.join(str(session_dir), query_id)
+    os.makedirs(query_cache_dir, exist_ok=True)
     
     # Debug: Print enabled_tools
     print(f"Debug - enabled_tools: {enabled_tools}")
@@ -1339,12 +1779,7 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
     # Ensure enabled_tools is a list and not empty
     if not enabled_tools:
         print("⚠️ No tools selected in UI, defaulting to all available tools.")
-        # Get all tools from the directory as a fallback
-        tools_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'octotools', 'tools')
-        enabled_tools = [
-            d for d in os.listdir(tools_dir)
-            if os.path.isdir(os.path.join(tools_dir, d)) and not d.startswith('__')
-        ]
+        enabled_tools = get_available_tools()
     elif isinstance(enabled_tools, str):
         enabled_tools = [enabled_tools]
     elif not isinstance(enabled_tools, list):
@@ -1354,50 +1789,67 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
         print("❌ Critical Error: Could not determine a default tool list. Using Generalist_Solution_Generator_Tool as a last resort.")
         enabled_tools = ["Generalist_Solution_Generator_Tool"]
 
-    print(f"Debug - final enabled_tools: {enabled_tools}")
-    
-    # Instantiate Initializer
+    # Create octotools components (Initializer → Planner, Memory, Executor)
+    # Dependency chain: Initializer provides metadata → Planner uses it → Executor uses Initializer for tool loading
     try:
         initializer = Initializer(
             enabled_tools=enabled_tools,
             model_string=model_name_for_octotools,
             api_key=api_key
         )
-        print(f"Debug - Initializer created successfully with {len(initializer.available_tools)} tools")
-    except Exception as e:
-        print(f"Error creating Initializer: {e}")
-        new_history = messages + [gr.ChatMessage(role="assistant", content=f"⚠️ Error: Failed to initialize tools. {str(e)}")]
-        state.conversation = new_history
-        return new_history, "", [], "**Progress**: Error occurred", state
-
-    # Instantiate Planner
-    try:
+        
         planner = Planner(
             llm_engine_name=model_name_for_octotools,
             toolbox_metadata=initializer.toolbox_metadata,
             available_tools=initializer.available_tools,
             api_key=api_key
         )
-        print(f"Debug - Planner created successfully")
+        
+        memory = Memory()
+        
+        session_tool_cache_dir = os.path.join(str(session_dir), "tool_cache")
+        os.makedirs(session_tool_cache_dir, exist_ok=True)
+        executor = Executor(
+            llm_engine_name=model_name_for_octotools,
+            query_cache_dir=session_tool_cache_dir,
+            enable_signal=False,
+            api_key=api_key,
+            initializer=initializer
+        )
     except Exception as e:
-        print(f"Error creating Planner: {e}")
-        new_history = messages + [gr.ChatMessage(role="assistant", content=f"⚠️ Error: Failed to initialize planner. {str(e)}")]
+        print(f"Error creating octotools components: {e}")
+        import traceback
+        traceback.print_exc()
+        new_history = messages + [ChatMessage(role="assistant", content=f"⚠️ Error: Failed to initialize components. {str(e)}")]
         state.conversation = new_history
         return new_history, "", [], "**Progress**: Error occurred", state
 
-    # Resolve target image group and cached features
-    group_name = (group_name or state.last_group_name or "").strip()
-    if not group_name and len(state.image_groups) == 1:
-        group_name = next(iter(state.image_groups.keys()))
-    if not group_name or group_name not in state.image_groups or not state.image_groups[group_name]["images"]:
+    # Collect all images from all groups for analysis (let planner decide which to use)
+    if len(state.image_groups) == 0:
         prompt_msg = "⚠️ Please upload an image into a group before asking a question."
-        new_history = messages + [gr.ChatMessage(role="assistant", content=prompt_msg)]
+        new_history = messages + [ChatMessage(role="assistant", content=prompt_msg)]
         state.conversation = new_history
         return new_history, "", [], "**Progress**: Waiting for image upload", state
-
-    group_entry = state.image_groups[group_name]
-    group_images = group_entry["images"]
-    representative = group_images[0]
+    
+    # Collect all images from all groups with group metadata
+    all_group_images = []
+    for gname, gentry in state.image_groups.items():
+        for img in gentry.get("images", []):
+            img_with_group = img.copy()
+            img_with_group["group"] = gname
+            all_group_images.append(img_with_group)
+    
+    if not all_group_images:
+        prompt_msg = "⚠️ No images found in any group."
+        new_history = messages + [ChatMessage(role="assistant", content=prompt_msg)]
+        state.conversation = new_history
+        return new_history, "", [], "**Progress**: Waiting for image upload", state
+    
+    # Use first image as representative for context
+    representative = all_group_images[0]
+    group_name = next(iter(state.image_groups.keys()))  # Use first group name
+    group_images = all_group_images
+    
     state.image_context = ImageContext(
         image_id=representative["image_id"],
         image_path=representative["image_path"],
@@ -1414,19 +1866,7 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
         image_path=state.image_context.image_path if state.image_context else None
     )
 
-    # Instantiate Memory
-    memory = Memory()
-
-    # Instantiate Executor
-    executor = Executor(
-        llm_engine_name=model_name_for_octotools,
-        query_cache_dir=query_cache_dir, # NOTE
-        enable_signal=False,
-        api_key=api_key,
-        initializer=initializer
-    )
-
-    # Instantiate Solver
+    # Instantiate Solver (components already created above)
     solver = Solver(
         planner=planner,
         memory=memory,
@@ -1436,18 +1876,18 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
         output_types="base,final,direct",  # Default output types
         verbose=True,          # Default verbose
         max_steps=10,
-        max_time=60,
-        query_cache_dir=query_cache_dir, # NOTE
+        max_time=999999,  # Effectively no time limit
+        query_cache_dir=query_cache_dir,
         agent_state=state
     )
 
     if solver is None:
-        new_history = messages + [gr.ChatMessage(role="assistant", content="⚠️ Error: Failed to initialize solver.")]
+        new_history = messages + [ChatMessage(role="assistant", content="⚠️ Error: Failed to initialize solver.")]
         state.conversation = new_history
         return new_history, "", [], "**Progress**: Error occurred", state
 
     try:
-        # Stream the solution
+        # Stream the solution - same as original version
         for messages, text_output, gallery_output, visual_desc, progress_md in solver.stream_solve_user_problem(user_query, state.image_context, group_name, group_images, api_key, messages):
             # Save steps data
             save_steps_data(query_id, memory)
@@ -1455,6 +1895,7 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
             # Return the current state
             state.conversation = messages
             state.last_visual_description = visual_desc
+            # Direct yield messages (already a list of ChatMessage objects)
             yield messages, text_output, gallery_output, progress_md, state
             
     except Exception as e:
@@ -1464,11 +1905,9 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
         print(f"Full traceback: {error_traceback}")
         record_question_result(state, user_query, status="FAILED", final_answer="", error=str(e))
         
-        # Create error message for UI
+        # Create error message for UI - same as original version
         error_message = f"⚠️ Error occurred during analysis:\n\n**Error Type:** {type(e).__name__}\n**Error Message:** {str(e)}\n\nPlease check your input and try again."
-        
-        # Return error message in the expected format
-        error_messages = messages + [gr.ChatMessage(role="assistant", content=error_message)]
+        error_messages = messages + [ChatMessage(role="assistant", content=error_message)]
         state.conversation = error_messages
         yield error_messages, "", [], "**Progress**: Error occurred", state
     finally:
@@ -1478,7 +1917,11 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
             if query_cache_dir != DATASET_DIR.name and DATASET_DIR.name in query_cache_dir:
                 # Preserve output_visualizations directory - DO NOT CLEAR IT
                 # This allows users to keep all generated charts until they start a new analysis
-                output_viz_dir = os.path.join(os.getcwd(), 'output_visualizations')
+                # For Spaces, use /tmp directory; for local, use current working directory
+                if IS_SPACES:
+                    output_viz_dir = "/tmp/output_visualizations"
+                else:
+                    output_viz_dir = os.path.join(os.getcwd(), 'output_visualizations')
                 if os.path.exists(output_viz_dir):
                     print(f"📁 Preserving output_visualizations directory: {output_viz_dir}")
                     print(f"💡 All generated charts are preserved for review")
@@ -1512,29 +1955,33 @@ def main(args):
                 gr.Markdown("### ⚙️ LLM Configuration")
                 multimodal_models = [m for m in OPENAI_MODEL_CONFIGS.values()]
                 model_names = [m["model_id"] for m in multimodal_models]
-                default_model = next((m["model_id"] for m in multimodal_models if m.get("model_type") == "openai"), model_names[0] if model_names else None)
+                # Prefer gpt-5-mini as default (latest cost-effective mini model)
+                default_model = next((m["model_id"] for m in multimodal_models if m.get("model_id") == "gpt-5-mini"),
+                                   next((m["model_id"] for m in multimodal_models if m.get("model_id") == "gpt-4o-mini"),
+                                       next((m["model_id"] for m in multimodal_models if m.get("model_type") == "openai"), 
+                                           model_names[0] if model_names else None)))
                 language_model = gr.Dropdown(choices=model_names, value=default_model)
             with gr.Column(scale=1):
                 gr.Markdown("### 🛠️ Available Tools")
                 with gr.Accordion("🛠️ Available Tools", open=False):
-                    gr.Markdown("\n".join([f"- {t}" for t in AVAILABLE_TOOLS]))
+                    gr.Markdown("\n".join([f"- {t}" for t in get_available_tools()]))
 
         # Main interaction row: left (uploads + question), right (conversation)
         with gr.Row():
             with gr.Column(scale=1):
                 gr.Markdown("### 📤 Image Groups")
                 user_image = gr.File(label="Upload Images", file_count="multiple", type="filepath")
-                group_table = gr.Dataframe(headers=["image_name", "group"], row_count=0, col_count=2, wrap=True, interactive=True, visible=False)
+                group_table = gr.Dataframe(headers=["image_name", "group"], row_count=0, wrap=True, interactive=True, visible=True)
                 group_prompt = gr.Markdown("**Upload Status**: No uploads yet")
-                upload_btn = gr.Button("Add Image(s) to Registry", variant="primary")
+                upload_btn = gr.Button("Add Group(s) to Image(s)", variant="primary")
                 gr.Markdown("### ❓ Ask Question")
-                group_name_input = gr.Textbox(label="Group to analyze", placeholder="e.g., control or drugA", value="")
                 user_query = gr.Textbox(label="Ask about your groups", placeholder="e.g., Compare cell counts between control and drugA", lines=5)
                 run_button = gr.Button("🚀 Ask Question", variant="primary", size="lg")
                 progress_md = gr.Markdown("**Progress**: Ready")
                 conversation_state = gr.State(AgentState())
-            with gr.Column(scale=2):
+            with gr.Column(scale=1):
                 gr.Markdown("### 🗣️ Conversation")
+                # Use type="messages" directly like original version
                 chatbot_output = gr.Chatbot(type="messages", height=700, show_label=False)
 
         # Bottom full-width: summary and visual outputs
@@ -1547,39 +1994,28 @@ def main(args):
         with gr.Row():
             with gr.Column(scale=5):
                 gr.Markdown("## 💡 Try these examples with suggested tools.")
-                fibroblast_examples = [
+                examples = [
                     ["Image Preprocessing", "examples/A5_01_1_1_Phase Contrast_001.png", "Normalize this phase contrast image.", "Image_Preprocessor_Tool", "Illumination-corrected and brightness-normalized phase contrast image."],
                     ["Cell Identification", "examples/A2_02_1_1_Phase Contrast_001.png", "How many cells are there in this image.", "Image_Preprocessor_Tool, Nuclei_Segmenter_Tool", "258 cells are identified and their nuclei are labeled."],
                     ["Single-Cell Cropping", "examples/A3_02_1_1_Phase Contrast_001.png", "Crop single cells from the segmented nuclei in this image.", "Image_Preprocessor_Tool, Nuclei_Segmenter_Tool, Single_Cell_Cropper_Tool", "Individual cell crops extracted from the image."],
                     ["Fibroblast State Analysis", "examples/A4_02_1_1_Phase Contrast_001.png", "Analyze the fibroblast cell states in this image.", "Image_Preprocessor_Tool, Nuclei_Segmenter_Tool, Single_Cell_Cropper_Tool, Fibroblast_State_Analyzer_Tool", "540 cells identified and segmented successfully. Comprehensive analysis of fibroblast cell states have been performed with visualizations."],
-                    ["Fibroblast Activation Scoring", "examples/A5_02_1_1_Phase Contrast_001.png", "Quantify the activation score of each fibroblast in this image.", "Image_Preprocessor_Tool, Nuclei_Segmenter_Tool, Single_Cell_Cropper_Tool, Fibroblast_State_Analyzer_Tool, Fibroblast_Activation_Scorer_Tool", "Activation scores for all fibroblasts have been computed and normalized based on the reference map."]
-                ]
-                general_examples = [
+                    ["Fibroblast Activation Scoring", "examples/A5_02_1_1_Phase Contrast_001.png", "Quantify the activation score of each fibroblast in this image.", "Image_Preprocessor_Tool, Nuclei_Segmenter_Tool, Single_Cell_Cropper_Tool, Fibroblast_State_Analyzer_Tool, Fibroblast_Activation_Scorer_Tool", "Activation scores for all fibroblasts have been computed and normalized based on the reference map."],
                     ["Pathology Diagnosis", "examples/pathology.jpg", "What are the cell types in this image?", "Generalist_Solution_Generator_Tool, Image_Captioner_Tool, Relevant_Patch_Zoomer_Tool", "Need expert insights."],
                     ["Visual Reasoning", "examples/rotting_kiwi.png", "You are given a 3 x 3 grid in which each cell can contain either no kiwi, one fresh kiwi, or one rotten kiwi. Every minute, any fresh kiwi that is 4-directionally adjacent to a rotten kiwi also becomes rotten. What is the minimum number of minutes that must elapse until no cell has a fresh kiwi?", "Image_Captioner_Tool", "4 minutes"],
                     ["Scientific Research", None, "What are the research trends in tool agents with large language models for scientific discovery? Please consider the latest literature from ArXiv, PubMed, Nature, and news sources.", "ArXiv_Paper_Searcher_Tool, Pubmed_Search_Tool, Nature_News_Fetcher_Tool", "Open-ended question. No reference answer."]
                 ]
                 def distribute_tools(category, img, q, tools_str, ans):
                     selected_tools = [tool.strip() for tool in tools_str.split(',')]
-                    selected = [tool for tool in selected_tools if tool in AVAILABLE_TOOLS]
+                    selected = [tool for tool in selected_tools if tool in get_available_tools()]
                     return img, q
-                gr.Markdown("#### 🧬 Fibroblast Analysis Examples")
+                gr.Markdown("#### 🧬 Analysis Examples")
                 gr.Examples(
-                    examples=fibroblast_examples,
+                    examples=examples,
                     inputs=[gr.Textbox(label="Category", visible=False), user_image, user_query, gr.Textbox(label="Select Tools", visible=False), gr.Textbox(label="Reference Answer", visible=False)],
                     outputs=[user_image, user_query],
                     fn=distribute_tools,
                     cache_examples=False
                 )
-                gr.Markdown("#### 🧩 General Purpose Examples")
-                gr.Examples(
-                    examples=general_examples,
-                    inputs=[gr.Textbox(label="Category", visible=False), user_image, user_query, gr.Textbox(label="Select Tools", visible=False), gr.Textbox(label="Reference Answer", visible=False)],
-                    outputs=[user_image, user_query],
-                    fn=distribute_tools,
-                    cache_examples=False
-                )
-
         # Button click event
         user_image.change(
             prepare_group_assignment,
@@ -1590,31 +2026,39 @@ def main(args):
         upload_btn.click(
             upload_image_to_group,
             inputs=[user_image, group_table, conversation_state],
-            outputs=[conversation_state, group_prompt]
+            outputs=[conversation_state, group_prompt, group_table]
         )
 
         run_button.click(
             solve_problem_gradio,
-            [user_query, group_name_input, language_model, conversation_state],
+            [user_query, language_model, conversation_state],
             [chatbot_output, text_output, gallery_output, progress_md, conversation_state]
         )
 
     #################### Gradio Interface ####################
 
-    # Launch configuration
     if IS_SPACES:
-        # HuggingFace Spaces config
         demo.launch(
             server_name="0.0.0.0",
             server_port=7860,
             share=False,
-            debug=False
+            debug=False,
+            show_error=True
         )
     else:
-        # Local development config
+        import os
+        server_port = os.getenv("GRADIO_SERVER_PORT")
+        if server_port:
+            try:
+                server_port = int(server_port)
+            except ValueError:
+                server_port = None
+        else:
+            server_port = None
+        
         demo.launch(
-            server_name="0.0.0.0",
-            server_port=1048,
+            server_name="127.0.0.1",
+            server_port=server_port,
             debug=True,
             share=False
         )
@@ -1626,46 +2070,24 @@ if __name__ == "__main__":
     if not hasattr(args, 'openai_api_source') or args.openai_api_source is None:
         args.openai_api_source = "we_provided"
 
-    # All available tools
-    all_tools = [
-        # Cell analysis tools
-        "Object_Detector_Tool",           # Cell detection and counting
-        "Image_Captioner_Tool",           # Cell morphology description
-        "Relevant_Patch_Zoomer_Tool",     # Cell region zoom analysis
-        "Text_Detector_Tool",             # Text recognition in images
-        "Advanced_Object_Detector_Tool",  # Advanced cell detection
-        "Image_Preprocessor_Tool",        # Image preprocessing and enhancement
-        "Nuclei_Segmenter_Tool",          # Nuclei segmentation
-        "Single_Cell_Cropper_Tool",        # Single cell cropping
-        "Fibroblast_State_Analyzer_Tool",  # Fibroblast state analysis
-        
-        # General analysis tools
-        "Generalist_Solution_Generator_Tool",  # Comprehensive analysis generation
-        "Python_Code_Generator_Tool",          # Code generation
-        
-        # Research literature tools
-        "ArXiv_Paper_Searcher_Tool",      # arXiv paper search
-        "Pubmed_Search_Tool",             # PubMed literature search
-        "Nature_News_Fetcher_Tool",       # Nature news fetching
-        "Google_Search_Tool",             # Google search
-        "Wikipedia_Knowledge_Searcher_Tool",  # Wikipedia search
-        "URL_Text_Extractor_Tool",        # URL text extraction
-    ]
-    args.enabled_tools = all_tools
-
-    # NOTE: Use the same name for the query cache directory as the dataset directory
+    args.enabled_tools = get_available_tools()
     args.root_cache_dir = DATASET_DIR.name
     
-    # Print environment information
     print("\n=== Environment Information ===")
     print(f"Running in HuggingFace Spaces: {IS_SPACES}")
+    print(f"Dataset/Cache Directory: {DATASET_DIR}")
+    if IS_SPACES:
+        print("⚠️ Note: Using /tmp directory - data will be cleared on restart")
     if TORCH_AVAILABLE:
         print(f"CUDA Available: {torch.cuda.is_available()}")
         if torch.cuda.is_available():
             print(f"CUDA Device: {torch.cuda.get_device_name(0)}")
     else:
         print("PyTorch not installed; running in CPU-only mode.")
-    #print(f"API Key Source: {args.openai_api_source}")
+    if not os.getenv("OPENAI_API_KEY"):
+        print("⚠️ Warning: OPENAI_API_KEY not set - API calls will fail")
+    else:
+        print("✅ OPENAI_API_KEY is set")
     print("==============================\n")
     
     main(args)
