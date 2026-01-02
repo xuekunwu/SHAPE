@@ -553,17 +553,29 @@ def _collect_visual_outputs(result, visual_outputs_list):
     """Collect visual outputs from tool result and add to visual_outputs_list."""
     visual_output_files = []
     if isinstance(result, dict):
+        # Collect visual outputs from top level
         if "visual_outputs" in result:
             visual_output_files.extend(result["visual_outputs"])
-        elif "per_image" in result:
+        # Collect visual outputs from per_image structure
+        if "per_image" in result:
             for img_result in result["per_image"]:
-                if isinstance(img_result, dict) and "visual_outputs" in img_result:
-                    visual_output_files.extend(img_result["visual_outputs"])
+                if isinstance(img_result, dict):
+                    if "visual_outputs" in img_result:
+                        visual_output_files.extend(img_result["visual_outputs"])
+                    # Also check for individual visual output keys
+                    for key in ["overlay_path", "mask_path", "processed_image_path", "output_path"]:
+                        if key in img_result and img_result[key]:
+                            visual_output_files.append(img_result[key])
     
     for file_path in visual_output_files:
         try:
-            if "comparison" in os.path.basename(file_path).lower():
+            # Don't skip comparison charts - they are important visualizations
+            # Only skip if it's a duplicate comparison plot (e.g., from image_preprocessor)
+            filename = os.path.basename(file_path).lower()
+            if "comparison" in filename and "preprocessed" in filename:
+                # Skip preprocessing comparison plots (we already show processed images)
                 continue
+                
             if not file_path.lower().endswith(('.png', '.jpg', '.jpeg', '.tif', '.tiff')):
                 continue
             if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
@@ -579,6 +591,7 @@ def _collect_visual_outputs(result, visual_outputs_list):
             img_array = np.array(image)
             if img_array.size == 0 or np.isnan(img_array).any():
                 continue
+            
             filename = os.path.basename(file_path)
             label_map = {
                 "processed": f"Processed Image: {filename}",
@@ -586,8 +599,13 @@ def _collect_visual_outputs(result, visual_outputs_list):
                 "segmented": f"Segmented Result: {filename}",
                 "detected": f"Detection Result: {filename}",
                 "zoomed": f"Zoomed Region: {filename}",
-                "crop": f"Single Cell Crop: {filename}"
+                "crop": f"Single Cell Crop: {filename}",
+                "comparison": f"Comparison Chart: {filename}",
+                "bar": f"Bar Chart: {filename}",
+                "overlay": f"Segmentation Overlay: {filename}",
+                "mask": f"Segmentation Mask: {filename}"
             }
+            # Check for keywords in filename to determine label
             label = next((label_map[k] for k in label_map if k in filename.lower()), f"Analysis Result: {filename}")
             
             visual_outputs_list.append((image, label))
