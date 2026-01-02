@@ -42,6 +42,44 @@ class Initializer:
         parts = dir_name.split('_')
         class_name = '_'.join([p.capitalize() for p in parts]) + '_Tool'
         return class_name
+    
+    def _find_tool_class(self, module, expected_class_name: str):
+        """
+        Try to find the tool class in the module, handling case variations.
+        For example, if expected_class_name is 'Url_Text_Extractor_Tool', 
+        it will try 'URL_Text_Extractor_Tool' as well.
+        """
+        # First try the exact name
+        if hasattr(module, expected_class_name):
+            return getattr(module, expected_class_name)
+        
+        # Try variations: convert first part to uppercase if it's a common abbreviation
+        parts = expected_class_name.split('_')
+        if len(parts) > 0:
+            # Common abbreviations that should be uppercase
+            abbreviations = ['url', 'api', 'id', 'pdf', 'html', 'xml', 'json', 'csv']
+            first_part_lower = parts[0].lower()
+            if first_part_lower in abbreviations:
+                # Try with first part uppercase
+                variant_parts = [parts[0].upper()] + parts[1:]
+                variant_name = '_'.join(variant_parts)
+                if hasattr(module, variant_name):
+                    print(f"Found class {variant_name} instead of {expected_class_name}")
+                    return getattr(module, variant_name)
+        
+        # Try to find any class that ends with '_Tool' and has similar name
+        module_attrs = dir(module)
+        for attr in module_attrs:
+            if attr.endswith('_Tool') and attr.lower() == expected_class_name.lower():
+                print(f"Found class {attr} instead of {expected_class_name} (case-insensitive match)")
+                return getattr(module, attr)
+        
+        # If still not found, raise AttributeError with helpful message
+        available_classes = [attr for attr in module_attrs if attr.endswith('_Tool')]
+        raise AttributeError(
+            f"module '{module.__name__}' has no attribute '{expected_class_name}'. "
+            f"Available classes ending with '_Tool': {available_classes}"
+        )
 
     def load_tools_and_get_metadata(self) -> Dict[str, Any]:
         print("Loading tools and getting metadata...")
@@ -62,7 +100,7 @@ class Initializer:
             print(f"Attempting to import: {module_name}")
             try:
                 module = importlib.import_module(module_name)
-                tool_class = getattr(module, tool_class_name)
+                tool_class = self._find_tool_class(module, tool_class_name)
                 # 实例化工具
                 inputs = {}
                 if hasattr(tool_class, 'require_llm_engine') and tool_class.require_llm_engine:
@@ -96,7 +134,7 @@ class Initializer:
                 module_name = f"octotools.tools.{tool_dir}.tool"
                 print(f"Attempting to import: {module_name}")
                 module = importlib.import_module(module_name)
-                tool_class = getattr(module, tool_class_name)
+                tool_class = self._find_tool_class(module, tool_class_name)
                 # 实例化工具
                 inputs = {}
                 if hasattr(tool_class, 'require_llm_engine') and tool_class.require_llm_engine:
