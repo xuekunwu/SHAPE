@@ -350,7 +350,7 @@ Instructions:
    
    - LOW Priority: Use sparingly, only when necessary
      * Utility tools and code generation tools (use only when no other tool can solve the query)
-     * Examples: Text_Detector_Tool, Python_Code_Generator_Tool, Generalist_Solution_Generator_Tool
+     * Examples: Text_Detector_Tool, Python_Code_Generator_Tool
    
    IMPORTANT: Always prefer tools from higher priority levels (HIGH > MEDIUM > LOW).
    Do NOT use LOW priority code generation tools if any higher-priority tool can address the query.
@@ -475,7 +475,7 @@ Example (do not copy, use only as reference):
         # Warn if LOW priority code generation tool is selected and there are higher priority alternatives
         if priority == ToolPriority.LOW:
             # Check if it's a code generation tool
-            code_gen_tools = ['Python_Code_Generator_Tool', 'Generalist_Solution_Generator_Tool']
+            code_gen_tools = ['Python_Code_Generator_Tool']  # Generalist_Solution_Generator_Tool is excluded
             if normalized_tool in code_gen_tools:
                 higher_priority_tools = [
                     t for t in available_tools 
@@ -578,14 +578,14 @@ Detailed Instructions:
    - If the query asked for "compare", "count", "analyze", "detect" and you have those results, STOP.
    - If the query asked for specific outputs (charts, counts, comparisons) and they exist, STOP.
    - DO NOT continue just because there are unused tools available.
-   - DO NOT use Generalist_Solution_Generator_Tool or Python_Code_Generator_Tool unless NO other tools can solve the query.
+   - DO NOT use Python_Code_Generator_Tool unless NO other tools can solve the query.
    - STOP if the query is satisfied, even if some tools haven't been used.
 
    CRITICAL CHECKLIST FOR CONTINUING (Only continue if query is NOT satisfied):
    - Is the MAIN query still UNANSWERED?
    - Are there UNANSWERED parts that require specific tools (not generalist/code generators)?
    - Is the current state only data preparation without the requested analysis?
-   - Only continue if the query specifically requires additional tools AND those tools are NOT Generalist_Solution_Generator_Tool or Python_Code_Generator_Tool (use these only as last resort).
+   - Only continue if the query specifically requires additional tools AND those tools are NOT Python_Code_Generator_Tool (use only as last resort).
 
 Response Format:
 You MUST respond with exactly two fields:

@@ -38,9 +38,9 @@ BIOIMAGE_TOOL_PRIORITIES: Dict[str, ToolPriority] = {
     # LOW: Utility tools and code generation tools (use sparingly)
     "Text_Detector_Tool": ToolPriority.LOW,
     "Python_Code_Generator_Tool": ToolPriority.LOW,
-    "Generalist_Solution_Generator_Tool": ToolPriority.LOW,
     
     # EXCLUDED: Tools not relevant for bioimage analysis
+    "Generalist_Solution_Generator_Tool": ToolPriority.EXCLUDED,  # Not useful, excluded
     "Google_Search_Tool": ToolPriority.EXCLUDED,
     "Pubmed_Search_Tool": ToolPriority.EXCLUDED,
     "Arxiv_Paper_Searcher_Tool": ToolPriority.EXCLUDED,
