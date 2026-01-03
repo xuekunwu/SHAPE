@@ -194,7 +194,7 @@ Tool Metadata: {tool_metadata}
 Previous Tool Outputs (summary only, file paths available for tool chaining): {previous_outputs_for_llm}
 
 IMPORTANT: When the tool requires an image parameter, you MUST use the exact image path provided above: "{safe_path}"
-{"IMPORTANT: When the tool generates output files (e.g., Nuclei_Segmenter_Tool, Image_Preprocessor_Tool), include image_id parameter if available for consistent file naming." if image_id else ""}
+{"IMPORTANT: Both Nuclei_Segmenter_Tool and Image_Preprocessor_Tool accept the image_id parameter for consistent file naming and tracking. Include image_id parameter when available for these tools." if image_id else ""}
 
 CRITICAL TOOL DEPENDENCY RULES:
 - Fibroblast_Activation_Scorer_Tool MUST use the h5ad file output from Fibroblast_State_Analyzer_Tool

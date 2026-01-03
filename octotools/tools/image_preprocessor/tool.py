@@ -25,7 +25,8 @@ class Image_Preprocessor_Tool(BaseTool):
                 "target_brightness": "int - Target brightness level (0-255, default: 120).",
                 "gaussian_kernel_size": "int - Size of Gaussian kernel for illumination correction (default: 151).",
                 "output_format": "str - Output format: Always use 'png' for Visual Outputs display compatibility (default: 'png', will be forced to 'png' regardless of input).",
-                "save_intermediate": "bool - Whether to save intermediate processing steps (default: False)."
+                "save_intermediate": "bool - Whether to save intermediate processing steps (default: False).",
+                "image_id": "str - Optional image identifier for consistent file naming and tracking."
             },
             output_type="dict - A dictionary containing processed image paths and processing statistics.",
             demo_commands=[
@@ -90,7 +91,7 @@ class Image_Preprocessor_Tool(BaseTool):
         
         return adjusted_image
 
-    def create_comparison_plot(self, original, corrected, normalized, filename, vis_config, group=None):
+    def create_comparison_plot(self, original, corrected, normalized, filename, vis_config, group=None, image_identifier=None):
         """
         Create a comparison plot of original, corrected, and normalized images with professional styling.
         
@@ -100,6 +101,8 @@ class Image_Preprocessor_Tool(BaseTool):
             normalized: Brightness-normalized image
             filename: Original filename for title
             vis_config: An instance of VisualizationConfig
+            group: Optional group name
+            image_identifier: Optional image identifier for file naming
             
         Returns:
             Path to saved comparison plot
@@ -134,12 +137,13 @@ class Image_Preprocessor_Tool(BaseTool):
                      fontweight='bold', y=1.02)
         plt.tight_layout()
         
-        # Save with professional settings
+        # Save with professional settings using image_identifier if provided
         group_suffix = f"_{group}" if group else ""
-        plot_path = os.path.join(
-            output_dir,
-            f"comparison_{os.path.splitext(os.path.basename(filename))[0]}{group_suffix}.png",
-        )
+        if image_identifier:
+            plot_name = f"comparison_{image_identifier}{group_suffix}.png"
+        else:
+            plot_name = f"comparison_{os.path.splitext(os.path.basename(filename))[0]}{group_suffix}.png"
+        plot_path = os.path.join(output_dir, plot_name)
         vis_config.save_professional_figure(fig, plot_path)
         plt.close(fig)
         
@@ -175,7 +179,7 @@ class Image_Preprocessor_Tool(BaseTool):
             return mapping
         raise ValueError("Unsupported groups format.")
 
-    def execute(self, image, target_brightness=120, gaussian_kernel_size=151, output_format='png', save_intermediate=False, groups=None):
+    def execute(self, image, target_brightness=120, gaussian_kernel_size=151, output_format='png', save_intermediate=False, groups=None, image_id=None):
         """
         Execute the image preprocessing pipeline.
         
@@ -185,6 +189,8 @@ class Image_Preprocessor_Tool(BaseTool):
             gaussian_kernel_size: Size of Gaussian kernel for illumination correction
             output_format: Output image format (forced to 'png' for Visual Outputs compatibility)
             save_intermediate: Whether to save intermediate processing steps
+            groups: Optional grouping for images
+            image_id: Optional image identifier for consistent file naming and tracking
             
         Returns:
             Dictionary containing processing results and file paths
@@ -208,8 +214,17 @@ class Image_Preprocessor_Tool(BaseTool):
             original_image = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
             if original_image is None:
                 raise ValueError(f"Cannot read image: {img_path}. Please check if the file is a valid image format.")
+            
             filename = os.path.basename(img_path)
-            base_name = os.path.splitext(filename)[0]
+            # Extract image identifier: use provided image_id, or use original filename (without extension)
+            if image_id:
+                image_identifier = image_id
+            else:
+                # Use the original filename without extension to preserve the original image name
+                # e.g., "A1_02_1_1_Phase Contrast_001.png" -> "A1_02_1_1_Phase Contrast_001"
+                image_identifier = os.path.splitext(filename)[0]
+            
+            base_name = image_identifier
             corrected_image = self.global_illumination_correction(original_image, gaussian_kernel_size)
             normalized_image = self.adjust_brightness(corrected_image, target_brightness)
 
@@ -253,6 +268,7 @@ class Image_Preprocessor_Tool(BaseTool):
                 filename,
                 vis_config,
                 group=group,
+                image_identifier=image_identifier,
             )
 
             # Build result in FBagent_250627 compatible format (flat structure)

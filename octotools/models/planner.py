@@ -8,6 +8,7 @@ from octotools.engine.openai import ChatOpenAI
 from octotools.models.memory import Memory
 from octotools.models.formatters import QueryAnalysis, NextStep, MemoryVerification
 from octotools.models.utils import normalize_tool_name
+from octotools.models.tool_priority import ToolPriorityManager, ToolPriority, TOOL_DEPENDENCIES
 
 class Planner:
     def __init__(self, llm_engine_name: str, toolbox_metadata: dict = None, available_tools: List = None, api_key: str = None):
@@ -16,6 +17,9 @@ class Planner:
         self.available_tools = available_tools or []
         self.api_key = api_key
         
+        # Initialize tool priority manager
+        self.priority_manager = ToolPriorityManager()
+        
         # Initialize LLM engines
         self.llm_engine = ChatOpenAI(model_string=llm_engine_name, is_multimodal=False, api_key=api_key)
         self.llm_engine_mm = ChatOpenAI(model_string=llm_engine_name, is_multimodal=True, api_key=api_key)
@@ -23,6 +27,7 @@ class Planner:
         # Initialize response storage
         self.base_response = None
         self.query_analysis = None
+        self.detected_domain = 'general'  # Track detected task domain
         
         # Initialize token usage tracking
         self.last_usage = {}
@@ -71,18 +76,27 @@ class Planner:
         image_info = self.get_image_info(image)
         print("image_info: ", image_info)
         
-        # Filter tools for bioimage tasks: exclude Relevant_Patch_Zoomer_Tool
-        available_tools = self.available_tools.copy()
-        toolbox_metadata = self.toolbox_metadata.copy()
+        # Detect task domain using priority manager
+        self.detected_domain = self.priority_manager.detect_task_domain(question, "")
         
-        # Create a temporary memory to check if it's a bioimage task
-        from octotools.models.memory import Memory
-        temp_memory = Memory()
-        if self._is_bioimage_task(question, "", temp_memory):
-            if "Relevant_Patch_Zoomer_Tool" in available_tools:
-                available_tools.remove("Relevant_Patch_Zoomer_Tool")
-                toolbox_metadata.pop("Relevant_Patch_Zoomer_Tool", None)
-                print("Bioimage task detected in query analysis: Excluding Relevant_Patch_Zoomer_Tool")
+        # Filter tools based on detected domain
+        available_tools, excluded_tools = self.priority_manager.filter_tools_for_domain(
+            self.available_tools, 
+            self.detected_domain,
+            exclude_excluded=True
+        )
+        
+        # Filter metadata to match filtered tools
+        toolbox_metadata = {
+            tool: self.toolbox_metadata[tool] 
+            for tool in available_tools 
+            if tool in self.toolbox_metadata
+        }
+        
+        if excluded_tools:
+            print(f"Task domain detected: {self.detected_domain}")
+            print(f"Excluded tools for this domain: {excluded_tools}")
+            print(f"Available tools after filtering: {available_tools}")
 
         query_prompt = f"""
 Task: Analyze the given query with accompanying inputs and determine the skills and tools needed to address it effectively.
@@ -226,32 +240,19 @@ Please present your analysis in a clear, structured format.
     
     def _is_bioimage_task(self, question: str, query_analysis: str, memory: Memory) -> bool:
         """Detect if the task is related to bioimage/single-cell analysis."""
-        # Bioimage-related keywords
-        bioimage_keywords = [
-            'cell', 'nucleus', 'nuclei', 'fibroblast', 'segment', 'crop', 
-            'microscopy', 'microscope', 'phase contrast', 'fluorescence',
-            'single cell', 'cell state', 'activation', 'morphology'
-        ]
+        # Use priority manager's domain detection
+        domain = self.priority_manager.detect_task_domain(question, query_analysis)
         
-        # Bioimage-specific tools
+        # Also check if bioimage tools have been used in memory
+        if domain == 'bioimage':
+            return True
+        
+        # Check if bioimage tools have been used
         bioimage_tools = [
             'Nuclei_Segmenter_Tool', 'Single_Cell_Cropper_Tool',
             'Fibroblast_State_Analyzer_Tool', 'Fibroblast_Activation_Scorer_Tool',
             'Image_Preprocessor_Tool'
         ]
-        
-        # Check query content
-        query_lower = question.lower()
-        if any(keyword in query_lower for keyword in bioimage_keywords):
-            return True
-        
-        # Check query analysis
-        if query_analysis:
-            analysis_lower = query_analysis.lower()
-            if any(keyword in analysis_lower for keyword in bioimage_keywords):
-                return True
-        
-        # Check if bioimage tools have been used
         actions = memory.get_actions()
         for action in actions:
             tool_name = action.get('tool_name', '')
@@ -263,15 +264,40 @@ Please present your analysis in a clear, structured format.
     def generate_next_step(self, question: str, image: str, query_analysis: str, memory: Memory, step_count: int, max_step_count: int, bytes_mode: bool = False, conversation_context: str = "", **kwargs) -> NextStep:
         image_info = self.get_image_info(image) if not bytes_mode else self.get_image_info_bytes(image)
         
-        # Filter tools for bioimage tasks: exclude Relevant_Patch_Zoomer_Tool
-        available_tools = self.available_tools.copy()
-        toolbox_metadata = self.toolbox_metadata.copy()
+        # Detect domain if not already detected (fallback to detection)
+        if not hasattr(self, 'detected_domain') or not self.detected_domain:
+            self.detected_domain = self.priority_manager.detect_task_domain(question, query_analysis)
         
-        if self._is_bioimage_task(question, query_analysis, memory):
-            if "Relevant_Patch_Zoomer_Tool" in available_tools:
-                available_tools.remove("Relevant_Patch_Zoomer_Tool")
-                toolbox_metadata.pop("Relevant_Patch_Zoomer_Tool", None)
-                print("Bioimage task detected: Excluding Relevant_Patch_Zoomer_Tool from available tools")
+        # Filter tools based on detected domain using priority manager
+        available_tools, excluded_tools = self.priority_manager.filter_tools_for_domain(
+            self.available_tools,
+            self.detected_domain,
+            exclude_excluded=True
+        )
+        
+        # Filter metadata to match filtered tools
+        toolbox_metadata = {
+            tool: self.toolbox_metadata[tool]
+            for tool in available_tools
+            if tool in self.toolbox_metadata
+        }
+        
+        if excluded_tools:
+            print(f"Step {step_count}: Domain={self.detected_domain}, Excluded tools: {excluded_tools}")
+        
+        # Get tools grouped by priority for prompt
+        tools_by_priority = self.priority_manager.format_tools_by_priority(available_tools)
+        
+        # Get used tools from memory for dependency checking
+        used_tools = [action.get('tool_name', '') for action in memory.get_actions() if 'tool_name' in action]
+        recommended_tools = self.priority_manager.get_recommended_next_tools(
+            available_tools, used_tools, self.detected_domain
+        )
+        
+        # Format recommended tools for prompt (first 5 for brevity)
+        recommended_tools_str = ", ".join(recommended_tools[:5]) if recommended_tools else "None"
+        if len(recommended_tools) > 5:
+            recommended_tools_str += f" (and {len(recommended_tools) - 5} more)"
         
         prompt_generate_next_step = f"""
 Task: Determine the optimal next step to address the given query based on the provided analysis, available tools, and previous steps taken.
@@ -280,15 +306,21 @@ Context:
 Query: {question}
 Image: {image if not bytes_mode else 'image.jpg'}
 Query Analysis: {query_analysis}
+Detected Task Domain: {self.detected_domain}
 
-Available Tools:
-{available_tools}
+Available Tools (organized by priority):
+{tools_by_priority}
+
+Recommended Next Tools (considering dependencies and priorities):
+{recommended_tools_str}
 
 Tool Metadata:
 {toolbox_metadata}
 
 Previous Steps and Their Results:
 {memory.get_actions()}
+
+Tools Already Used: {used_tools if used_tools else "None"}
 
 Current Step: {step_count} in {max_step_count} steps
 Remaining Steps: {max_step_count - step_count}
@@ -298,23 +330,45 @@ Instructions:
 
 2. Determine the most appropriate next step by considering:
    - Key objectives from the query analysis
-   - Capabilities of available tools
+   - Capabilities of available tools (see priority grouping above)
    - Logical progression of problem-solving
    - Outcomes from previous steps
+   - Tool dependencies (some tools require other tools to run first)
    - Current step count and remaining steps
 
-3. Tool Selection Priority (CRITICAL):
-   - FIRST: Use specific tools that directly address the query (e.g., Nuclei_Segmenter_Tool, Image_Preprocessor_Tool, Analysis_Visualizer_Tool)
-   - SECOND: Use specialized analysis tools (e.g., Fibroblast_State_Analyzer_Tool, Object_Detector_Tool)
-   - LAST RESORT ONLY: Use Generalist_Solution_Generator_Tool or Python_Code_Generator_Tool ONLY when:
-     * No other specific tool can solve the query
-     * The query requires custom code generation that cannot be done by existing tools
-     * All other options have been exhausted
-   - AVOID using Generalist_Solution_Generator_Tool or Python_Code_Generator_Tool if any specific tool can address the query
+3. Tool Selection Priority (IMPORTANT - FOLLOW THIS ORDER):
+   Tools are organized by priority level. You MUST follow this priority order:
+   
+   - HIGH Priority: Use these tools FIRST if they are relevant to the query
+     * Core tools for bioimage analysis and specialized analysis tools
+     * Examples: Image_Preprocessor_Tool, Nuclei_Segmenter_Tool, Single_Cell_Cropper_Tool, 
+                Fibroblast_State_Analyzer_Tool, Fibroblast_Activation_Scorer_Tool, Analysis_Visualizer_Tool
+   
+   - MEDIUM Priority: Use these general-purpose tools when needed
+     * Examples: Object_Detector_Tool, Image_Captioner_Tool
+   
+   - LOW Priority: Use sparingly, only when necessary
+     * Utility tools and code generation tools (use only when no other tool can solve the query)
+     * Examples: Text_Detector_Tool, Python_Code_Generator_Tool, Generalist_Solution_Generator_Tool
+   
+   IMPORTANT: Always prefer tools from higher priority levels (HIGH > MEDIUM > LOW).
+   Do NOT use LOW priority code generation tools if any higher-priority tool can address the query.
 
-4. Select ONE tool best suited for the next step, keeping in mind the limited number of remaining steps.
+4. Check Tool Dependencies:
+   Some tools require other tools to run first:
+   - Single_Cell_Cropper_Tool requires Nuclei_Segmenter_Tool
+   - Fibroblast_State_Analyzer_Tool requires Single_Cell_Cropper_Tool or Nuclei_Segmenter_Tool
+   - Fibroblast_Activation_Scorer_Tool requires Fibroblast_State_Analyzer_Tool
+   
+   Ensure all dependencies are satisfied before selecting a tool.
 
-5. Formulate a specific, achievable sub-goal for the selected tool that maximizes progress towards answering the query.
+5. Select ONE tool best suited for the next step, keeping in mind:
+   - The priority order above
+   - Tool dependencies
+   - The limited number of remaining steps
+   - Recommended tools listed above
+
+6. Formulate a specific, achievable sub-goal for the selected tool that maximizes progress towards answering the query.
 
 Output Format:
 <justification>: detailed explanation of why the selected tool is the best choice for the next step, considering the context and previous outcomes.
@@ -338,7 +392,7 @@ Example (do not copy, use only as reference):
 <context>: Image path: "example/image.jpg", Previous detection results: [list of objects]
 <sub_goal>: Detect and count the number of specific objects in the image "example/image.jpg"
 <tool_name>: Object_Detector_Tool
-"""
+        """
         llm_response = self.llm_engine.generate(prompt_generate_next_step, response_format=NextStep)
         
         # Extract content and usage from response
@@ -351,7 +405,88 @@ Example (do not copy, use only as reference):
             next_step = llm_response
             self.last_usage = {}
         
+        # Validate the selected tool
+        if hasattr(next_step, 'tool_name') and next_step.tool_name:
+            validation_result = self._validate_tool_selection(
+                next_step.tool_name, available_tools, used_tools, self.detected_domain
+            )
+            if not validation_result['valid']:
+                print(f"WARNING: Tool selection validation failed: {validation_result['reason']}")
+                # The tool is still returned, but warning is logged
+                # In production, you might want to retry or use a fallback
+        
         return next_step
+    
+    def _validate_tool_selection(
+        self, 
+        tool_name: str, 
+        available_tools: List[str],
+        used_tools: List[str],
+        domain: str
+    ) -> Dict[str, Any]:
+        """
+        Validate that the selected tool is appropriate for the task.
+        
+        Returns:
+            dict with 'valid' (bool) and 'reason' (str) keys
+        """
+        # Normalize tool name
+        normalized_tool = self.priority_manager._normalize_tool_name(tool_name)
+        
+        # Check if tool is in available tools
+        if normalized_tool not in available_tools:
+            # Try to find similar tool names
+            similar_tools = [t for t in available_tools if normalized_tool.lower() in t.lower() or t.lower() in normalized_tool.lower()]
+            if similar_tools:
+                return {
+                    'valid': False,
+                    'reason': f"Tool '{tool_name}' not in available tools. Did you mean: {similar_tools[0]}?",
+                    'suggestion': similar_tools[0]
+                }
+            return {
+                'valid': False,
+                'reason': f"Tool '{tool_name}' not in available tools list: {available_tools}",
+                'suggestion': None
+            }
+        
+        # Check tool priority for domain
+        priority = self.priority_manager.get_priority(normalized_tool)
+        
+        if priority == ToolPriority.EXCLUDED:
+            return {
+                'valid': False,
+                'reason': f"Tool '{tool_name}' is EXCLUDED for {domain} domain tasks",
+                'suggestion': None
+            }
+        
+        # Check dependencies
+        dependencies = TOOL_DEPENDENCIES.get(normalized_tool, [])
+        missing_deps = [dep for dep in dependencies if dep not in used_tools]
+        
+        if missing_deps:
+            return {
+                'valid': False,
+                'reason': f"Tool '{tool_name}' requires dependencies that haven't been used: {missing_deps}",
+                'suggestion': f"Use {missing_deps[0]} first" if missing_deps else None
+            }
+        
+        # Warn if LOW priority code generation tool is selected and there are higher priority alternatives
+        if priority == ToolPriority.LOW:
+            # Check if it's a code generation tool
+            code_gen_tools = ['Python_Code_Generator_Tool', 'Generalist_Solution_Generator_Tool']
+            if normalized_tool in code_gen_tools:
+                higher_priority_tools = [
+                    t for t in available_tools 
+                    if t not in used_tools and self.priority_manager.get_priority(t) < ToolPriority.LOW
+                ]
+                if higher_priority_tools:
+                    return {
+                        'valid': True,  # Still valid, but warn
+                        'reason': f"LOW priority code generation tool selected, but higher priority tools available: {higher_priority_tools[:3]}",
+                        'suggestion': higher_priority_tools[0] if higher_priority_tools else None
+                    }
+        
+        return {'valid': True, 'reason': 'Tool selection is valid', 'suggestion': None}
 
     def verificate_memory(self, question: str, image: str, query_analysis: str, memory: Memory, bytes_mode: bool = False, conversation_context: str = "", **kwargs) -> MemoryVerification:
         if bytes_mode:

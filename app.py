@@ -466,9 +466,8 @@ def add_image_to_group(group_name: str, user_image, state: "AgentState", images_
             elif isinstance(img, str):
                 image_name = os.path.splitext(os.path.basename(img))[0]
         
-        # Sanitize image_name for use in filenames (keep only alphanumeric, dash, underscore)
-        if image_name:
-            image_name = "".join(c for c in image_name if c.isalnum() or c in ('-', '_'))[:50]
+        # Keep original image_name (including spaces and special characters) for consistent file naming
+        # The tools will handle the filename appropriately when saving files
         
         entry = {
             "image_id": image_id,
