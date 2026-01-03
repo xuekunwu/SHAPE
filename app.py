@@ -1571,6 +1571,7 @@ class Solver:
             "Cell_Segmenter_Tool": f"*Showing {counts['segmented']} segmentation result(s) with identified cell regions in phase-contrast images.*",
             "Organoid_Segmenter_Tool": f"*Showing {counts['segmented']} segmentation result(s) with identified organoid regions.*",
             "Single_Cell_Cropper_Tool": f"*Displaying {counts['cropped']} single-cell crop(s) generated from segmentation results (nuclei, cells, or organoids).*",
+            "Cell_State_Analyzer_Tool": f"*Displaying cell state analysis results from self-supervised learning with UMAP visualizations and clustering.*",
             "Cell_Morphology_Analyzer_Tool": "*Displaying cell morphology analysis results with detailed structural insights.*",
             "Fibroblast_Activation_Detector_Tool": "*Showing fibroblast activation state analysis with morphological indicators.*",
             "Fibroblast_State_Analyzer_Tool": f"*Displaying {counts['analyzed']} fibroblast state analysis result(s) with cell state distributions and statistics.*"

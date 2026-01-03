@@ -87,11 +87,13 @@ class Executor:
                     previous_outputs_for_llm = get_llm_safe_result(previous_outputs)
                     print(f"DEBUG: Extracted previous outputs: {list(previous_outputs.keys()) if isinstance(previous_outputs, dict) else 'Not a dict'}")
         
-        # Special handling for Fibroblast_State_Analyzer_Tool to use dynamic metadata file discovery
-        if tool_name == "Fibroblast_State_Analyzer_Tool":
+        # Special handling for Cell_State_Analyzer_Tool and Fibroblast_State_Analyzer_Tool to use dynamic metadata file discovery
+        state_analyzer_tools = ["Cell_State_Analyzer_Tool", "Fibroblast_State_Analyzer_Tool"]
+        if tool_name in state_analyzer_tools:
+            tool_label = "Cell_State_Analyzer_Tool" if tool_name == "Cell_State_Analyzer_Tool" else "Fibroblast_State_Analyzer_Tool"
             return ToolCommand(
-                analysis="Using dynamic metadata file discovery for Fibroblast_State_Analyzer_Tool",
-                explanation="Automatically finding the most recent metadata file and loading cell data with improved format handling",
+                analysis=f"Using dynamic metadata file discovery for {tool_label}",
+                explanation=f"Automatically finding the most recent metadata file and loading cell data with improved format handling for {tool_label}",
                 command="""import json
 import os
 import glob
@@ -583,12 +585,16 @@ Remember: Your <command> field MUST be valid Python code including any necessary
             # Execute the entire command as a single block to preserve variable definitions
             result = execute_with_timeout(command, local_context)
             
-            # Special handling for Fibroblast_State_Analyzer_Tool to save h5ad file
-            if tool_name == "Fibroblast_State_Analyzer_Tool" and isinstance(result, dict) and 'adata' in result:
-                try:
-                    import anndata
-                    adata_path = os.path.join(self.tool_cache_dir, 'fibroblast_state_analyzed.h5ad')
-                    print(f"Saving AnnData to h5ad file: {adata_path}")
+            # Special handling for Cell_State_Analyzer_Tool and Fibroblast_State_Analyzer_Tool to save h5ad file
+            if tool_name in ["Cell_State_Analyzer_Tool", "Fibroblast_State_Analyzer_Tool"] and isinstance(result, dict):
+                # Cell_State_Analyzer_Tool saves adata_path directly in result, Fibroblast_State_Analyzer_Tool has 'adata' key
+                if tool_name == "Cell_State_Analyzer_Tool" and 'adata_path' in result:
+                    print(f"AnnData already saved by Cell_State_Analyzer_Tool: {result['adata_path']}")
+                elif tool_name == "Fibroblast_State_Analyzer_Tool" and 'adata' in result:
+                    try:
+                        import anndata
+                        adata_path = os.path.join(self.tool_cache_dir, 'fibroblast_state_analyzed.h5ad')
+                        print(f"Saving AnnData to h5ad file: {adata_path}")
                     
                     # Ensure the directory exists
                     os.makedirs(os.path.dirname(adata_path), exist_ok=True)
