@@ -605,27 +605,26 @@ Remember: Your <command> field MUST be valid Python code including any necessary
                         import anndata
                         adata_path = os.path.join(self.tool_cache_dir, 'fibroblast_state_analyzed.h5ad')
                         print(f"Saving AnnData to h5ad file: {adata_path}")
-                    
-                    # Ensure the directory exists
-                    os.makedirs(os.path.dirname(adata_path), exist_ok=True)
-                    
-                    # Save the AnnData object
-                    result['adata'].write_h5ad(adata_path)
-                    result['analyzed_h5ad_path'] = adata_path
-                    print(f"Successfully saved h5ad file: {adata_path}")
-                    
-                    # Verify the file was created
-                    if os.path.exists(adata_path):
-                        file_size = os.path.getsize(adata_path)
-                        print(f"Verified h5ad file exists with size: {file_size} bytes")
-                    else:
-                        print(f"Warning: h5ad file was not created at {adata_path}")
                         
-                except Exception as e:
-                    print(f"Error saving h5ad file: {e}")
-                    # Don't fail the entire execution, just log the error
-                    if 'analyzed_h5ad_path' not in result:
-                        result['analyzed_h5ad_path'] = None
+                        # Ensure the directory exists
+                        os.makedirs(os.path.dirname(adata_path), exist_ok=True)
+                        
+                        # Save the AnnData object
+                        result['adata'].write_h5ad(adata_path)
+                        result['analyzed_h5ad_path'] = adata_path
+                        print(f"Successfully saved h5ad file: {adata_path}")
+                        
+                        # Verify the file was created
+                        if os.path.exists(adata_path):
+                            file_size = os.path.getsize(adata_path)
+                            print(f"Verified h5ad file exists with size: {file_size} bytes")
+                        else:
+                            print(f"Warning: h5ad file was not created at {adata_path}")
+                    except Exception as e:
+                        print(f"Error saving h5ad file: {e}")
+                        # Don't fail the entire execution, just log the error
+                        if 'analyzed_h5ad_path' not in result:
+                            result['analyzed_h5ad_path'] = None
             
             return result
 
