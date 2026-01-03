@@ -15,53 +15,58 @@ class Single_Cell_Cropper_Tool(BaseTool):
     def __init__(self):
         super().__init__(
             tool_name="Single_Cell_Cropper_Tool",
-            tool_description="Generates individual cell crops from nuclei segmentation results for single-cell analysis. Creates masks and crops each detected nucleus with configurable margins. Automatically handles image dimension mismatches by resizing masks.",
+            tool_description="Generates individual cell/object crops from segmentation masks (nuclei, cells, or organoids) for single-cell analysis. Creates crops for each detected object with configurable margins. Supports masks from Nuclei_Segmenter_Tool, Cell_Segmenter_Tool, or Organoid_Segmenter_Tool. Automatically handles image dimension mismatches by resizing masks.",
             tool_version="1.0.0",
             input_types={
                 "original_image": "str - Path to the original image (brightfield/phase contrast).",
-                "nuclei_mask": "str - Path to the nuclei segmentation mask image or mask array.",
+                "nuclei_mask": "str - Path to the segmentation mask image. Accepts nuclei_mask, cell_mask, or organoid_mask from segmentation tools.",
                 "source_image_id": "str - Optional source image ID for cell tracking (default: extracted from image path).",
                 "group": "str - Optional group/condition label for multi-group analysis (default: 'default').",
-                "min_area": "int - Minimum area threshold for valid nuclei (default: 50 pixels).",
-                "margin": "int - Margin around each nucleus for cropping (default: 25 pixels).",
+                "min_area": "int - Minimum area threshold for valid objects (default: 50 pixels).",
+                "margin": "int - Margin around each object for cropping (default: 25 pixels).",
                 "output_format": "str - Output format for crops ('tif', 'png', 'jpg', default: 'tif')."
             },
             output_type="dict - Contains cropped cell images, metadata, and visualization paths.",
             demo_commands=[
                 {
-                    "command": 'execution = tool.execute(original_image="path/to/brightfield.tif", nuclei_mask="path/to/nuclei_mask.png")',
-                    "description": "Generate single-cell crops from nuclei segmentation with default parameters."
+                    "command": 'execution = tool.execute(original_image="path/to/image.tif", nuclei_mask="path/to/nuclei_mask.png")',
+                    "description": "Generate single-cell crops from nuclei segmentation mask with default parameters."
                 },
                 {
-                    "command": 'execution = tool.execute(original_image="path/to/brightfield.tif", nuclei_mask="path/to/nuclei_mask.png", min_area=100, margin=30)',
-                    "description": "Generate single-cell crops with custom area threshold and margin parameters."
+                    "command": 'execution = tool.execute(original_image="path/to/image.tif", nuclei_mask="path/to/cell_mask.png", min_area=100, margin=30)',
+                    "description": "Generate single-cell crops from cell segmentation mask with custom area threshold and margin parameters."
+                },
+                {
+                    "command": 'execution = tool.execute(original_image="path/to/image.tif", nuclei_mask="path/to/organoid_mask.png")',
+                    "description": "Generate organoid crops from organoid segmentation mask."
                 }
             ],
             user_metadata={
-                "limitation": "Requires nuclei segmentation results as input. May generate overlapping crops if nuclei are close together. Performance depends on image quality and segmentation accuracy.",
-                "best_practice": "Use with Nuclei_Segmenter_Tool for optimal results. Adjust min_area and margin based on cell size and analysis requirements. Automatically handles dimension mismatches between original image and nuclei mask."
+                "limitation": "Requires segmentation mask results as input (from Nuclei_Segmenter_Tool, Cell_Segmenter_Tool, or Organoid_Segmenter_Tool). May generate overlapping crops if objects are close together. Performance depends on image quality and segmentation accuracy.",
+                "best_practice": "Use with any segmentation tool (Nuclei_Segmenter_Tool, Cell_Segmenter_Tool, or Organoid_Segmenter_Tool) for optimal results. Adjust min_area and margin based on object size and analysis requirements. For organoids, use larger min_area and margin values. Automatically handles dimension mismatches between original image and mask."
             }
         )
 
     def execute(self, original_image, nuclei_mask, source_image_id=None, group="default", min_area=50, margin=25, output_format='png', query_cache_dir=None):
         """
-        Execute single-cell cropping from nuclei segmentation results.
+        Execute single-cell/object cropping from segmentation masks.
         
         This is a Stage 2 (cell-level) tool. It operates on segmentation results (masks)
+        from Nuclei_Segmenter_Tool, Cell_Segmenter_Tool, or Organoid_Segmenter_Tool,
         and produces CellCrop objects as the atomic data units for downstream analysis.
         
         Args:
-            original_image: Path to original brightfield image (should be query_image_processed.png)
-            nuclei_mask: Path to nuclei segmentation mask
+            original_image: Path to original image (brightfield/phase contrast)
+            nuclei_mask: Path to segmentation mask (accepts nuclei_mask, cell_mask, or organoid_mask)
             source_image_id: Optional source image ID for tracking (default: extracted from path)
             group: Optional group/condition label (default: 'default')
-            min_area: Minimum area threshold for valid nuclei
-            margin: Margin around each nucleus for cropping
+            min_area: Minimum area threshold for valid objects (default: 50 pixels)
+            margin: Margin around each object for cropping (default: 25 pixels)
             output_format: Output image format ('png', 'tif', 'jpg')
             query_cache_dir: Directory for caching results
             
         Returns:
-            dict: Cropping results with cell crops, CellCrop objects, and metadata
+            dict: Cropping results with cell/object crops, CellCrop objects, and metadata
         """
         try:
             # Check if we should use processed image instead of original
@@ -79,12 +84,12 @@ class Single_Cell_Cropper_Tool(BaseTool):
                     "summary": "Image loading failed"
                 }
             
-            # Load nuclei mask
+            # Load segmentation mask (supports nuclei_mask, cell_mask, or organoid_mask)
             mask = cv2.imread(nuclei_mask, cv2.IMREAD_GRAYSCALE)
             if mask is None:
                 return {
-                    "error": f"Failed to load nuclei mask: {nuclei_mask}",
-                    "summary": "Mask loading failed"
+                    "error": f"Failed to load segmentation mask: {nuclei_mask}",
+                    "summary": "Mask loading failed. Please provide a valid mask from Nuclei_Segmenter_Tool, Cell_Segmenter_Tool, or Organoid_Segmenter_Tool."
                 }
             
             # Setup output directory
@@ -464,7 +469,8 @@ if __name__ == "__main__":
         # This would require actual image and mask files
         print("\nTool initialized successfully. Ready for execution.")
         print("Example usage:")
-        print("execution = tool.execute(original_image='path/to/brightfield.tif', nuclei_mask='path/to/nuclei_mask.png')")
+        print("execution = tool.execute(original_image='path/to/image.tif', nuclei_mask='path/to/mask.png')")
+        print("Note: nuclei_mask parameter accepts any segmentation mask: nuclei_mask, cell_mask, or organoid_mask")
         
     except Exception as e:
         print(f"Error during tool initialization: {e}") 

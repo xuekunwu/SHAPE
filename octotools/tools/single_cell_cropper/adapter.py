@@ -5,7 +5,7 @@ from octotools.models.tool_adapter import ToolAdapter
 
 class InputModel(BaseModel):
     original_image: str = Field(..., description="Path to original image")
-    nuclei_mask: str = Field(..., description="Path to nuclei mask")
+    nuclei_mask: str = Field(..., description="Path to segmentation mask (accepts nuclei_mask, cell_mask, or organoid_mask from segmentation tools)")
     min_area: int | None = None
     margin: int | None = None
     output_format: str | None = None
