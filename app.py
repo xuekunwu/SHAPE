@@ -440,8 +440,39 @@ def add_image_to_group(group_name: str, user_image, state: "AgentState", images_
             continue
 
         feature_path = encode_image_features(str(image_path), features_dir / group)
+        # Extract original image name from upload_path_map or image path
+        image_name = None
+        # Try to find in upload_path_map by matching paths
+        if state.upload_path_map:
+            img_source_path = None
+            if isinstance(img, dict) and 'path' in img:
+                img_source_path = img['path']
+            elif isinstance(img, str):
+                img_source_path = img
+            
+            if img_source_path:
+                # Normalize paths for comparison
+                img_source_path_norm = os.path.normpath(str(img_source_path))
+                for orig_name, orig_path in state.upload_path_map.items():
+                    orig_path_norm = os.path.normpath(str(orig_path))
+                    if orig_path_norm == img_source_path_norm:
+                        image_name = os.path.splitext(orig_name)[0]  # Remove extension
+                        break
+        
+        # If not found in upload_path_map, extract from source path
+        if not image_name:
+            if isinstance(img, dict) and 'path' in img:
+                image_name = os.path.splitext(os.path.basename(img['path']))[0]
+            elif isinstance(img, str):
+                image_name = os.path.splitext(os.path.basename(img))[0]
+        
+        # Sanitize image_name for use in filenames (keep only alphanumeric, dash, underscore)
+        if image_name:
+            image_name = "".join(c for c in image_name if c.isalnum() or c in ('-', '_'))[:50]
+        
         entry = {
             "image_id": image_id,
+            "image_name": image_name,  # Store original image name for consistent naming
             "image_path": str(image_path),
             "fingerprint": fingerprint,
             "features_path": feature_path
@@ -1062,12 +1093,15 @@ class Solver:
                     ))
                     print(f"Reused cached artifact for {tool_name} (key={artifact_key}, source={cache_source})")
                 else:
-                    # Pass image_id for consistent file naming
+                    # Pass image_id and image_name for consistent file naming
                     image_id = img_item.get("image_id")
+                    image_name = img_item.get("image_name")  # Use original image name if available
+                    # Prefer image_name over image_id for file naming (more readable)
+                    identifier_for_naming = image_name if image_name else image_id
                     tool_command = self.executor.generate_tool_command(
                         user_query, safe_path, context, sub_goal, 
                         self.planner.toolbox_metadata[tool_name], self.memory, 
-                        conversation_context=conversation_text, image_id=image_id
+                        conversation_context=conversation_text, image_id=identifier_for_naming
                     )
                     analysis, explanation, command = self.executor.extract_explanation_and_command(tool_command)
                     result = self.executor.execute_tool_command(tool_name, command)

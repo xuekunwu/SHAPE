@@ -303,9 +303,18 @@ Instructions:
    - Outcomes from previous steps
    - Current step count and remaining steps
 
-3. Select ONE tool best suited for the next step, keeping in mind the limited number of remaining steps.
+3. Tool Selection Priority (CRITICAL):
+   - FIRST: Use specific tools that directly address the query (e.g., Nuclei_Segmenter_Tool, Image_Preprocessor_Tool, Analysis_Visualizer_Tool)
+   - SECOND: Use specialized analysis tools (e.g., Fibroblast_State_Analyzer_Tool, Object_Detector_Tool)
+   - LAST RESORT ONLY: Use Generalist_Solution_Generator_Tool or Python_Code_Generator_Tool ONLY when:
+     * No other specific tool can solve the query
+     * The query requires custom code generation that cannot be done by existing tools
+     * All other options have been exhausted
+   - AVOID using Generalist_Solution_Generator_Tool or Python_Code_Generator_Tool if any specific tool can address the query
 
-4. Formulate a specific, achievable sub-goal for the selected tool that maximizes progress towards answering the query.
+4. Select ONE tool best suited for the next step, keeping in mind the limited number of remaining steps.
+
+5. Formulate a specific, achievable sub-goal for the selected tool that maximizes progress towards answering the query.
 
 Output Format:
 <justification>: detailed explanation of why the selected tool is the best choice for the next step, considering the context and previous outcomes.
@@ -426,19 +435,20 @@ Detailed Instructions:
 5. Final Determination:
    Based on your thorough analysis, decide if the memory is complete and accurate enough to generate the final output, or if additional tool usage is necessary.
    
-   CRITICAL CHECKLIST FOR STOPPING:
-   - Has the query been fully answered with actual analysis results?
-   - Are there analysis results with visualizations, distributions, or statistics?
-   - Does the current state represent the final analysis, or just intermediate data preparation?
-   - If the query asked for analysis and analysis results are present, STOP.
-   - If the query asked for classification and classification results are present, STOP.
-   - If the query asked for detection and detection results are present, STOP.
-   - Only continue if there are UNANSWERED aspects of the query that require additional tools.
+   CRITICAL CHECKLIST FOR STOPPING (PRIORITY: Stop early if query is satisfied):
+   - Has the MAIN query been answered? If yes, STOP immediately.
+   - Are there analysis results, visualizations, counts, or statistics that answer the query? If yes, STOP.
+   - If the query asked for "compare", "count", "analyze", "detect" and you have those results, STOP.
+   - If the query asked for specific outputs (charts, counts, comparisons) and they exist, STOP.
+   - DO NOT continue just because there are unused tools available.
+   - DO NOT use Generalist_Solution_Generator_Tool or Python_Code_Generator_Tool unless NO other tools can solve the query.
+   - STOP if the query is satisfied, even if some tools haven't been used.
 
-   CRITICAL CHECKLIST FOR CONTINUING:
-   - Are there UNANSWERED parts of the query that require additional tools?
-   - Is the current state only data preparation without actual analysis?
-   - Are there analysis tools available that could provide insights from prepared data AND the query specifically asks for such analysis?
+   CRITICAL CHECKLIST FOR CONTINUING (Only continue if query is NOT satisfied):
+   - Is the MAIN query still UNANSWERED?
+   - Are there UNANSWERED parts that require specific tools (not generalist/code generators)?
+   - Is the current state only data preparation without the requested analysis?
+   - Only continue if the query specifically requires additional tools AND those tools are NOT Generalist_Solution_Generator_Tool or Python_Code_Generator_Tool (use these only as last resort).
 
 Response Format:
 You MUST respond with exactly two fields:
