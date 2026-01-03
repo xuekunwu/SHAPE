@@ -565,16 +565,35 @@ Remember: Your <command> field MUST be valid Python code including any necessary
                     except Exception:
                         pass
 
-        # Import the tool module and instantiate it
-        module_name = f"tools.{tool_name.lower().replace('_tool', '')}.tool"
+        # Import the tool module and instantiate it (lazy loading)
+        # Try to get tool class from initializer cache first if available
+        tool_class = None
+        if self.initializer and hasattr(self.initializer, '_tool_classes_cache'):
+            tool_class = self.initializer._tool_classes_cache.get(tool_name)
+        
+        if tool_class is None:
+            # Fallback: load tool class directly using Initializer's helper method
+            if self.initializer:
+                try:
+                    tool_class = self.initializer._load_tool_class_only(tool_name)
+                except Exception:
+                    pass
+            
+            if tool_class is None:
+                # Final fallback: manual loading
+                tool_dir_parts = tool_name.replace('_Tool', '').split('_')
+                tool_dir = '_'.join([p.lower() for p in tool_dir_parts])
+                module_name = f"octotools.tools.{tool_dir}.tool"
+                try:
+                    module = importlib.import_module(module_name)
+                    tool_class = getattr(module, tool_name)
+                except (ImportError, AttributeError):
+                    # Alternative path: try direct import
+                    module_name = f"tools.{tool_dir}.tool"
+                    module = importlib.import_module(module_name)
+                    tool_class = getattr(module, tool_name)
         
         try:
-            # Dynamically import the module
-            module = importlib.import_module(module_name)
-
-            # Get the tool class
-            tool_class = getattr(module, tool_name)
-
             # Check if the tool requires an LLM engine or API key
             inputs = {}
             if getattr(tool_class, 'require_llm_engine', False):
@@ -582,6 +601,7 @@ Remember: Your <command> field MUST be valid Python code including any necessary
             if getattr(tool_class, 'require_api_key', False):
                 inputs['api_key'] = self.api_key
             
+            # Instantiate tool (lazy loading - only when actually called)
             tool = tool_class(**inputs)
             
             # Set the custom output directory

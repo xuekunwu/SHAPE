@@ -14,6 +14,8 @@ class Initializer:
         self.enabled_tools = enabled_tools
         self.model_string = model_string # llm model string
         self.api_key = api_key
+        self._tool_classes_cache = {}  # Cache tool classes without instantiation
+        self._tool_metadata_cache = {}  # Cache metadata for loaded tools
 
         print("\nInitializing OctoTools...")
         print(f"Enabled tools: {self.enabled_tools}")
@@ -81,8 +83,60 @@ class Initializer:
             f"Available classes ending with '_Tool': {available_classes}"
         )
 
+    def _load_tool_class_only(self, tool_class_name: str):
+        """Load tool class without instantiation. Returns tool class or None."""
+        if tool_class_name in self._tool_classes_cache:
+            return self._tool_classes_cache[tool_class_name]
+        
+        try:
+            tool_dir = self.class_name_to_dir(tool_class_name)
+            module_name = f"octotools.tools.{tool_dir}.tool"
+            module = importlib.import_module(module_name)
+            tool_class = self._find_tool_class(module, tool_class_name)
+            self._tool_classes_cache[tool_class_name] = tool_class
+            return tool_class
+        except Exception as e:
+            print(f"Error loading tool class {tool_class_name}: {str(e)}")
+            return None
+    
+    def get_tool_metadata(self, tool_class_name: str) -> Dict[str, Any]:
+        """Get tool metadata with lazy loading (instantiate only when needed)."""
+        # Check cache first
+        if tool_class_name in self._tool_metadata_cache:
+            return self._tool_metadata_cache[tool_class_name]
+        
+        # Load tool class if not cached
+        tool_class = self._load_tool_class_only(tool_class_name)
+        if tool_class is None:
+            return {}
+        
+        # Instantiate tool to get metadata (only when needed)
+        try:
+            inputs = {}
+            if hasattr(tool_class, 'require_llm_engine') and tool_class.require_llm_engine:
+                inputs['model_string'] = self.model_string
+            if hasattr(tool_class, 'require_api_key') and tool_class.require_api_key:
+                inputs['api_key'] = self.api_key
+            tool_instance = tool_class(**inputs)
+            metadata = {
+                'tool_name': getattr(tool_instance, 'tool_name', 'Unknown'),
+                'tool_description': getattr(tool_instance, 'tool_description', 'No description'),
+                'tool_version': getattr(tool_instance, 'tool_version', 'Unknown'),
+                'input_types': getattr(tool_instance, 'input_types', {}),
+                'output_type': getattr(tool_instance, 'output_type', 'Unknown'),
+                'demo_commands': getattr(tool_instance, 'demo_commands', []),
+                'user_metadata': getattr(tool_instance, 'user_metadata', {}),
+                'require_llm_engine': getattr(tool_class, 'require_llm_engine', False),
+            }
+            self._tool_metadata_cache[tool_class_name] = metadata
+            return metadata
+        except Exception as e:
+            print(f"Error instantiating tool {tool_class_name} for metadata: {str(e)}")
+            return {}
+    
     def load_tools_and_get_metadata(self) -> Dict[str, Any]:
-        print("Loading tools and getting metadata...")
+        """Load tool classes (without instantiation) and get metadata on demand."""
+        print("Loading tools (lazy loading - no instantiation)...")
         self.toolbox_metadata = {}
         octotools_dir = self.get_project_root()
         tools_dir = os.path.join(octotools_dir, 'tools')
@@ -90,64 +144,44 @@ class Initializer:
         print(f"Tools directory: {tools_dir}")
         sys.path.insert(0, octotools_dir)
         sys.path.insert(0, os.path.dirname(octotools_dir))
-        print(f"Updated Python path: {sys.path}")
+        
         if not os.path.exists(tools_dir):
             print(f"Error: Tools directory does not exist: {tools_dir}")
             return self.toolbox_metadata
+        
+        # Only load tool classes, do not instantiate
         for tool_class_name in self.enabled_tools:
             tool_dir = self.class_name_to_dir(tool_class_name)
             module_name = f"octotools.tools.{tool_dir}.tool"
             print(f"Attempting to import: {module_name}")
             try:
-                module = importlib.import_module(module_name)
-                tool_class = self._find_tool_class(module, tool_class_name)
-                # 实例化工具
-                inputs = {}
-                if hasattr(tool_class, 'require_llm_engine') and tool_class.require_llm_engine:
-                    inputs['model_string'] = self.model_string
-                if hasattr(tool_class, 'require_api_key') and tool_class.require_api_key:
-                    inputs['api_key'] = self.api_key
-                tool_instance = tool_class(**inputs)
-                self.toolbox_metadata[tool_class_name] = {
-                    'tool_name': getattr(tool_instance, 'tool_name', 'Unknown'),
-                    'tool_description': getattr(tool_instance, 'tool_description', 'No description'),
-                    'tool_version': getattr(tool_instance, 'tool_version', 'Unknown'),
-                    'input_types': getattr(tool_instance, 'input_types', {}),
-                    'output_type': getattr(tool_instance, 'output_type', 'Unknown'),
-                    'demo_commands': getattr(tool_instance, 'demo_commands', []),
-                    'user_metadata': getattr(tool_instance, 'user_metadata', {}),
-                    'require_llm_engine': getattr(tool_class, 'require_llm_engine', False),
-                }
-                print(f"\nMetadata for {tool_class_name}: {self.toolbox_metadata[tool_class_name]}")
+                tool_class = self._load_tool_class_only(tool_class_name)
+                if tool_class:
+                    # For Planner, we need metadata. Load it on demand
+                    # Store a placeholder that will be loaded when needed
+                    self.toolbox_metadata[tool_class_name] = None  # Will be loaded on demand
+                    print(f"✓ Tool class {tool_class_name} loaded (not instantiated)")
             except Exception as e:
                 print(f"Error loading tool {tool_class_name}: {str(e)}")
-        print(f"\nTotal number of tools loaded: {len(self.toolbox_metadata)}")
+        
+        print(f"\nTotal number of tool classes loaded: {len(self.toolbox_metadata)}")
         return self.toolbox_metadata
 
     def run_demo_commands(self) -> List[str]:
-        print("\nRunning demo commands for each tool...")
+        """Verify tools are available (without instantiation)."""
+        print("\nVerifying tool availability (no instantiation)...")
         self.available_tools = []
         for tool_class_name in self.enabled_tools:
             print(f"\nChecking availability of {tool_class_name}...")
             try:
-                tool_dir = self.class_name_to_dir(tool_class_name)
-                module_name = f"octotools.tools.{tool_dir}.tool"
-                print(f"Attempting to import: {module_name}")
-                module = importlib.import_module(module_name)
-                tool_class = self._find_tool_class(module, tool_class_name)
-                # 实例化工具
-                inputs = {}
-                if hasattr(tool_class, 'require_llm_engine') and tool_class.require_llm_engine:
-                    inputs['model_string'] = self.model_string
-                if hasattr(tool_class, 'require_api_key') and tool_class.require_api_key:
-                    inputs['api_key'] = self.api_key
-                tool_instance = tool_class(**inputs)
-                self.available_tools.append(tool_class_name)
+                tool_class = self._load_tool_class_only(tool_class_name)
+                if tool_class:
+                    self.available_tools.append(tool_class_name)
+                    print(f"✓ Tool {tool_class_name} is available")
             except Exception as e:
                 print(f"Error checking availability of {tool_class_name}: {str(e)}")
                 print(traceback.format_exc())
-        self.toolbox_metadata = {tool: self.toolbox_metadata[tool] for tool in self.available_tools if tool in self.toolbox_metadata}
-        print(f"\nUpdated total number of available tools: {len(self.toolbox_metadata)}")
+        print(f"\nUpdated total number of available tools: {len(self.available_tools)}")
         print(f"\nAvailable tools: {self.available_tools}")
         return self.available_tools
     
@@ -170,18 +204,36 @@ class Initializer:
         for tool in self.enabled_tools:
             self.available_tools.append(tool)
 
-        # Load tools and get metadata
+        # Load tool classes (without instantiation)
         self.load_tools_and_get_metadata()
         
-        # Run demo commands to determine available tools
+        # Verify tools are available
         self.run_demo_commands()
         
-        # Filter toolbox_metadata to include only available tools
-        self.toolbox_metadata = {tool: self.toolbox_metadata[tool] for tool in self.available_tools if tool in self.toolbox_metadata}
+        # Initialize metadata placeholders for available tools
+        # Metadata will be loaded on demand when needed by Planner
+        for tool in self.available_tools:
+            if tool not in self.toolbox_metadata:
+                self.toolbox_metadata[tool] = None
         
         print(f"\nTotal number of available tools: {len(self.available_tools)}")
         print(f"Available tools: {self.available_tools}")
         print(f"Enabled tools: {self.enabled_tools}")
+        print("✓ Tools loaded (lazy loading - no instantiation at startup)")
+    
+    def get_toolbox_metadata(self) -> Dict[str, Any]:
+        """Get toolbox metadata with lazy loading. Loads metadata on demand."""
+        # Load metadata for tools that haven't been loaded yet
+        for tool_name in self.available_tools:
+            if tool_name not in self._tool_metadata_cache:
+                # Load metadata for this tool (instantiates on demand)
+                print(f"Loading metadata for {tool_name}...")
+                metadata = self.get_tool_metadata(tool_name)
+                if metadata:
+                    self.toolbox_metadata[tool_name] = metadata
+        
+        # Return only tools that have metadata loaded
+        return {k: v for k, v in self.toolbox_metadata.items() if v is not None}
 
 
 if __name__ == "__main__":
@@ -191,6 +243,7 @@ if __name__ == "__main__":
     print("\nAvailable tools:")
     print(initializer.available_tools)
 
-    print("\nToolbox metadata for available tools:")
-    print(initializer.toolbox_metadata)
+    print("\nToolbox metadata for available tools (lazy loaded):")
+    metadata = initializer.get_toolbox_metadata()
+    print(metadata)
     
