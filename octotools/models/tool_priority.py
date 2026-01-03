@@ -29,12 +29,12 @@ BIOIMAGE_TOOL_PRIORITIES: Dict[str, ToolPriority] = {
     "Fibroblast_Activation_Scorer_Tool": ToolPriority.HIGH,
     "Analysis_Visualizer_Tool": ToolPriority.HIGH,
     
-    # MEDIUM: General image analysis tools
-    "Object_Detector_Tool": ToolPriority.MEDIUM,
-    "Advanced_Object_Detector_Tool": ToolPriority.MEDIUM,
-    "Image_Captioner_Tool": ToolPriority.MEDIUM,
+    # MEDIUM: General image analysis tools (deprecated, moved to LOW)
     
     # LOW: Utility tools and code generation tools (use sparingly)
+    "Object_Detector_Tool": ToolPriority.LOW,
+    "Advanced_Object_Detector_Tool": ToolPriority.LOW,
+    "Image_Captioner_Tool": ToolPriority.LOW,
     "Text_Detector_Tool": ToolPriority.LOW,
     "Python_Code_Generator_Tool": ToolPriority.LOW,
     
@@ -216,8 +216,22 @@ class ToolPriorityManager:
         recommended = []
         used_set = set(used_tools)
         
+        # CRITICAL: If a segmentation tool was just used, prioritize Single_Cell_Cropper_Tool
+        segmentation_tools = ["Cell_Segmenter_Tool", "Nuclei_Segmenter_Tool", "Organoid_Segmenter_Tool"]
+        last_tool = used_tools[-1] if used_tools else None
+        
+        if last_tool in segmentation_tools:
+            # A segmentation tool just completed - Single_Cell_Cropper_Tool must be next
+            if "Single_Cell_Cropper_Tool" in filtered_tools and "Single_Cell_Cropper_Tool" not in used_set:
+                # Put Single_Cell_Cropper_Tool at the top
+                recommended.append("Single_Cell_Cropper_Tool")
+        
         for tool in filtered_tools:
             if tool in used_set:
+                continue
+            
+            # Skip if already added (Single_Cell_Cropper_Tool)
+            if tool in recommended:
                 continue
             
             # Check if dependencies are satisfied
@@ -227,8 +241,15 @@ class ToolPriorityManager:
             elif not deps:  # No dependencies
                 recommended.append(tool)
         
-        # Sort by priority
-        recommended.sort(key=lambda t: (self.get_priority(t).value, t))
+        # Sort by priority (but keep Single_Cell_Cropper_Tool first if segmentation just completed)
+        if last_tool in segmentation_tools and "Single_Cell_Cropper_Tool" in recommended:
+            # Single_Cell_Cropper_Tool is already at the top, sort the rest
+            rest = [t for t in recommended if t != "Single_Cell_Cropper_Tool"]
+            rest.sort(key=lambda t: (self.get_priority(t).value, t))
+            recommended = ["Single_Cell_Cropper_Tool"] + rest
+        else:
+            # Normal sorting
+            recommended.sort(key=lambda t: (self.get_priority(t).value, t))
         
         return recommended
     

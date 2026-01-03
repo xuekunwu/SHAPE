@@ -295,10 +295,21 @@ Please present your analysis in a clear, structured format.
             available_tools, used_tools, self.detected_domain
         )
         
-        # Format recommended tools for prompt (first 5 for brevity)
-        recommended_tools_str = ", ".join(recommended_tools[:5]) if recommended_tools else "None"
-        if len(recommended_tools) > 5:
-            recommended_tools_str += f" (and {len(recommended_tools) - 5} more)"
+        # Format recommended tools for prompt with special emphasis
+        if recommended_tools:
+            first_tool = recommended_tools[0]
+            # If first tool is Single_Cell_Cropper_Tool and last used was a segmentation tool, emphasize it
+            last_tool = used_tools[-1] if used_tools else None
+            segmentation_tools = ["Cell_Segmenter_Tool", "Nuclei_Segmenter_Tool", "Organoid_Segmenter_Tool"]
+            if first_tool == "Single_Cell_Cropper_Tool" and last_tool in segmentation_tools:
+                recommended_tools_str = f"⚡ {first_tool} (MANDATORY - must be next)" + \
+                                      (f", {', '.join(recommended_tools[1:5])}" if len(recommended_tools) > 1 else "")
+            else:
+                recommended_tools_str = ", ".join(recommended_tools[:5])
+            if len(recommended_tools) > 5:
+                recommended_tools_str += f" (and {len(recommended_tools) - 5} more)"
+        else:
+            recommended_tools_str = "None"
         
         prompt_generate_next_step = f"""
 Task: Determine the optimal next step to address the given query based on the provided analysis, available tools, and previous steps taken.
@@ -314,6 +325,14 @@ Available Tools (organized by priority):
 
 Recommended Next Tools (considering dependencies and priorities):
 {recommended_tools_str}
+
+⚠️ CRITICAL CHECK: Look at "Previous Steps and Their Results" above. If the LAST tool executed was:
+   - Cell_Segmenter_Tool, OR
+   - Nuclei_Segmenter_Tool, OR  
+   - Organoid_Segmenter_Tool
+   
+   Then you MUST select Single_Cell_Cropper_Tool as the next tool. This is MANDATORY.
+   Do NOT select any other tool. Do NOT skip this step.
 
 Tool Metadata:
 {toolbox_metadata}
@@ -345,12 +364,11 @@ Instructions:
      * Examples: Image_Preprocessor_Tool, Nuclei_Segmenter_Tool, Cell_Segmenter_Tool, Organoid_Segmenter_Tool,
                 Single_Cell_Cropper_Tool, Cell_State_Analyzer_Tool, Fibroblast_Activation_Scorer_Tool, Analysis_Visualizer_Tool
    
-   - MEDIUM Priority: Use these general-purpose tools when needed
-     * Examples: Object_Detector_Tool, Image_Captioner_Tool
+   - MEDIUM Priority: General-purpose tools (rarely used for bioimage tasks)
    
    - LOW Priority: Use sparingly, only when necessary
      * Utility tools and code generation tools (use only when no other tool can solve the query)
-     * Examples: Text_Detector_Tool, Python_Code_Generator_Tool
+     * Examples: Object_Detector_Tool, Advanced_Object_Detector_Tool, Image_Captioner_Tool, Text_Detector_Tool, Python_Code_Generator_Tool
    
    IMPORTANT: Always prefer tools from higher priority levels (HIGH > MEDIUM > LOW).
    Do NOT use LOW priority code generation tools if any higher-priority tool can address the query.
@@ -363,11 +381,16 @@ Instructions:
            - Cell_Segmenter_Tool (for phase-contrast cell images)
            - Nuclei_Segmenter_Tool (for nuclei/fluorescence images)
            - Organoid_Segmenter_Tool (for organoid images)
-   Step 3: Single_Cell_Cropper_Tool (requires segmentation output from Step 2)
+   Step 3: Single_Cell_Cropper_Tool (REQUIRED - must be called IMMEDIATELY after Step 2)
+          ⚠️ MANDATORY: If a segmentation tool (Cell_Segmenter_Tool, Nuclei_Segmenter_Tool, or Organoid_Segmenter_Tool) 
+          was just executed, you MUST select Single_Cell_Cropper_Tool as the next tool. 
+          Do NOT skip this step. Do NOT select any other tool.
    Step 4: Cell_State_Analyzer_Tool (requires single-cell crops from Step 3)
    
    This chain MUST be followed in order: Image_Preprocessor → Segmenter → Single_Cell_Cropper → Cell_State_Analyzer
    Do NOT skip steps or use tools out of order.
+   
+   CRITICAL RULE: When a segmentation tool completes, the next tool MUST be Single_Cell_Cropper_Tool.
 
 5. Check Tool Dependencies:
    Some tools require other tools to run first:
