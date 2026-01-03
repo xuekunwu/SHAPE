@@ -132,7 +132,7 @@ class Cell_Segmenter_Tool(BaseTool):
                 try:
                     model_path = hf_hub_download(
                         repo_id="5xuekun/cell-segmenter-cpsam-model",
-                        filename="cellpose-sam",
+                        filename="cpsam",
                         token=os.getenv("HUGGINGFACE_TOKEN")
                     )
                     self.model = models.CellposeModel(
