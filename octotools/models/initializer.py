@@ -41,6 +41,16 @@ class Initializer:
 
     def dir_to_class_name(self, dir_name: str) -> str:
         # 目录名转为类名（如fibroblast_activation_scorer -> Fibroblast_Activation_Scorer_Tool）
+        # Special cases: handle tools with non-standard capitalization
+        special_cases = {
+            'url_text_extractor': 'URL_Text_Extractor_Tool',  # URL is all uppercase
+            'arxiv_paper_searcher': 'ArXiv_Paper_Searcher_Tool',  # ArXiv is mixed case
+        }
+        
+        if dir_name in special_cases:
+            return special_cases[dir_name]
+        
+        # Standard conversion: snake_case -> Pascal_Case_Tool
         parts = dir_name.split('_')
         class_name = '_'.join([p.capitalize() for p in parts]) + '_Tool'
         return class_name
@@ -48,8 +58,8 @@ class Initializer:
     def _find_tool_class(self, module, expected_class_name: str):
         """
         Try to find the tool class in the module, handling case variations.
-        For example, if expected_class_name is 'Url_Text_Extractor_Tool', 
-        it will try 'URL_Text_Extractor_Tool' as well.
+        For example, if expected_class_name is 'URL_Text_Extractor_Tool', 
+        it will try 'Url_Text_Extractor_Tool' as well (for backwards compatibility).
         """
         # First try the exact name
         if hasattr(module, expected_class_name):

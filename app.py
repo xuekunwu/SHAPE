@@ -59,8 +59,18 @@ def get_available_tools() -> List[str]:
             continue
         
         if os.path.isfile(os.path.join(tool_dir, 'tool.py')):
-            parts = item.split('_')
-            class_name = '_'.join([p.capitalize() for p in parts]) + '_Tool'
+            # Special cases: handle tools with non-standard capitalization
+            special_cases = {
+                'url_text_extractor': 'URL_Text_Extractor_Tool',  # URL is all uppercase
+                'arxiv_paper_searcher': 'ArXiv_Paper_Searcher_Tool',  # ArXiv is mixed case
+            }
+            
+            if item in special_cases:
+                class_name = special_cases[item]
+            else:
+                # Standard conversion: snake_case -> Pascal_Case_Tool
+                parts = item.split('_')
+                class_name = '_'.join([p.capitalize() for p in parts]) + '_Tool'
             tools.append(class_name)
     
     tools.sort()

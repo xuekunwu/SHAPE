@@ -42,10 +42,10 @@ BIOIMAGE_TOOL_PRIORITIES: Dict[str, ToolPriority] = {
     "Generalist_Solution_Generator_Tool": ToolPriority.EXCLUDED,  # Not useful, excluded
     "Google_Search_Tool": ToolPriority.EXCLUDED,
     "Pubmed_Search_Tool": ToolPriority.EXCLUDED,
-    "Arxiv_Paper_Searcher_Tool": ToolPriority.EXCLUDED,
+    "ArXiv_Paper_Searcher_Tool": ToolPriority.EXCLUDED,  # Note: ArXiv is mixed case (as defined in tool class)
     "Nature_News_Fetcher_Tool": ToolPriority.EXCLUDED,
     "Wikipedia_Knowledge_Searcher_Tool": ToolPriority.EXCLUDED,
-    "Url_Text_Extractor_Tool": ToolPriority.EXCLUDED,
+    "URL_Text_Extractor_Tool": ToolPriority.EXCLUDED,  # Note: URL is all uppercase (as defined in tool class)
     "Relevant_Patch_Zoomer_Tool": ToolPriority.EXCLUDED,  # Not suitable for bioimages
 }
 

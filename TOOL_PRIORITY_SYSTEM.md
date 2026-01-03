@@ -25,7 +25,7 @@ A comprehensive priority system that categorizes tools based on their relevance 
 
 - **EXCLUDED (99)**: Tools not relevant for bioimage analysis
   - All search tools (Google_Search_Tool, Pubmed_Search_Tool, etc.)
-  - Text extraction tools (Url_Text_Extractor_Tool)
+  - Text extraction tools (URL_Text_Extractor_Tool)
   - `Relevant_Patch_Zoomer_Tool` (not suitable for bioimages)
 
 #### Key Features
