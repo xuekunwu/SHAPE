@@ -133,8 +133,10 @@ else:
         execution = {"error": "Failed to load metadata: " + str(e), "status": "failed"}"""
             )
         
-        # Special handling for Nuclei_Segmenter_Tool to use processed image from Image_Preprocessor_Tool
-        if tool_name == "Nuclei_Segmenter_Tool" and previous_outputs and 'processed_image_path' in previous_outputs:
+        # Special handling for segmentation tools (Nuclei_Segmenter_Tool, Cell_Segmenter_Tool, Organoid_Segmenter_Tool) 
+        # to use processed image from Image_Preprocessor_Tool
+        segmentation_tools = ["Nuclei_Segmenter_Tool", "Cell_Segmenter_Tool", "Organoid_Segmenter_Tool"]
+        if tool_name in segmentation_tools and previous_outputs and 'processed_image_path' in previous_outputs:
             processed_image_path = previous_outputs['processed_image_path']
             # Normalize path for cross-platform compatibility
             import os
@@ -148,32 +150,57 @@ else:
                 safe_processed_path = processed_image_path.replace("\\", "\\\\")
                 # Include image_id if available for consistent naming
                 image_id_param = f', image_id="{image_id}"' if image_id else ''
+                tool_label = "nuclei segmentation" if tool_name == "Nuclei_Segmenter_Tool" else \
+                             "cell segmentation" if tool_name == "Cell_Segmenter_Tool" else \
+                             "organoid segmentation"
                 return ToolCommand(
-                    analysis="Using the processed image from Image_Preprocessor_Tool for nuclei segmentation",
+                    analysis=f"Using the processed image from Image_Preprocessor_Tool for {tool_label}",
                     explanation=f"Using the processed image path '{processed_image_path}' from the previous Image_Preprocessor_Tool step",
                     command=f"""execution = tool.execute(image="{safe_processed_path}"{image_id_param})"""
                 )
         
-        # Special handling for Single_Cell_Cropper_Tool to use nuclei mask from Nuclei_Segmenter_Tool
+        # Special handling for Single_Cell_Cropper_Tool to use mask from segmentation tools
+        # Supports masks from Nuclei_Segmenter_Tool, Cell_Segmenter_Tool, and Organoid_Segmenter_Tool
         if tool_name == "Single_Cell_Cropper_Tool" and previous_outputs and 'visual_outputs' in previous_outputs:
-            # Find nuclei mask file from previous outputs
-            nuclei_mask_path = None
-            print(f"DEBUG: Looking for nuclei mask in previous outputs: {previous_outputs['visual_outputs']}")
+            # Find mask file from previous outputs (support nuclei_mask, cell_mask, organoid_mask)
+            mask_path = None
+            mask_type = None
+            print(f"DEBUG: Looking for mask in previous outputs: {previous_outputs['visual_outputs']}")
             for output_path in previous_outputs['visual_outputs']:
                 print(f"DEBUG: Checking output path: {output_path}")
-                if 'nuclei_mask' in output_path and output_path.endswith('.png') and 'viz' not in output_path:
-                    nuclei_mask_path = output_path
-                    print(f"DEBUG: Found nuclei mask path: {nuclei_mask_path}")
-                    break
+                # Check for various mask types
+                if output_path.endswith('.png') and 'viz' not in output_path:
+                    if 'nuclei_mask' in output_path:
+                        mask_path = output_path
+                        mask_type = "nuclei_mask"
+                        print(f"DEBUG: Found nuclei mask path: {mask_path}")
+                        break
+                    elif 'cell_mask' in output_path:
+                        mask_path = output_path
+                        mask_type = "nuclei_mask"  # Use same parameter name for compatibility
+                        print(f"DEBUG: Found cell mask path: {mask_path}")
+                        break
+                    elif 'organoid_mask' in output_path:
+                        mask_path = output_path
+                        mask_type = "nuclei_mask"  # Use same parameter name for compatibility
+                        print(f"DEBUG: Found organoid mask path: {mask_path}")
+                        break
             
-            if nuclei_mask_path:
+            if mask_path:
+                source_tool = "segmentation tool"
+                if 'nuclei_mask' in mask_path:
+                    source_tool = "Nuclei_Segmenter_Tool"
+                elif 'cell_mask' in mask_path:
+                    source_tool = "Cell_Segmenter_Tool"
+                elif 'organoid_mask' in mask_path:
+                    source_tool = "Organoid_Segmenter_Tool"
                 return ToolCommand(
-                    analysis="Using the nuclei mask from Nuclei_Segmenter_Tool for single cell cropping",
-                    explanation=f"Using the nuclei mask path '{nuclei_mask_path}' from the previous Nuclei_Segmenter_Tool step",
-                    command=f"""execution = tool.execute(original_image="{actual_image_path}", nuclei_mask="{nuclei_mask_path}", min_area=50, margin=25)"""
+                    analysis=f"Using the mask from {source_tool} for single cell cropping",
+                    explanation=f"Using the mask path '{mask_path}' from the previous {source_tool} step",
+                    command=f"""execution = tool.execute(original_image="{actual_image_path}", nuclei_mask="{mask_path}", min_area=50, margin=25)"""
                 )
             else:
-                print(f"DEBUG: No nuclei mask found in previous outputs: {previous_outputs['visual_outputs']}")
+                print(f"DEBUG: No mask found in previous outputs: {previous_outputs['visual_outputs']}")
                 # Fallback to standard command generation
                 pass
         
@@ -194,7 +221,7 @@ Tool Metadata: {tool_metadata}
 Previous Tool Outputs (summary only, file paths available for tool chaining): {previous_outputs_for_llm}
 
 IMPORTANT: When the tool requires an image parameter, you MUST use the exact image path provided above: "{safe_path}"
-{"IMPORTANT: Both Nuclei_Segmenter_Tool and Image_Preprocessor_Tool accept the image_id parameter for consistent file naming and tracking. Include image_id parameter when available for these tools." if image_id else ""}
+{"IMPORTANT: Nuclei_Segmenter_Tool, Cell_Segmenter_Tool, Organoid_Segmenter_Tool, and Image_Preprocessor_Tool accept the image_id parameter for consistent file naming and tracking. Include image_id parameter when available for these tools." if image_id else ""}
 
 CRITICAL TOOL DEPENDENCY RULES:
 - Fibroblast_Activation_Scorer_Tool MUST use the h5ad file output from Fibroblast_State_Analyzer_Tool

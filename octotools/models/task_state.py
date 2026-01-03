@@ -175,6 +175,8 @@ TOOL_STAGE_REGISTRY: Dict[str, ToolStage] = {
     # Stage 1: Image-level tools
     "Image_Preprocessor_Tool": ToolStage.STAGE_1_IMAGE_LEVEL,
     "Nuclei_Segmenter_Tool": ToolStage.STAGE_1_IMAGE_LEVEL,
+    "Cell_Segmenter_Tool": ToolStage.STAGE_1_IMAGE_LEVEL,  # For phase-contrast cell images
+    "Organoid_Segmenter_Tool": ToolStage.STAGE_1_IMAGE_LEVEL,  # For organoid segmentation
     "Object_Detector_Tool": ToolStage.STAGE_1_IMAGE_LEVEL,
     "Advanced_Object_Detector_Tool": ToolStage.STAGE_1_IMAGE_LEVEL,
     "Image_Captioner_Tool": ToolStage.STAGE_1_IMAGE_LEVEL,

@@ -22,6 +22,8 @@ BIOIMAGE_TOOL_PRIORITIES: Dict[str, ToolPriority] = {
     # HIGH: Core image processing, segmentation, and specialized analysis tools
     "Image_Preprocessor_Tool": ToolPriority.HIGH,
     "Nuclei_Segmenter_Tool": ToolPriority.HIGH,
+    "Cell_Segmenter_Tool": ToolPriority.HIGH,  # For phase-contrast cell images
+    "Organoid_Segmenter_Tool": ToolPriority.HIGH,  # For organoid segmentation
     "Single_Cell_Cropper_Tool": ToolPriority.HIGH,
     "Fibroblast_State_Analyzer_Tool": ToolPriority.HIGH,
     "Fibroblast_Activation_Scorer_Tool": ToolPriority.HIGH,
@@ -49,8 +51,8 @@ BIOIMAGE_TOOL_PRIORITIES: Dict[str, ToolPriority] = {
 
 # Tool dependency chains for workflow optimization
 TOOL_DEPENDENCIES: Dict[str, List[str]] = {
-    "Single_Cell_Cropper_Tool": ["Nuclei_Segmenter_Tool"],  # Cropper needs segmentation
-    "Fibroblast_State_Analyzer_Tool": ["Single_Cell_Cropper_Tool", "Nuclei_Segmenter_Tool"],
+    "Single_Cell_Cropper_Tool": ["Nuclei_Segmenter_Tool", "Cell_Segmenter_Tool"],  # Cropper needs segmentation (either nuclei or cell)
+    "Fibroblast_State_Analyzer_Tool": ["Single_Cell_Cropper_Tool", "Nuclei_Segmenter_Tool", "Cell_Segmenter_Tool"],
     "Fibroblast_Activation_Scorer_Tool": ["Fibroblast_State_Analyzer_Tool"],
     "Analysis_Visualizer_Tool": [],  # Can work with any analysis output
 }
@@ -60,7 +62,8 @@ BIOIMAGE_KEYWORDS: Set[str] = {
     'cell', 'nucleus', 'nuclei', 'fibroblast', 'segment', 'crop',
     'microscopy', 'microscope', 'phase contrast', 'fluorescence',
     'single cell', 'cell state', 'activation', 'morphology',
-    'bioimage', 'biological image', 'cell analysis', 'cellular'
+    'bioimage', 'biological image', 'cell analysis', 'cellular',
+    'organoid', 'organoids', 'tissue', 'spheroid', 'spheroids'
 }
 
 SEARCH_KEYWORDS: Set[str] = {

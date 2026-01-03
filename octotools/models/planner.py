@@ -249,7 +249,8 @@ Please present your analysis in a clear, structured format.
         
         # Check if bioimage tools have been used
         bioimage_tools = [
-            'Nuclei_Segmenter_Tool', 'Single_Cell_Cropper_Tool',
+            'Nuclei_Segmenter_Tool', 'Cell_Segmenter_Tool', 'Organoid_Segmenter_Tool',
+            'Single_Cell_Cropper_Tool',
             'Fibroblast_State_Analyzer_Tool', 'Fibroblast_Activation_Scorer_Tool',
             'Image_Preprocessor_Tool'
         ]
@@ -341,8 +342,8 @@ Instructions:
    
    - HIGH Priority: Use these tools FIRST if they are relevant to the query
      * Core tools for bioimage analysis and specialized analysis tools
-     * Examples: Image_Preprocessor_Tool, Nuclei_Segmenter_Tool, Single_Cell_Cropper_Tool, 
-                Fibroblast_State_Analyzer_Tool, Fibroblast_Activation_Scorer_Tool, Analysis_Visualizer_Tool
+     * Examples: Image_Preprocessor_Tool, Nuclei_Segmenter_Tool, Cell_Segmenter_Tool, Organoid_Segmenter_Tool,
+                Single_Cell_Cropper_Tool, Fibroblast_State_Analyzer_Tool, Fibroblast_Activation_Scorer_Tool, Analysis_Visualizer_Tool
    
    - MEDIUM Priority: Use these general-purpose tools when needed
      * Examples: Object_Detector_Tool, Image_Captioner_Tool
@@ -356,8 +357,8 @@ Instructions:
 
 4. Check Tool Dependencies:
    Some tools require other tools to run first:
-   - Single_Cell_Cropper_Tool requires Nuclei_Segmenter_Tool
-   - Fibroblast_State_Analyzer_Tool requires Single_Cell_Cropper_Tool or Nuclei_Segmenter_Tool
+   - Single_Cell_Cropper_Tool requires Nuclei_Segmenter_Tool, Cell_Segmenter_Tool, or Organoid_Segmenter_Tool
+   - Fibroblast_State_Analyzer_Tool requires Single_Cell_Cropper_Tool or a segmentation tool (Nuclei_Segmenter_Tool, Cell_Segmenter_Tool, or Organoid_Segmenter_Tool)
    - Fibroblast_Activation_Scorer_Tool requires Fibroblast_State_Analyzer_Tool
    
    Ensure all dependencies are satisfied before selecting a tool.

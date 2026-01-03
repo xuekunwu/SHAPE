@@ -23,7 +23,7 @@ git add .
 # Commit
 Write-Host "💾 Committing changes..." -ForegroundColor Yellow
 $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-git commit -m "Update: SHAPE with analysis visualizer and optimizations - $timestamp"
+git commit -m "Add Cell_Segmenter_Tool and Organoid_Segmenter_Tool for general cell types and organoids - $timestamp"
 
 # Force push
 Write-Host ""
