@@ -50,59 +50,126 @@ class Organoid_Segmenter_Tool(BaseTool):
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         print(f"Organoid_Segmenter_Tool: Using device: {self.device}")
         
-        # Download custom organoid model from Hugging Face Hub - REQUIRED
-        if model_path is None:
-            # Try to load custom organoid model from Hugging Face
+        # Store model path for lazy loading (model will be loaded in execute method)
+        # This avoids initialization failures due to CP3/CP4 compatibility issues
+        self.model_path = model_path
+        self.model = None  # Will be loaded on first execute
+        self.model_type = "organoid"
+        self._model_loaded = False
+        self._model_load_error = None
+        
+        # If model_path is provided, validate it exists but don't load yet
+        if model_path is not None:
+            if not os.path.exists(model_path):
+                print(f"Organoid_Segmenter_Tool: Warning - provided model_path does not exist: {model_path}")
+        else:
+            # Try to download model path (but don't load yet)
             try:
-                # You'll need to update this with your actual repo ID after uploading
-                model_path = hf_hub_download(
-                    repo_id="5xuekun/organoid-segmenter-model",  # UPDATE THIS after uploading your model
-                    filename="CO_4x_V2",  # UPDATE THIS with actual filename
+                self.model_path = hf_hub_download(
+                    repo_id="5xuekun/organoid-segmenter-model",
+                    filename="CO_4x_V2",
                     token=os.getenv("HUGGINGFACE_TOKEN")
                 )
-                print(f"Organoid_Segmenter_Tool: Custom organoid model downloaded to {model_path}")
+                print(f"Organoid_Segmenter_Tool: Custom organoid model path determined: {self.model_path}")
+            except Exception as e:
+                print(f"Organoid_Segmenter_Tool: Could not determine model path at initialization: {e}")
+                print(f"Organoid_Segmenter_Tool: Model will be downloaded when first used (in execute method)")
+    
+    def _load_model(self, model_path=None):
+        """Load the organoid model (lazy loading)."""
+        if self._model_loaded and self.model is not None:
+            return
+        
+        # Use provided model_path or fallback to stored one
+        model_to_load = model_path or self.model_path
+        
+        # If still no path, try to download
+        if model_to_load is None:
+            try:
+                model_to_load = hf_hub_download(
+                    repo_id="5xuekun/organoid-segmenter-model",
+                    filename="CO_4x_V2",
+                    token=os.getenv("HUGGINGFACE_TOKEN")
+                )
+                self.model_path = model_to_load
+                print(f"Organoid_Segmenter_Tool: Downloaded model to {model_to_load}")
             except Exception as e:
                 error_msg = (
-                    f"Organoid_Segmenter_Tool: Failed to download organoid model from Hugging Face: {e}\n"
+                    f"Organoid_Segmenter_Tool: Failed to download organoid model: {e}\n"
                     f"ERROR: Organoid segmentation REQUIRES a specialized organoid model.\n"
                     f"Standard Cellpose models (cyto/cyto2) are NOT suitable for organoids.\n"
                     f"Please upload your trained organoid model to Hugging Face following MODEL_UPLOAD_GUIDE.md,\n"
                     f"or provide a model_path parameter with the path to your organoid model."
                 )
-                print(error_msg)
+                self._model_load_error = error_msg
                 raise ValueError(error_msg)
         
         try:
             # Load custom organoid model from path
             self.model = models.CellposeModel(
                 gpu=torch.cuda.is_available(), 
-                pretrained_model=model_path
+                pretrained_model=model_to_load
             )
-            self.model_type = "organoid"
-            self.model_path = model_path
+            self.model_path = model_to_load
             
             if self.model is None:
                 raise ValueError("Failed to initialize CellposeModel")
-            print(f"Organoid_Segmenter_Tool: Organoid model initialized successfully from {model_path}")
+            print(f"Organoid_Segmenter_Tool: Organoid model loaded successfully from {model_to_load}")
+            self._model_loaded = True
+            self._model_load_error = None
         except Exception as e:
-            # Retry on CPU if GPU path fails (e.g., NVML issues)
-            try:
-                print(f"Organoid_Segmenter_Tool: GPU init failed ({e}), retrying on CPU")
-                self.device = torch.device('cpu')
-                self.model = models.CellposeModel(
-                    gpu=False,
-                    pretrained_model=model_path
-                )
-                self.model_type = "organoid"
-                self.model_path = model_path
-                print("Organoid_Segmenter_Tool: CPU model initialized successfully")
-            except Exception as cpu_e:
-                error_msg = (
-                    f"Organoid_Segmenter_Tool: Error initializing organoid model even on CPU: {cpu_e}\n"
-                    f"Please ensure the model file is valid and compatible with Cellpose."
-                )
-                print(error_msg)
-                raise ValueError(error_msg)
+            # Check if it's a CP3 compatibility issue
+            error_str = str(e).lower()
+            if "cp3" in error_str or "cp4" in error_str or "not compatible" in error_str:
+                # Retry on CPU (sometimes helps)
+                try:
+                    print(f"Organoid_Segmenter_Tool: GPU load failed (possible CP3 compatibility issue: {e}), retrying on CPU")
+                    self.device = torch.device('cpu')
+                    self.model = models.CellposeModel(
+                        gpu=False,
+                        pretrained_model=model_to_load
+                    )
+                    self.model_path = model_to_load
+                    if self.model is None:
+                        raise ValueError("Failed to initialize CellposeModel on CPU")
+                    print("Organoid_Segmenter_Tool: CPU model loaded successfully")
+                    self._model_loaded = True
+                    self._model_load_error = None
+                except Exception as cpu_e:
+                    error_msg = (
+                        f"Organoid_Segmenter_Tool: Model loading failed on both GPU and CPU: {cpu_e}\n"
+                        f"ERROR: The model appears to be a Cellpose 3 (CP3) model, but Cellpose 4 is installed.\n"
+                        f"Cellpose 4 does not support CP3 models. Solutions:\n"
+                        f"1. Convert your model to CP4 format\n"
+                        f"2. Use Cellpose 3.x instead of Cellpose 4.x (pip install 'cellpose<2.2')\n"
+                        f"3. Train a new model using Cellpose 4\n"
+                        f"Model path: {model_to_load}"
+                    )
+                    self._model_load_error = error_msg
+                    raise ValueError(error_msg)
+            else:
+                # Retry on CPU for other errors
+                try:
+                    print(f"Organoid_Segmenter_Tool: GPU load failed ({e}), retrying on CPU")
+                    self.device = torch.device('cpu')
+                    self.model = models.CellposeModel(
+                        gpu=False,
+                        pretrained_model=model_to_load
+                    )
+                    self.model_path = model_to_load
+                    if self.model is None:
+                        raise ValueError("Failed to initialize CellposeModel on CPU")
+                    print("Organoid_Segmenter_Tool: CPU model loaded successfully")
+                    self._model_loaded = True
+                    self._model_load_error = None
+                except Exception as cpu_e:
+                    error_msg = (
+                        f"Organoid_Segmenter_Tool: Error loading organoid model on both GPU and CPU: {cpu_e}\n"
+                        f"Please ensure the model file is valid and compatible with Cellpose.\n"
+                        f"Model path: {model_to_load}"
+                    )
+                    self._model_load_error = error_msg
+                    raise ValueError(error_msg)
 
     def execute(self, image, diameter=100, flow_threshold=0.4, cellprob_threshold=0, model_path=None, query_cache_dir=None, image_id=None):
         """
@@ -121,21 +188,26 @@ class Organoid_Segmenter_Tool(BaseTool):
             dict: Segmentation results with organoid count and visualization paths
         """
         try:
-            # If model_path is provided and different from current, reload model
+            # Load model if not already loaded (lazy loading)
             if model_path and model_path != self.model_path:
+                # New model path provided, reset and load it
+                self.model = None
+                self._model_loaded = False
+                self.model_path = model_path
+            
+            if not self._model_loaded or self.model is None:
                 try:
-                    # Load the new organoid model
-                    self.model = models.CellposeModel(
-                        gpu=torch.cuda.is_available(),
-                        pretrained_model=model_path
-                    )
-                    self.model_path = model_path
-                    self.model_type = "organoid"
-                    print(f"Organoid_Segmenter_Tool: Loaded organoid model from {model_path}")
-                except Exception as e:
-                    error_msg = f"Organoid_Segmenter_Tool: Could not load organoid model from {model_path}: {e}. Using existing model."
-                    print(error_msg)
-                    # Continue with existing model
+                    self._load_model(model_path)
+                except ValueError as ve:
+                    # Model loading failed, return error
+                    return {
+                        "error": str(ve),
+                        "summary": "Failed to load organoid segmentation model",
+                        "error_details": {
+                            "model_path": model_path or self.model_path,
+                            "error_type": "Model loading failed - possible CP3/CP4 compatibility issue"
+                        }
+                    }
             
             # Normalize path for cross-platform compatibility
             image_path = os.path.normpath(image) if isinstance(image, str) else str(image)
@@ -287,8 +359,11 @@ class Organoid_Segmenter_Tool(BaseTool):
         """Returns the metadata for the Organoid_Segmenter_Tool."""
         metadata = super().get_metadata()
         metadata["device"] = str(self.device)
-        metadata["model_loaded"] = self.model is not None
+        metadata["model_loaded"] = self._model_loaded if hasattr(self, '_model_loaded') else False
         metadata["model_type"] = self.model_type if hasattr(self, 'model_type') else "unknown"
+        metadata["model_path"] = self.model_path if hasattr(self, 'model_path') else None
+        if hasattr(self, '_model_load_error') and self._model_load_error:
+            metadata["model_load_error"] = self._model_load_error
         return metadata
 
 
