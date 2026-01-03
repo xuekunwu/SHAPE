@@ -22,7 +22,7 @@ from typing import List, Dict, Any, Optional, Tuple
 from uuid import uuid4
 import matplotlib.pyplot as plt
 import seaborn as sns
-from huggingface_hub import hf_hub_download
+# No need for hf_hub_download - using transformers.AutoModel instead
 import glob
 import pandas as pd
 from tqdm import tqdm
@@ -112,46 +112,16 @@ class DinoV3Projector(nn.Module):
             "dinov3_vit7b16": 4096,
         }
         
-        # Load backbone from Hugging Face
+        # Load DINOv3 backbone directly from Hugging Face Hub
+        repo_id = "5xuekun/dinov3_vitb16"  # UPDATE THIS with actual repo ID after uploading
+        logger.info(f"Loading DINOv3 backbone from Hugging Face Hub: {repo_id}")
         try:
-            # Try to download and load from Hugging Face
-            repo_id = "5xuekun/dinov3_vitb16"  # UPDATE THIS with actual repo ID after uploading
-            model_path = hf_hub_download(
-                repo_id=repo_id,
-                filename="dinov3_vitl16_pretrain_lvd1689m-8aa4cbdd.pth",  # UPDATE THIS with actual filename after uploading
-                token=os.getenv("HUGGINGFACE_TOKEN")
-            )
-            logger.info(f"Loading DINOv3 backbone from Hugging Face: {model_path}")
-            
-            # Load model architecture - try to load dinov3, fallback to dinov2
-            try:
-                # For dinov3, we'll use dinov2 architecture as base (same architecture)
-                backbone_name_fallback = backbone_name.replace("dinov3", "dinov2")
-                self.backbone = torch.hub.load("facebookresearch/dinov2", backbone_name_fallback, pretrained=True)
-            except:
-                # Fallback: use dinov2_vitb14 if dinov2_vitb16 not available
-                self.backbone = torch.hub.load("facebookresearch/dinov2", "dinov2_vitb14", pretrained=True)
-            
-            # Load pretrained weights from Hugging Face
-            if os.path.exists(model_path):
-                state_dict = torch.load(model_path, map_location="cpu")
-                if "teacher" in state_dict:
-                    state_dict = state_dict["teacher"]
-                self.backbone.load_state_dict(state_dict, strict=False)
-                logger.info("✅ Loaded pretrained DINOv3 weights from Hugging Face")
-            else:
-                logger.warning(f"Model file not found at {model_path}. Using default pretrained weights.")
+            from transformers import AutoModel
+            self.backbone = AutoModel.from_pretrained(repo_id, token=os.getenv("HUGGINGFACE_TOKEN"))
+            logger.info("✅ Loaded DINOv3 model from Hugging Face Hub")
         except Exception as e:
-            logger.warning(f"Failed to load from Hugging Face: {e}. Using default pretrained DINOv2 model.")
-            # Fallback to default torch hub loading (DINOv2)
-            if "dinov3" in backbone_name:
-                backbone_name_fallback = backbone_name.replace("dinov3", "dinov2")
-                try:
-                    self.backbone = torch.hub.load("facebookresearch/dinov2", backbone_name_fallback, pretrained=True)
-                except:
-                    self.backbone = torch.hub.load("facebookresearch/dinov2", "dinov2_vitb14", pretrained=True)
-            else:
-                self.backbone = torch.hub.load("facebookresearch/dinov2", backbone_name, pretrained=True)
+            logger.error(f"Failed to load DINOv3 from Hugging Face Hub: {e}")
+            raise ValueError(f"DINOv3 model loading failed. Please ensure the model is uploaded to Hugging Face Hub at {repo_id}")
         
         feat_dim = feat_dim_map.get(backbone_name, 768)
         self.projector = nn.Sequential(
