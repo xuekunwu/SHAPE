@@ -57,8 +57,8 @@ class Cell_Segmenter_Tool(BaseTool):
             try:
                 # For CPSAM model - you'll need to update this with your actual repo ID after uploading
                 model_path = hf_hub_download(
-                    repo_id="your-username/cell-segmenter-cpsam-model",  # UPDATE THIS after uploading your model
-                    filename="cpsam_model",  # UPDATE THIS with actual filename
+                    repo_id="5xuekun/cell-segmenter-cpsam-model",  # UPDATE THIS after uploading your model
+                    filename="cellpose-sam",  # UPDATE THIS with actual filename
                     token=os.getenv("HUGGINGFACE_TOKEN")
                 )
                 print(f"Cell_Segmenter_Tool: CPSAM model downloaded to {model_path}")
@@ -131,8 +131,8 @@ class Cell_Segmenter_Tool(BaseTool):
                 # Try to reload CPSAM model
                 try:
                     model_path = hf_hub_download(
-                        repo_id="your-username/cell-segmenter-cpsam-model",  # UPDATE THIS
-                        filename="cpsam_model",  # UPDATE THIS
+                        repo_id="5xuekun/cell-segmenter-cpsam-model",
+                        filename="cellpose-sam",
                         token=os.getenv("HUGGINGFACE_TOKEN")
                     )
                     self.model = models.CellposeModel(
