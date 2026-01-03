@@ -160,11 +160,30 @@ Please present your analysis in a clear, structured format.
         return analysis_text
 
     def extract_context_subgoal_and_tool(self, response) -> Tuple[str, str, str]:
-        def normalize_tool_name(tool_name: str) -> str:
+        def normalize_tool_name_local(tool_name: str) -> str:
+            """Local normalization function that uses available_tools from planner."""
+            # Strip any "No matched tool given: " prefix if present (handle recursive calls)
+            clean_name = tool_name
+            if "No matched tool given: " in tool_name:
+                # Handle multiple nested prefixes
+                while "No matched tool given: " in clean_name:
+                    clean_name = clean_name.split("No matched tool given: ")[-1].strip()
+            
+            # First try exact match (case-insensitive)
             for tool in self.available_tools:
-                if tool.lower() in tool_name.lower():
+                if tool.lower() == clean_name.lower():
+                    print(f"planner.normalize_tool_name_local: Exact match found: '{tool_name}' -> '{tool}'")
                     return tool
-            return "No matched tool given: " + tool_name
+            
+            # Then try partial match (tool name contained in the given string)
+            for tool in self.available_tools:
+                if tool.lower() in clean_name.lower() or clean_name.lower() in tool.lower():
+                    print(f"planner.normalize_tool_name_local: Partial match found: '{tool_name}' -> '{tool}'")
+                    return tool
+            
+            # If still no match, return error with cleaned name
+            print(f"planner.normalize_tool_name_local: No match found for '{tool_name}' (cleaned: '{clean_name}'). Available tools: {self.available_tools[:5]}...")
+            return "No matched tool given: " + clean_name
         
         try:
             print(f"DEBUG: extract_context_subgoal_and_tool - response type: {type(response)}")
@@ -180,7 +199,7 @@ Please present your analysis in a clear, structured format.
                 
                 context = response.context.strip()
                 sub_goal = response.sub_goal.strip()
-                tool_name = normalize_tool_name(response.tool_name.strip())
+                tool_name = normalize_tool_name_local(response.tool_name.strip())
                 
                 print(f"DEBUG: Normalized tool_name: {tool_name}")
                 
@@ -225,7 +244,7 @@ Please present your analysis in a clear, structured format.
                                 tool_name = ""
                     
                     # Normalize tool name
-                    tool_name = normalize_tool_name(tool_name)
+                    tool_name = normalize_tool_name_local(tool_name)
                     
                     return context, sub_goal, tool_name
                     

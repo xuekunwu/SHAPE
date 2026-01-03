@@ -536,10 +536,29 @@ def normalize_tool_name(tool_name: str, available_tools=None) -> str:
     """Normalize the tool name to match the available tools."""
     if available_tools is None:
         return tool_name
+    
+    # Strip any "No matched tool given: " prefix if present (handle recursive calls)
+    clean_name = tool_name
+    if "No matched tool given: " in tool_name:
+        # Handle multiple nested prefixes
+        while "No matched tool given: " in clean_name:
+            clean_name = clean_name.split("No matched tool given: ")[-1].strip()
+    
+    # First try exact match (case-insensitive)
     for tool in available_tools:
-        if tool.lower() in tool_name.lower():
+        if tool.lower() == clean_name.lower():
+            print(f"app.normalize_tool_name: Exact match found: '{tool_name}' -> '{tool}'")
             return tool
-    return "No matched tool given: " + tool_name
+    
+    # Then try partial match (tool name contained in the given string)
+    for tool in available_tools:
+        if tool.lower() in clean_name.lower() or clean_name.lower() in tool.lower():
+            print(f"app.normalize_tool_name: Partial match found: '{tool_name}' -> '{tool}'")
+            return tool
+    
+    # If still no match, return error with cleaned name
+    print(f"app.normalize_tool_name: No match found for '{tool_name}' (cleaned: '{clean_name}'). Available tools: {available_tools[:5] if available_tools else 'None'}...")
+    return "No matched tool given: " + clean_name
 
 
 def _read_group_table_rows(group_table):
@@ -1047,6 +1066,23 @@ class Solver:
             yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Action predicted"
 
             # Handle tool execution or errors
+            # Check if tool_name contains error prefix (normalization failed)
+            if "No matched tool given: " in tool_name:
+                # Extract the actual tool name from error message
+                actual_tool_name = tool_name.split("No matched tool given: ")[-1].strip()
+                # Handle nested prefixes
+                while "No matched tool given: " in actual_tool_name:
+                    actual_tool_name = actual_tool_name.split("No matched tool given: ")[-1].strip()
+                error_msg = f"Tool '{actual_tool_name}' could not be matched to any available tool. Available tools: {self.planner.available_tools[:10]}..."
+                tool_execution_failed = True
+                if actual_tool_name not in failed_tool_names:
+                    failed_tool_names.append(actual_tool_name)
+                messages.append(ChatMessage(
+                    role="assistant", 
+                    content=f"⚠️ **Tool Matching Error:** {error_msg}\n\nThis may indicate that the tool is not properly registered or loaded."))
+                yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Tool matching failed"
+                continue
+            
             if tool_name not in self.planner.available_tools:
                 tool_execution_failed = True
                 if tool_name not in failed_tool_names:

@@ -300,10 +300,29 @@ def normalize_tool_name(tool_name: str, available_tools=None) -> str:
     """Normalize the tool name to match the available tools."""
     if available_tools is None:
         return tool_name
+    
+    # Strip any "No matched tool given: " prefix if present (handle recursive calls)
+    clean_name = tool_name
+    if "No matched tool given: " in tool_name:
+        # Handle multiple nested prefixes
+        while "No matched tool given: " in clean_name:
+            clean_name = clean_name.split("No matched tool given: ")[-1].strip()
+    
+    # First try exact match (case-insensitive)
     for tool in available_tools:
-        if tool.lower() in tool_name.lower():
+        if tool.lower() == clean_name.lower():
+            print(f"normalize_tool_name: Exact match found: '{tool_name}' -> '{tool}'")
             return tool
-    return "No matched tool given: " + tool_name
+    
+    # Then try partial match (tool name contained in the given string)
+    for tool in available_tools:
+        if tool.lower() in clean_name.lower() or clean_name.lower() in tool.lower():
+            print(f"normalize_tool_name: Partial match found: '{tool_name}' -> '{tool}'")
+            return tool
+    
+    # If still no match, return error with cleaned name
+    print(f"normalize_tool_name: No match found for '{tool_name}' (cleaned: '{clean_name}'). Available tools: {available_tools[:5]}...")
+    return "No matched tool given: " + clean_name
 
 def sanitize_tool_output_for_llm(result: Any) -> Dict[str, Any]:
     """

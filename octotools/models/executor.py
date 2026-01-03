@@ -523,6 +523,22 @@ Remember: Your <command> field MUST be valid Python code including any necessary
             return "Error extracting analysis", "Error extracting explanation", "execution = tool.execute(error='Error extracting command')"
 
     def execute_tool_command(self, tool_name: str, command: str) -> Any:
+        # Check if tool_name contains error prefix (indicates normalization failed)
+        if "No matched tool given: " in tool_name:
+            # Extract the actual tool name from error message
+            clean_tool_name = tool_name.split("No matched tool given: ")[-1].strip()
+            error_msg = (
+                f"Tool name normalization failed: '{clean_tool_name}' could not be matched to any available tool. "
+                f"This may indicate a mismatch between the tool name returned by the planner and the available tools. "
+                f"Please check that the tool is properly registered and available."
+            )
+            print(f"ERROR: {error_msg}")
+            return {
+                "error": error_msg,
+                "summary": f"Failed to execute tool: {clean_tool_name} not found",
+                "tool_name": clean_tool_name
+            }
+        
         def execute_with_timeout(block: str, local_context: dict) -> Optional[str]:
             output_file = f"temp_output_{uuid.uuid4()}.txt"
             try:
