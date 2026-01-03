@@ -26,7 +26,6 @@ BIOIMAGE_TOOL_PRIORITIES: Dict[str, ToolPriority] = {
     "Organoid_Segmenter_Tool": ToolPriority.HIGH,  # For organoid segmentation
     "Single_Cell_Cropper_Tool": ToolPriority.HIGH,
     "Cell_State_Analyzer_Tool": ToolPriority.HIGH,  # Self-supervised learning for cell state analysis
-    "Fibroblast_State_Analyzer_Tool": ToolPriority.HIGH,  # Keep for backward compatibility
     "Fibroblast_Activation_Scorer_Tool": ToolPriority.HIGH,
     "Analysis_Visualizer_Tool": ToolPriority.HIGH,
     
@@ -51,11 +50,11 @@ BIOIMAGE_TOOL_PRIORITIES: Dict[str, ToolPriority] = {
 }
 
 # Tool dependency chains for workflow optimization
+# Bioimage analysis chain: Image_Preprocessor → (Cell_Segmenter/Nuclei_Segmenter/Organoid_Segmenter) → Single_Cell_Cropper → Cell_State_Analyzer → Fibroblast_Activation_Scorer (optional)
 TOOL_DEPENDENCIES: Dict[str, List[str]] = {
     "Single_Cell_Cropper_Tool": ["Nuclei_Segmenter_Tool", "Cell_Segmenter_Tool", "Organoid_Segmenter_Tool"],  # Cropper needs segmentation
     "Cell_State_Analyzer_Tool": ["Single_Cell_Cropper_Tool"],  # Needs cell crops
-    "Fibroblast_State_Analyzer_Tool": ["Single_Cell_Cropper_Tool", "Nuclei_Segmenter_Tool", "Cell_Segmenter_Tool"],  # Keep for backward compatibility
-    "Fibroblast_Activation_Scorer_Tool": ["Fibroblast_State_Analyzer_Tool"],
+    "Fibroblast_Activation_Scorer_Tool": ["Cell_State_Analyzer_Tool"],  # Uses h5ad output from Cell_State_Analyzer_Tool
     "Analysis_Visualizer_Tool": [],  # Can work with any analysis output
 }
 

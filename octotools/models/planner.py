@@ -251,7 +251,7 @@ Please present your analysis in a clear, structured format.
         bioimage_tools = [
             'Nuclei_Segmenter_Tool', 'Cell_Segmenter_Tool', 'Organoid_Segmenter_Tool',
             'Single_Cell_Cropper_Tool',
-            'Cell_State_Analyzer_Tool', 'Fibroblast_State_Analyzer_Tool', 'Fibroblast_Activation_Scorer_Tool',
+            'Cell_State_Analyzer_Tool', 'Fibroblast_Activation_Scorer_Tool',
             'Image_Preprocessor_Tool'
         ]
         actions = memory.get_actions()
@@ -343,7 +343,7 @@ Instructions:
    - HIGH Priority: Use these tools FIRST if they are relevant to the query
      * Core tools for bioimage analysis and specialized analysis tools
      * Examples: Image_Preprocessor_Tool, Nuclei_Segmenter_Tool, Cell_Segmenter_Tool, Organoid_Segmenter_Tool,
-                Single_Cell_Cropper_Tool, Cell_State_Analyzer_Tool, Fibroblast_State_Analyzer_Tool, Fibroblast_Activation_Scorer_Tool, Analysis_Visualizer_Tool
+                Single_Cell_Cropper_Tool, Cell_State_Analyzer_Tool, Fibroblast_Activation_Scorer_Tool, Analysis_Visualizer_Tool
    
    - MEDIUM Priority: Use these general-purpose tools when needed
      * Examples: Object_Detector_Tool, Image_Captioner_Tool
@@ -355,12 +355,25 @@ Instructions:
    IMPORTANT: Always prefer tools from higher priority levels (HIGH > MEDIUM > LOW).
    Do NOT use LOW priority code generation tools if any higher-priority tool can address the query.
 
-4. Check Tool Dependencies:
+4. CRITICAL: Bioimage Analysis Chain Priority (MUST FOLLOW THIS ORDER):
+   For bioimage analysis queries, you MUST follow this specific tool chain order:
+   
+   Step 1: Image_Preprocessor_Tool (if image quality needs improvement)
+   Step 2: Choose ONE segmentation tool based on image type:
+           - Cell_Segmenter_Tool (for phase-contrast cell images)
+           - Nuclei_Segmenter_Tool (for nuclei/fluorescence images)
+           - Organoid_Segmenter_Tool (for organoid images)
+   Step 3: Single_Cell_Cropper_Tool (requires segmentation output from Step 2)
+   Step 4: Cell_State_Analyzer_Tool (requires single-cell crops from Step 3)
+   
+   This chain MUST be followed in order: Image_Preprocessor → Segmenter → Single_Cell_Cropper → Cell_State_Analyzer
+   Do NOT skip steps or use tools out of order.
+
+5. Check Tool Dependencies:
    Some tools require other tools to run first:
    - Single_Cell_Cropper_Tool requires Nuclei_Segmenter_Tool, Cell_Segmenter_Tool, or Organoid_Segmenter_Tool
    - Cell_State_Analyzer_Tool requires Single_Cell_Cropper_Tool
-   - Fibroblast_State_Analyzer_Tool requires Single_Cell_Cropper_Tool or a segmentation tool (Nuclei_Segmenter_Tool, Cell_Segmenter_Tool, or Organoid_Segmenter_Tool)
-   - Fibroblast_Activation_Scorer_Tool requires Fibroblast_State_Analyzer_Tool
+   - Fibroblast_Activation_Scorer_Tool requires Cell_State_Analyzer_Tool (uses h5ad output)
    
    Ensure all dependencies are satisfied before selecting a tool.
 
@@ -504,18 +517,18 @@ Example (do not copy, use only as reference):
         # Get finished tools from memory
         finished_tools = [action['tool_name'] for action in memory.get_actions() if 'tool_name' in action]
         
-        # Special case: If this is a fibroblast analysis and state analyzer just finished,
+        # Special case: If this is a fibroblast analysis and cell state analyzer just finished,
         # but activation scorer hasn't run yet, we should continue
         if (is_fibroblast_query and 
-            "Fibroblast_State_Analyzer_Tool" in finished_tools and 
+            "Cell_State_Analyzer_Tool" in finished_tools and 
             "Fibroblast_Activation_Scorer_Tool" not in finished_tools and
             "Fibroblast_Activation_Scorer_Tool" in self.available_tools):
             
-            print(f"DEBUG: Fibroblast analysis detected - state analyzer finished but activation scorer not run yet")
+            print(f"DEBUG: Fibroblast analysis detected - cell state analyzer finished but activation scorer not run yet")
             print(f"DEBUG: Continuing to activation scorer for complete fibroblast analysis")
             
             return MemoryVerification(
-                analysis="Fibroblast state analysis completed successfully. However, the complete fibroblast analysis pipeline requires activation scoring to provide quantitative activation scores. The Fibroblast_Activation_Scorer_Tool is available and should be run to complete the analysis.",
+                analysis="Cell state analysis completed successfully. However, the complete fibroblast analysis pipeline requires activation scoring to provide quantitative activation scores. The Fibroblast_Activation_Scorer_Tool is available and should be run to complete the analysis.",
                 stop_signal=False
             )
 

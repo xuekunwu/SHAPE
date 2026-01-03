@@ -87,10 +87,10 @@ class Executor:
                     previous_outputs_for_llm = get_llm_safe_result(previous_outputs)
                     print(f"DEBUG: Extracted previous outputs: {list(previous_outputs.keys()) if isinstance(previous_outputs, dict) else 'Not a dict'}")
         
-        # Special handling for Cell_State_Analyzer_Tool and Fibroblast_State_Analyzer_Tool to use dynamic metadata file discovery
-        state_analyzer_tools = ["Cell_State_Analyzer_Tool", "Fibroblast_State_Analyzer_Tool"]
+        # Special handling for Cell_State_Analyzer_Tool to use dynamic metadata file discovery
+        state_analyzer_tools = ["Cell_State_Analyzer_Tool"]
         if tool_name in state_analyzer_tools:
-            tool_label = "Cell_State_Analyzer_Tool" if tool_name == "Cell_State_Analyzer_Tool" else "Fibroblast_State_Analyzer_Tool"
+            tool_label = "Cell_State_Analyzer_Tool"
             return ToolCommand(
                 analysis=f"Using dynamic metadata file discovery for {tool_label}",
                 explanation=f"Automatically finding the most recent metadata file and loading cell data with improved format handling for {tool_label}",
@@ -113,7 +113,7 @@ else:
         cell_crops, cell_metadata = tool._load_cell_data_from_metadata('solver_cache/temp/tool_cache')
         
         if cell_crops and len(cell_crops) > 0:
-            # Execute the tool with loaded data""" + ("""
+            # Execute the tool with loaded data
             execution = tool.execute(
                 cell_crops=cell_crops, 
                 cell_metadata=cell_metadata, 
@@ -123,20 +123,7 @@ else:
                 learning_rate=3e-5,
                 cluster_resolution=0.5,
                 query_cache_dir='solver_cache/temp'
-            )""" if tool_name == "Cell_State_Analyzer_Tool" else """
-            execution = tool.execute(
-                cell_crops=cell_crops, 
-                cell_metadata=cell_metadata, 
-                batch_size=16, 
-                query_cache_dir='solver_cache/temp/tool_cache',
-                visualization_type='all'
-            )""") + """
-            # 保存AnnData为h5ad文件，供下游激活评分工具使用
-            # Note: This logic is now handled in execute_tool_command method
-            # if hasattr(execution, 'adata'):
-            #     adata_path = os.path.join('solver_cache/temp/tool_cache', 'fibroblast_state_analyzed.h5ad')
-            #     execution['adata'].write_h5ad(adata_path)
-            #     execution['analyzed_h5ad_path'] = adata_path
+            )
         else:
             execution = {"error": "No valid cell crops found in metadata", "status": "failed"}
         
@@ -236,10 +223,10 @@ IMPORTANT: When the tool requires an image parameter, you MUST use the exact ima
 {"IMPORTANT: Nuclei_Segmenter_Tool, Cell_Segmenter_Tool, Organoid_Segmenter_Tool, and Image_Preprocessor_Tool accept the image_id parameter for consistent file naming and tracking. Include image_id parameter when available for these tools." if image_id else ""}
 
 CRITICAL TOOL DEPENDENCY RULES:
-- Fibroblast_Activation_Scorer_Tool MUST use the h5ad file output from Fibroblast_State_Analyzer_Tool
+- Fibroblast_Activation_Scorer_Tool MUST use the h5ad file output from Cell_State_Analyzer_Tool
 - Fibroblast_Activation_Scorer_Tool CANNOT use cell_crops_metadata files directly
-- If Fibroblast_State_Analyzer_Tool has not been executed yet, Fibroblast_Activation_Scorer_Tool should not be executed
-- The tool chain must be: Single_Cell_Cropper_Tool → Fibroblast_State_Analyzer_Tool → Fibroblast_Activation_Scorer_Tool
+- If Cell_State_Analyzer_Tool has not been executed yet, Fibroblast_Activation_Scorer_Tool should not be executed
+- The bioimage analysis tool chain must be: Image_Preprocessor_Tool -> (Cell_Segmenter_Tool/Nuclei_Segmenter_Tool/Organoid_Segmenter_Tool) -> Single_Cell_Cropper_Tool -> Cell_State_Analyzer_Tool -> Fibroblast_Activation_Scorer_Tool (optional)
 
 Instructions:
 1. Carefully review all provided information: the query, image path, context, sub-goal, selected tool, tool metadata, and previous tool outputs.
@@ -250,7 +237,7 @@ Instructions:
 6. Use appropriate values for parameters based on the given context, particularly the Context field which may contain relevant information from previous steps.
 7. If multiple steps are needed to prepare data for the tool, include them in the command construction.
 8. CRITICAL: If the tool requires an image parameter, use the exact image path "{safe_path}" provided above, unless a processed image path is available from previous outputs.
-9. CRITICAL: For Fibroblast_Activation_Scorer_Tool, only use h5ad files from Fibroblast_State_Analyzer_Tool, never use cell_crops_metadata files.
+9. CRITICAL: For Fibroblast_Activation_Scorer_Tool, only use h5ad files from Cell_State_Analyzer_Tool, never use cell_crops_metadata files.
 
 Output Format:
 <analysis>: a step-by-step analysis of the context, sub-goal, and selected tool to guide the command construction.
@@ -276,7 +263,7 @@ Rules:
 10. If preparation steps are needed, include them as separate Python statements before the tool.execute() calls.
 11. CRITICAL: If the tool requires an image parameter, use the exact image path "{safe_path}" provided above, unless a processed image path is available from previous outputs.
 12. If previous tool outputs contain relevant file paths (e.g., processed_image_path, nuclei_mask paths, h5ad files), use those paths instead of the original image path when appropriate.
-13. CRITICAL: Fibroblast_Activation_Scorer_Tool must use h5ad files from Fibroblast_State_Analyzer_Tool, not cell_crops_metadata files.
+13. CRITICAL: Fibroblast_Activation_Scorer_Tool must use h5ad files from Cell_State_Analyzer_Tool, not cell_crops_metadata files.
 
 Examples (Not to use directly unless relevant):
 
@@ -325,9 +312,9 @@ Reason: Do not use placeholder paths like "path/to/image". Use the actual image 
 ```python
 execution = tool.execute(cell_data="cell_crops_metadata.json")
 ```
-Reason: Fibroblast_Activation_Scorer_Tool must use h5ad files from Fibroblast_State_Analyzer_Tool, not cell_crops_metadata files.
+Reason: Fibroblast_Activation_Scorer_Tool must use h5ad files from Cell_State_Analyzer_Tool, not cell_crops_metadata files.
 
-Remember: Your <command> field MUST be valid Python code including any necessary data preparation steps and one or more execution = tool.execute( calls, without any additional explanatory text. The format execution = tool.execute must be strictly followed, and the last line must begin with execution = tool.execute to capture the final output. ALWAYS use the actual image path "{safe_path}" when the tool requires an image parameter, unless a processed image path is available from previous outputs. CRITICAL: Fibroblast_Activation_Scorer_Tool must use h5ad files from Fibroblast_State_Analyzer_Tool.
+Remember: Your <command> field MUST be valid Python code including any necessary data preparation steps and one or more execution = tool.execute( calls, without any additional explanatory text. The format execution = tool.execute must be strictly followed, and the last line must begin with execution = tool.execute to capture the final output. ALWAYS use the actual image path "{safe_path}" when the tool requires an image parameter, unless a processed image path is available from previous outputs. CRITICAL: Fibroblast_Activation_Scorer_Tool must use h5ad files from Cell_State_Analyzer_Tool.
 """
 
         try:
@@ -615,36 +602,11 @@ Remember: Your <command> field MUST be valid Python code including any necessary
             # Execute the entire command as a single block to preserve variable definitions
             result = execute_with_timeout(command, local_context)
             
-            # Special handling for Cell_State_Analyzer_Tool and Fibroblast_State_Analyzer_Tool to save h5ad file
-            if tool_name in ["Cell_State_Analyzer_Tool", "Fibroblast_State_Analyzer_Tool"] and isinstance(result, dict):
-                # Cell_State_Analyzer_Tool saves adata_path directly in result, Fibroblast_State_Analyzer_Tool has 'adata' key
-                if tool_name == "Cell_State_Analyzer_Tool" and 'adata_path' in result:
+            # Special handling for Cell_State_Analyzer_Tool to save h5ad file
+            if tool_name == "Cell_State_Analyzer_Tool" and isinstance(result, dict):
+                # Cell_State_Analyzer_Tool saves adata_path directly in result
+                if 'adata_path' in result:
                     print(f"AnnData already saved by Cell_State_Analyzer_Tool: {result['adata_path']}")
-                elif tool_name == "Fibroblast_State_Analyzer_Tool" and 'adata' in result:
-                    try:
-                        import anndata
-                        adata_path = os.path.join(self.tool_cache_dir, 'fibroblast_state_analyzed.h5ad')
-                        print(f"Saving AnnData to h5ad file: {adata_path}")
-                        
-                        # Ensure the directory exists
-                        os.makedirs(os.path.dirname(adata_path), exist_ok=True)
-                        
-                        # Save the AnnData object
-                        result['adata'].write_h5ad(adata_path)
-                        result['analyzed_h5ad_path'] = adata_path
-                        print(f"Successfully saved h5ad file: {adata_path}")
-                        
-                        # Verify the file was created
-                        if os.path.exists(adata_path):
-                            file_size = os.path.getsize(adata_path)
-                            print(f"Verified h5ad file exists with size: {file_size} bytes")
-                        else:
-                            print(f"Warning: h5ad file was not created at {adata_path}")
-                    except Exception as e:
-                        print(f"Error saving h5ad file: {e}")
-                        # Don't fail the entire execution, just log the error
-                        if 'analyzed_h5ad_path' not in result:
-                            result['analyzed_h5ad_path'] = None
             
             return result
 

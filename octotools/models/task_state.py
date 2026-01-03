@@ -186,7 +186,6 @@ TOOL_STAGE_REGISTRY: Dict[str, ToolStage] = {
     # Stage 2: Cell-level tools
     "Single_Cell_Cropper_Tool": ToolStage.STAGE_2_CELL_LEVEL,
     "Cell_State_Analyzer_Tool": ToolStage.STAGE_2_CELL_LEVEL,  # Self-supervised learning for cell states
-    "Fibroblast_State_Analyzer_Tool": ToolStage.STAGE_2_CELL_LEVEL,  # Keep for backward compatibility
     "Fibroblast_Activation_Scorer_Tool": ToolStage.STAGE_2_CELL_LEVEL,
     
     # Non-image tools (not classified by stage)

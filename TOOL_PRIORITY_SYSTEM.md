@@ -14,7 +14,7 @@ A comprehensive priority system that categorizes tools based on their relevance 
 
 - **HIGH (1)**: High priority tools for bioimage analysis
   - Core image processing and segmentation: `Image_Preprocessor_Tool`, `Nuclei_Segmenter_Tool`, `Single_Cell_Cropper_Tool`
-  - Specialized analysis tools: `Fibroblast_State_Analyzer_Tool`, `Fibroblast_Activation_Scorer_Tool`, `Analysis_Visualizer_Tool`
+  - Specialized analysis tools: `Cell_State_Analyzer_Tool`, `Fibroblast_Activation_Scorer_Tool`, `Analysis_Visualizer_Tool`
 
 - **MEDIUM (2)**: Medium priority tools
   - General-purpose image analysis tools: `Object_Detector_Tool`, `Advanced_Object_Detector_Tool`, `Image_Captioner_Tool`
@@ -109,7 +109,7 @@ For a bioimage analysis query like "segment the cells in this image":
 1. Domain detected: `bioimage`
 2. Tools filtered: Search/text tools excluded
 3. Available tools prioritized:
-   - HIGH: Image_Preprocessor_Tool, Nuclei_Segmenter_Tool, Single_Cell_Cropper_Tool, Fibroblast_State_Analyzer_Tool, Analysis_Visualizer_Tool
+   - HIGH: Image_Preprocessor_Tool, Nuclei_Segmenter_Tool, Cell_Segmenter_Tool, Organoid_Segmenter_Tool, Single_Cell_Cropper_Tool, Cell_State_Analyzer_Tool, Analysis_Visualizer_Tool
    - MEDIUM: Object_Detector_Tool, Image_Captioner_Tool, etc.
    - LOW: Text_Detector_Tool, Python_Code_Generator_Tool, Generalist_Solution_Generator_Tool
 4. LLM guided to select from HIGH priority tools first
