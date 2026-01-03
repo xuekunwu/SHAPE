@@ -113,8 +113,24 @@ else:
         cell_crops, cell_metadata = tool._load_cell_data_from_metadata('solver_cache/temp/tool_cache')
         
         if cell_crops and len(cell_crops) > 0:
-            # Execute the tool with loaded data
-            {"execution = tool.execute(cell_crops=cell_crops, cell_metadata=cell_metadata, max_epochs=100, early_stop_loss=0.05, batch_size=16, learning_rate=3e-5, cluster_resolution=0.5, query_cache_dir='solver_cache/temp')" if tool_name == "Cell_State_Analyzer_Tool" else "execution = tool.execute(cell_crops=cell_crops, cell_metadata=cell_metadata, batch_size=16, query_cache_dir='solver_cache/temp/tool_cache', visualization_type='all')"}
+            # Execute the tool with loaded data""" + ("""
+            execution = tool.execute(
+                cell_crops=cell_crops, 
+                cell_metadata=cell_metadata, 
+                max_epochs=100,
+                early_stop_loss=0.05,
+                batch_size=16,
+                learning_rate=3e-5,
+                cluster_resolution=0.5,
+                query_cache_dir='solver_cache/temp'
+            )""" if tool_name == "Cell_State_Analyzer_Tool" else """
+            execution = tool.execute(
+                cell_crops=cell_crops, 
+                cell_metadata=cell_metadata, 
+                batch_size=16, 
+                query_cache_dir='solver_cache/temp/tool_cache',
+                visualization_type='all'
+            )""") + """
             # 保存AnnData为h5ad文件，供下游激活评分工具使用
             # Note: This logic is now handled in execute_tool_command method
             # if hasattr(execution, 'adata'):
