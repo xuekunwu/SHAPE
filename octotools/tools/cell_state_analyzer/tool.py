@@ -118,7 +118,7 @@ class DinoV3Projector(nn.Module):
             repo_id = "5xuekun/dinov3_vitb16"  # UPDATE THIS with actual repo ID after uploading
             model_path = hf_hub_download(
                 repo_id=repo_id,
-                filename="dinov3_vitb16.pth",  # UPDATE THIS with actual filename after uploading
+                filename="dinov3_vitl16_pretrain_lvd1689m-8aa4cbdd.pth",  # UPDATE THIS with actual filename after uploading
                 token=os.getenv("HUGGINGFACE_TOKEN")
             )
             logger.info(f"Loading DINOv3 backbone from Hugging Face: {model_path}")

@@ -263,11 +263,30 @@ tool = Cell_Segmenter_Tool()
 # ... use the tool ...
 ```
 
+### For Cell_State_Analyzer_Tool
+
+**IMPORTANT**: Cell_State_Analyzer_Tool uses DINOv3 model for self-supervised learning. The tool will download the model from Hugging Face.
+
+Edit `octotools/tools/cell_state_analyzer/tool.py`:
+
+```python
+# Line ~118-122: Update the repo_id and filename
+repo_id = "5xuekun/dinov3_vitb16"  # UPDATE THIS with your repo ID
+model_path = hf_hub_download(
+    repo_id=repo_id,
+    filename="dinov3_vitb16.pth",  # UPDATE THIS with actual filename
+    token=os.getenv("HUGGINGFACE_TOKEN")
+)
+```
+
+**Note**: If DINOv3 model is not available, the tool will fallback to DINOv2 pretrained models.
+
 ## Additional Resources
 
 - [Hugging Face Hub Documentation](https://huggingface.co/docs/hub)
 - [Cellpose Documentation](https://cellpose.readthedocs.io/)
 - [Hugging Face Python API](https://huggingface.co/docs/huggingface_hub/quick-start)
+- [DINOv3 Documentation](https://github.com/facebookresearch/dinov2) (Note: DINOv3 uses similar architecture to DINOv2)
 
 ## Notes
 
@@ -275,3 +294,4 @@ tool = Cell_Segmenter_Tool()
 - For **private repositories**: Only you and authorized users can access
 - Model files can be large; ensure stable internet connection for uploads
 - Consider adding a README.md to your repository explaining the model, training data, and usage
+- DINOv3 models should be saved as PyTorch `.pth` files containing the state_dict
