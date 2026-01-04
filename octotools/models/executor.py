@@ -86,6 +86,8 @@ class Executor:
                 if 'result' in last_action:
                     raw_result = last_action['result']
                     # Handle per_image structure: extract the actual result from per_image if present
+                    # Note: Cell_State_Analyzer_Tool and Analysis_Visualizer_Tool merge all images,
+                    # so they should not have per_image structure, but we handle it for safety
                     if isinstance(raw_result, dict) and 'per_image' in raw_result:
                         per_image_list = raw_result['per_image']
                         # Use the first image's result if available, or the last one
