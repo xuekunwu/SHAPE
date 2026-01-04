@@ -870,11 +870,18 @@ class Analysis_Visualizer_Tool(BaseTool):
         n_cols = crops_per_cluster
         crop_size = 100  # Size for each crop in montage
         
-        # Adjust figure size for montage (wider for 5 columns)
-        montage_figsize = (figure_size[0] * 1.2, figure_size[1] * (n_rows * 0.8))
+        # Use more compact figure size (similar to single-cell cropping summary)
+        # Base size per cell crop: smaller for tighter layout
+        base_width = 1.5  # Width per column (inches)
+        base_height = 1.5  # Height per row (inches)
+        montage_figsize = (base_width * n_cols + 1.0, base_height * n_rows + 0.8)  # Add space for labels and title
+        
         fig, axes = plt.subplots(n_rows, n_cols, figsize=montage_figsize, dpi=dpi)
         if n_rows == 1:
             axes = axes.reshape(1, -1)
+        
+        # Set very tight spacing between subplots (like single-cell cropping summary: wspace=0.05, hspace=0.05)
+        plt.subplots_adjust(left=0.12, right=0.98, top=0.95, bottom=0.05, wspace=0.05, hspace=0.05)
         
         colors = self._get_color_scheme(len(clusters))
         cluster_colors = {cluster: colors[i] for i, cluster in enumerate(clusters)}
@@ -917,14 +924,13 @@ class Analysis_Visualizer_Tool(BaseTool):
                         except Exception:
                             pass
                 
-                # Add cluster label on first column
+                # Add cluster label on first column (adjusted position for tighter layout)
                 if col_idx == 0:
-                    ax.text(-0.08, 0.5, f'Cluster {cluster}', transform=ax.transAxes,
-                           fontsize=14, fontweight='normal', va='center', ha='right')
+                    ax.text(-0.15, 0.5, f'Cluster {cluster}', transform=ax.transAxes,
+                           fontsize=12, fontweight='normal', va='center', ha='right')
         
         plt.suptitle(f'Cluster Exemplars (resolution={resolution})', 
-                    fontsize=16, fontweight='normal', y=0.995)
-        plt.tight_layout(rect=[0.05, 0, 1, 0.96])
+                    fontsize=14, fontweight='normal', y=0.98)
         
         output_path = os.path.join(output_dir, f"cluster_exemplars_res{resolution}.png")
         fig.savefig(output_path, dpi=dpi, bbox_inches='tight', facecolor='white', edgecolor='none')
