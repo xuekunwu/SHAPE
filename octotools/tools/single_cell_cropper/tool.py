@@ -10,6 +10,7 @@ from pathlib import Path
 import json
 from octotools.models.utils import VisualizationConfig
 from octotools.models.task_state import CellCrop
+import tifffile
 
 class Single_Cell_Cropper_Tool(BaseTool):
     def __init__(self):
@@ -120,7 +121,32 @@ class Single_Cell_Cropper_Tool(BaseTool):
                 }
             
             # Load segmentation mask (supports nuclei_mask, cell_mask, or organoid_mask)
-            mask = cv2.imread(nuclei_mask, cv2.IMREAD_GRAYSCALE)
+            # Prioritize tifffile for .tif files to preserve 16-bit label values
+            mask_path_lower = nuclei_mask.lower()
+            if mask_path_lower.endswith('.tif') or mask_path_lower.endswith('.tiff'):
+                try:
+                    mask = tifffile.imread(nuclei_mask)
+                    # Ensure mask is 2D and convert to appropriate dtype
+                    if len(mask.shape) > 2:
+                        mask = mask.squeeze()
+                    # Preserve uint16 for label masks (>255 labels), convert others to uint16 for consistency
+                    if mask.dtype not in [np.uint8, np.uint16]:
+                        mask = mask.astype(np.uint16)
+                    elif mask.dtype == np.uint8:
+                        # Convert uint8 to uint16 to preserve all values (backward compatibility)
+                        mask = mask.astype(np.uint16)
+                except Exception as e:
+                    print(f"Warning: Failed to load mask with tifffile: {e}, trying cv2")
+                    mask = cv2.imread(nuclei_mask, cv2.IMREAD_GRAYSCALE)
+                    if mask is not None:
+                        mask = mask.astype(np.uint16)  # Convert to uint16 for consistency
+            else:
+                # For PNG/other formats, use cv2 (may lose labels >255 in old masks)
+                # Convert to uint16 for consistency with label mask handling
+                mask = cv2.imread(nuclei_mask, cv2.IMREAD_GRAYSCALE)
+                if mask is not None:
+                    mask = mask.astype(np.uint16)  # Convert to uint16 to handle any labels up to 65535
+            
             if mask is None:
                 return {
                     "error": f"Failed to load segmentation mask: {nuclei_mask}",
@@ -260,13 +286,23 @@ class Single_Cell_Cropper_Tool(BaseTool):
             print(f"Error: Image shape mismatch - original: {original_img.shape}, mask: {mask.shape}")
             return [], [], [], {}
         
-        # Ensure mask is binary
-        if len(np.unique(mask)) > 2:
-            print("Warning: Mask is not binary, converting to binary")
-            mask = (mask > 0).astype(np.uint8) * 255
+        # Handle mask format: Cellpose generates label masks (0=background, 1-N for N cells)
+        # We should preserve the original labels, not convert to binary
+        # Check if mask is already a label mask (multiple unique values) or binary
+        unique_values = np.unique(mask)
+        num_unique = len(unique_values)
         
-        # Label connected components in the mask
-        labeled_mask = label(mask)
+        if num_unique > 2:
+            # Label mask from Cellpose: use directly with regionprops
+            # Each unique value (except 0) represents a distinct cell/object
+            print(f"Detected label mask with {num_unique - 1} unique objects (excluding background)")
+            # Use the mask directly - regionprops can work with label masks
+            labeled_mask = mask
+        else:
+            # Binary mask: need to label connected components
+            print("Detected binary mask, labeling connected components")
+            labeled_mask = label(mask)
+        
         cell_properties = regionprops(labeled_mask)
         
         initial_cell_count = len(cell_properties)

@@ -20,6 +20,15 @@ project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(c
 sys.path.insert(0, project_root)
 
 from octotools.tools.base import BaseTool
+from octotools.models.utils import VisualizationConfig
+
+# Try to import anndata and scanpy for cell state analysis visualization
+try:
+    import anndata as ad
+    import scanpy as sc
+    ANNDATA_AVAILABLE = True
+except ImportError:
+    ANNDATA_AVAILABLE = False
 
 
 class Analysis_Visualizer_Tool(BaseTool):
@@ -396,6 +405,37 @@ class Analysis_Visualizer_Tool(BaseTool):
                             group_column: group
                         })
                 df = pd.DataFrame(records)
+            elif 'analysis_type' in analysis_data and analysis_data['analysis_type'] == 'cell_state_analysis':
+                # Cell_State_Analyzer_Tool output - load from AnnData file
+                if 'adata_path' in analysis_data and os.path.exists(analysis_data['adata_path']):
+                    # Load AnnData and extract cluster/group information
+                    if not ANNDATA_AVAILABLE:
+                        raise ValueError("anndata/scanpy not available. Cannot process cell state analysis results.")
+                    
+                    adata = ad.read_h5ad(analysis_data['adata_path'])
+                    cluster_key = analysis_data.get('cluster_key', 'leiden_0.5')
+                    
+                    # Extract data for visualization
+                    records = []
+                    for i in range(adata.n_obs):
+                        record = {
+                            group_column: adata.obs[group_column].iloc[i] if group_column in adata.obs else 'default',
+                            'cluster': adata.obs[cluster_key].iloc[i] if cluster_key in adata.obs else None,
+                            'umap_1': adata.obsm['X_umap'][i, 0] if 'X_umap' in adata.obsm else None,
+                            'umap_2': adata.obsm['X_umap'][i, 1] if 'X_umap' in adata.obsm else None,
+                        }
+                        # Add comparison metric if available
+                        if comparison_metric in adata.obs:
+                            record[comparison_metric] = adata.obs[comparison_metric].iloc[i]
+                        records.append(record)
+                    
+                    df = pd.DataFrame(records)
+                    
+                    # Store AnnData info for later use in visualization
+                    analysis_data['_adata'] = adata
+                    analysis_data['_cluster_key'] = cluster_key
+                else:
+                    raise ValueError(f"AnnData file not found: {analysis_data.get('adata_path', 'Not specified')}")
             elif 'cell_crop_objects' in analysis_data:
                 # Single cell cropper output format
                 # cell_crop_objects is a list of CellCrop objects (serialized as dicts)
@@ -551,6 +591,232 @@ class Analysis_Visualizer_Tool(BaseTool):
         
         return data_by_group, stats_result, groups
     
+    def _visualize_cell_state_analysis(self, analysis_data: Dict[str, Any], 
+                                       output_dir: str, figure_size: tuple, dpi: int) -> Dict[str, Any]:
+        """
+        Generate publication-quality visualizations for cell state analysis results.
+        
+        Args:
+            analysis_data: Cell_State_Analyzer_Tool output dictionary
+            output_dir: Directory to save outputs
+            figure_size: Figure size (width, height) in inches
+            dpi: Resolution for saved figures
+            
+        Returns:
+            Dictionary with visualization results
+        """
+        if not ANNDATA_AVAILABLE:
+            return {
+                "error": "anndata/scanpy not available. Cannot generate cell state visualizations.",
+                "summary": "Visualization failed"
+            }
+        
+        # Load AnnData
+        adata_path = analysis_data.get('adata_path')
+        if not adata_path or not os.path.exists(adata_path):
+            return {
+                "error": f"AnnData file not found: {adata_path}",
+                "summary": "Visualization failed"
+            }
+        
+        adata = ad.read_h5ad(adata_path)
+        cluster_key = analysis_data.get('cluster_key', 'leiden_0.5')
+        cluster_resolution = analysis_data.get('cluster_resolution', 0.5)
+        
+        visual_outputs = []
+        
+        # 1. Create publication-quality UMAP colored by cluster
+        umap_cluster_path = self._create_publication_umap_by_cluster(
+            adata, cluster_key, cluster_resolution, output_dir, figure_size, dpi
+        )
+        if umap_cluster_path:
+            visual_outputs.append(umap_cluster_path)
+        
+        # 2. Create UMAP colored by group (if multiple groups exist)
+        if 'group' in adata.obs and adata.obs['group'].nunique() > 1:
+            umap_group_path = self._create_publication_umap_by_group(
+                adata, output_dir, figure_size, dpi
+            )
+            if umap_group_path:
+                visual_outputs.append(umap_group_path)
+        
+        # 3. Create cluster composition plot by group (if multiple groups)
+        if 'group' in adata.obs and adata.obs['group'].nunique() > 1:
+            composition_path = self._create_publication_cluster_composition(
+                adata, cluster_key, output_dir, figure_size, dpi
+            )
+            if composition_path:
+                visual_outputs.append(composition_path)
+        
+        # 4. Create cluster size bar chart
+        cluster_size_path = self._create_cluster_size_chart(
+            adata, cluster_key, output_dir, figure_size, dpi
+        )
+        if cluster_size_path:
+            visual_outputs.append(cluster_size_path)
+        
+        return {
+            "summary": f"Generated {len(visual_outputs)} publication-quality visualizations for cell state analysis",
+            "visual_outputs": visual_outputs,
+            "cell_count": adata.n_obs,
+            "num_clusters": adata.obs[cluster_key].nunique() if cluster_key in adata.obs else 0,
+            "cluster_key": cluster_key
+        }
+    
+    def _create_publication_umap_by_cluster(self, adata, cluster_key: str, resolution: float,
+                                           output_dir: str, figure_size: tuple, dpi: int) -> Optional[str]:
+        """Create publication-quality UMAP visualization colored by cluster."""
+        if 'X_umap' not in adata.obsm or cluster_key not in adata.obs:
+            return None
+        
+        # Create figure with professional styling
+        fig, ax = VisualizationConfig.create_professional_figure(figsize=(10, 8))
+        
+        # Get unique clusters and assign colors
+        clusters = sorted(adata.obs[cluster_key].unique())
+        n_clusters = len(clusters)
+        colors = self._get_color_scheme(n_clusters)
+        cluster_colors = {cluster: colors[i] for i, cluster in enumerate(clusters)}
+        
+        # Plot each cluster
+        for cluster in clusters:
+            cluster_mask = adata.obs[cluster_key] == cluster
+            umap_coords = adata.obsm['X_umap'][cluster_mask]
+            ax.scatter(umap_coords[:, 0], umap_coords[:, 1], 
+                      c=[cluster_colors[cluster]], label=f'Cluster {cluster}',
+                      s=50, alpha=0.6, edgecolors='white', linewidths=0.5)
+        
+        ax.set_xlabel('UMAP 1', fontsize=16, fontweight='bold')
+        ax.set_ylabel('UMAP 2', fontsize=16, fontweight='bold')
+        ax.set_title(f'UMAP Visualization - Leiden Clustering (resolution={resolution})', 
+                    fontsize=18, fontweight='bold', pad=20)
+        
+        # Professional legend
+        ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', 
+                 frameon=True, fancybox=True, shadow=True, fontsize=12)
+        
+        ax.grid(True, alpha=0.3, linestyle='--')
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        
+        output_path = os.path.join(output_dir, f"umap_cluster_res{resolution}.png")
+        VisualizationConfig.save_professional_figure(fig, output_path)
+        plt.close(fig)
+        
+        return output_path
+    
+    def _create_publication_umap_by_group(self, adata, output_dir: str, 
+                                         figure_size: tuple, dpi: int) -> Optional[str]:
+        """Create publication-quality UMAP visualization colored by group."""
+        if 'X_umap' not in adata.obsm or 'group' not in adata.obs:
+            return None
+        
+        fig, ax = VisualizationConfig.create_professional_figure(figsize=(10, 8))
+        
+        groups = sorted(adata.obs['group'].unique())
+        n_groups = len(groups)
+        colors = self._get_color_scheme(n_groups)
+        group_colors = {group: colors[i] for i, group in enumerate(groups)}
+        
+        for group in groups:
+            group_mask = adata.obs['group'] == group
+            umap_coords = adata.obsm['X_umap'][group_mask]
+            ax.scatter(umap_coords[:, 0], umap_coords[:, 1],
+                      c=[group_colors[group]], label=str(group),
+                      s=50, alpha=0.6, edgecolors='white', linewidths=0.5)
+        
+        ax.set_xlabel('UMAP 1', fontsize=16, fontweight='bold')
+        ax.set_ylabel('UMAP 2', fontsize=16, fontweight='bold')
+        ax.set_title('UMAP Visualization - Colored by Group',
+                    fontsize=18, fontweight='bold', pad=20)
+        
+        ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left',
+                 frameon=True, fancybox=True, shadow=True, fontsize=12)
+        
+        ax.grid(True, alpha=0.3, linestyle='--')
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        
+        output_path = os.path.join(output_dir, "umap_by_group.png")
+        VisualizationConfig.save_professional_figure(fig, output_path)
+        plt.close(fig)
+        
+        return output_path
+    
+    def _create_publication_cluster_composition(self, adata, cluster_key: str,
+                                               output_dir: str, figure_size: tuple, dpi: int) -> Optional[str]:
+        """Create publication-quality cluster composition plot by group."""
+        if 'group' not in adata.obs or cluster_key not in adata.obs:
+            return None
+        
+        # Calculate composition
+        composition = pd.crosstab(
+            adata.obs['group'], 
+            adata.obs[cluster_key],
+            normalize='index'
+        )
+        
+        fig, ax = VisualizationConfig.create_professional_figure(figsize=(12, 8))
+        
+        # Stacked bar chart
+        composition.plot(kind='bar', stacked=True, ax=ax, 
+                        colormap='tab20', width=0.8, edgecolor='white', linewidth=1.5)
+        
+        ax.set_xlabel('Group', fontsize=16, fontweight='bold')
+        ax.set_ylabel('Proportion', fontsize=16, fontweight='bold')
+        ax.set_title('Cluster Composition by Group', fontsize=18, fontweight='bold', pad=20)
+        
+        ax.legend(title='Cluster', bbox_to_anchor=(1.05, 1), loc='upper left',
+                 frameon=True, fancybox=True, shadow=True, fontsize=11)
+        
+        ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')
+        ax.grid(True, alpha=0.3, linestyle='--', axis='y')
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        
+        output_path = os.path.join(output_dir, "cluster_composition_by_group.png")
+        VisualizationConfig.save_professional_figure(fig, output_path)
+        plt.close(fig)
+        
+        return output_path
+    
+    def _create_cluster_size_chart(self, adata, cluster_key: str,
+                                  output_dir: str, figure_size: tuple, dpi: int) -> Optional[str]:
+        """Create cluster size distribution bar chart."""
+        if cluster_key not in adata.obs:
+            return None
+        
+        cluster_counts = adata.obs[cluster_key].value_counts().sort_index()
+        
+        fig, ax = VisualizationConfig.create_professional_figure(figsize=(10, 6))
+        
+        colors = self._get_color_scheme(len(cluster_counts))
+        bars = ax.bar(range(len(cluster_counts)), cluster_counts.values, 
+                     color=colors[:len(cluster_counts)], edgecolor='white', linewidth=1.5)
+        
+        ax.set_xlabel('Cluster', fontsize=16, fontweight='bold')
+        ax.set_ylabel('Number of Cells', fontsize=16, fontweight='bold')
+        ax.set_title('Cluster Size Distribution', fontsize=18, fontweight='bold', pad=20)
+        
+        ax.set_xticks(range(len(cluster_counts)))
+        ax.set_xticklabels([f'Cluster {c}' for c in cluster_counts.index], rotation=45, ha='right')
+        
+        # Add value labels on bars
+        for i, (bar, count) in enumerate(zip(bars, cluster_counts.values)):
+            height = bar.get_height()
+            ax.text(bar.get_x() + bar.get_width()/2., height,
+                   f'{int(count)}', ha='center', va='bottom', fontsize=12, fontweight='bold')
+        
+        ax.grid(True, alpha=0.3, linestyle='--', axis='y')
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        
+        output_path = os.path.join(output_dir, "cluster_size_distribution.png")
+        VisualizationConfig.save_professional_figure(fig, output_path)
+        plt.close(fig)
+        
+        return output_path
+    
     def execute(self, analysis_data: Union[Dict, str], 
                 chart_type: str = 'auto',
                 comparison_metric: str = 'cell_count',
@@ -577,7 +843,20 @@ class Analysis_Visualizer_Tool(BaseTool):
             # Create output directory
             os.makedirs(output_dir, exist_ok=True)
             
-            # Prepare data
+            # Check if this is cell state analysis output (from Cell_State_Analyzer_Tool)
+            is_cell_state_analysis = (
+                isinstance(analysis_data, dict) and 
+                analysis_data.get('analysis_type') == 'cell_state_analysis' and
+                'adata_path' in analysis_data
+            )
+            
+            # For cell state analysis, generate publication-quality UMAP and cluster composition plots
+            if is_cell_state_analysis:
+                return self._visualize_cell_state_analysis(
+                    analysis_data, output_dir, figure_size, dpi
+                )
+            
+            # Prepare data for regular visualizations
             data_by_group, stats_result, groups = self._prepare_data(
                 analysis_data, comparison_metric, group_column
             )

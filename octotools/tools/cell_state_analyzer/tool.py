@@ -458,11 +458,11 @@ class Cell_State_Analyzer_Tool(BaseTool):
         logger.info(f"✅ Loss curve saved to {output_path}")
         return output_path
     
-    def _create_umap_visualization(self, adata, resolution, output_dir, groups=None):
-        """Create UMAP visualization with clustering."""
+    def _compute_umap_and_clustering(self, adata, resolution, groups=None):
+        """Compute UMAP coordinates and perform clustering (no visualization)."""
         if not ANNDATA_AVAILABLE:
-            logger.warning("anndata/scanpy not available. Cannot create UMAP visualization.")
-            return None, None
+            logger.warning("anndata/scanpy not available. Cannot compute UMAP and clustering.")
+            return None
         
         # Compute neighbors and UMAP
         sc.pp.neighbors(adata, use_rep='X', n_neighbors=20, metric="cosine")
@@ -472,46 +472,10 @@ class Cell_State_Analyzer_Tool(BaseTool):
         cluster_key = f"leiden_{resolution}"
         sc.tl.leiden(adata, resolution=resolution, key_added=cluster_key)
         
-        # Create UMAP plot colored by cluster using professional styling
-        fig, ax = VisualizationConfig.create_professional_figure(figsize=(12, 8))
-        sc.pl.umap(adata, color=cluster_key, ax=ax, show=False, frameon=False, 
-                   title=f"UMAP - Leiden Clustering (resolution={resolution})")
-        VisualizationConfig.apply_professional_styling(ax, title=f"UMAP - Leiden Clustering (resolution={resolution})")
+        logger.info(f"✅ Computed UMAP and Leiden clustering (resolution={resolution})")
+        logger.info(f"✅ Found {len(adata.obs[cluster_key].unique())} clusters")
         
-        output_path = os.path.join(output_dir, f"umap_cluster_res{resolution}.png")
-        VisualizationConfig.save_professional_figure(fig, output_path)
-        plt.close(fig)
-        logger.info(f"✅ UMAP visualization saved to {output_path}")
-        
-        return output_path, cluster_key
-    
-    def _create_group_cluster_composition(self, adata, cluster_key, groups, output_dir):
-        """Create cluster composition plot by group."""
-        if not groups or len(set(groups)) <= 1:
-            logger.info("Single group detected. Skipping group composition plot.")
-            return None
-        
-        # Create composition plot
-        cluster_composition = pd.crosstab(
-            pd.Series(groups, index=adata.obs.index, name='group'),
-            adata.obs[cluster_key],
-            normalize='index'
-        )
-        
-        fig, ax = VisualizationConfig.create_professional_figure(figsize=(12, 6))
-        cluster_composition.plot(kind='bar', stacked=True, ax=ax, colormap='tab20')
-        ax.set_xlabel("Group", fontsize=12)
-        ax.set_ylabel("Proportion", fontsize=12)
-        VisualizationConfig.apply_professional_styling(ax, title="Cluster Composition by Group")
-        ax.legend(title="Cluster", bbox_to_anchor=(1.05, 1), loc='upper left')
-        ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')
-        
-        output_path = os.path.join(output_dir, "cluster_composition_by_group.png")
-        VisualizationConfig.save_professional_figure(fig, output_path)
-        plt.close(fig)
-        logger.info(f"✅ Group cluster composition plot saved to {output_path}")
-        
-        return output_path
+        return cluster_key
     
     def _load_cell_data_from_metadata(self, query_cache_dir):
         """Load cell crops and metadata from metadata files."""
@@ -629,27 +593,16 @@ class Cell_State_Analyzer_Tool(BaseTool):
         adata.obs["group"] = groups_extracted
         adata.obs.index = [f"cell_{i}" for i in range(adata.n_obs)]
         
-        # Create UMAP visualization
-        umap_path, cluster_key = self._create_umap_visualization(adata, cluster_resolution, output_dir, groups_extracted)
+        # Compute UMAP and clustering (no visualization - handled by Analysis_Visualizer_Tool)
+        cluster_key = self._compute_umap_and_clustering(adata, cluster_resolution, groups_extracted)
         
-        # Save AnnData
+        # Save AnnData (contains UMAP coordinates and cluster assignments)
         adata_path = os.path.join(output_dir, "cell_state_analyzed.h5ad")
         adata.write(adata_path)
         logger.info(f"✅ AnnData saved to {adata_path}")
         
-        # Create group cluster composition plot if multiple groups
-        group_composition_path = None
-        if len(set(groups_extracted)) > 1:
-            group_composition_path = self._create_group_cluster_composition(
-                adata, cluster_key, groups_extracted, output_dir
-            )
-        
-        # Prepare output
+        # Prepare output - visualization will be handled by Analysis_Visualizer_Tool
         visual_outputs = [loss_curve_path]
-        if umap_path:
-            visual_outputs.append(umap_path)
-        if group_composition_path:
-            visual_outputs.append(group_composition_path)
         
         # Format training logs for display
         training_logs_text = "\n".join(training_logs) if training_logs else ""
@@ -665,13 +618,13 @@ class Cell_State_Analyzer_Tool(BaseTool):
             "final_loss": history[-1],
             "best_loss": min(history),
             "loss_curve": loss_curve_path,
-            "umap_visualization": umap_path,
-            "cluster_composition": group_composition_path,
-            "adata_path": adata_path,
+            "adata_path": adata_path,  # AnnData file path for Analysis_Visualizer_Tool
             "visual_outputs": visual_outputs,
             "training_history": history,
             "training_logs": training_logs_text,  # Include training logs for display
-            "cluster_key": cluster_key if umap_path else None
+            "cluster_key": cluster_key,  # Cluster column name (e.g., "leiden_0.5")
+            "cluster_resolution": cluster_resolution,  # Resolution used for clustering
+            "analysis_type": "cell_state_analysis"  # Flag for Analysis_Visualizer_Tool to detect this output
         }
 
 

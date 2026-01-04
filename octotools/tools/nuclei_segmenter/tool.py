@@ -10,6 +10,7 @@ import torch
 from huggingface_hub import hf_hub_download
 from octotools.models.utils import VisualizationConfig
 import traceback
+import tifffile
 
 class Nuclei_Segmenter_Tool(BaseTool):
     def __init__(self, model_path=None):
@@ -182,11 +183,13 @@ class Nuclei_Segmenter_Tool(BaseTool):
             n_nuclei = len(np.unique(mask)) - 1 if mask is not None else 0
             
             # Save mask as separate visualization with professional styling using image identifier
-            mask_path = os.path.join(output_dir, f"nuclei_mask_{image_identifier}.png")
+            # Use .tif format with 16-bit depth to preserve all label values (supports up to 65535 nuclei)
+            mask_path = os.path.join(output_dir, f"nuclei_mask_{image_identifier}.tif")
             
-            # Save the original mask array (not matplotlib visualization)
-            # This ensures Single_Cell_Cropper_Tool can properly process it
-            cv2.imwrite(mask_path, mask.astype(np.uint8))
+            # Save the original mask array as 16-bit TIFF to preserve all label values
+            # Cellpose masks are integer labels (0=background, 1-N for N nuclei), which can exceed 255
+            mask_uint16 = mask.astype(np.uint16)
+            tifffile.imwrite(mask_path, mask_uint16)
             
             # Also save a visualization version for display with professional styling
             viz_mask_path = os.path.join(output_dir, f"nuclei_mask_viz_{image_identifier}.png")
