@@ -187,11 +187,19 @@ else:
             # Only proceed if we have the required fields
             if has_adata_path or (has_analysis_type and has_cluster_key):
                 logger.info(f"✅ Using special handling for Analysis_Visualizer_Tool with Cell_State_Analyzer_Tool results")
+                # Use adata_path directly from Cell_State_Analyzer_Tool output (should be well-defined)
                 adata_path = previous_outputs.get('adata_path', '')
                 cluster_key = previous_outputs.get('cluster_key', 'leiden_0.5')
                 cluster_resolution = previous_outputs.get('cluster_resolution', 0.5)
                 
+                if not adata_path:
+                    logger.error(f"❌ adata_path is empty in Cell_State_Analyzer_Tool output. Cannot proceed with visualization.")
+                    # Fall through to standard command generation
+                else:
+                    logger.info(f"Using adata_path from Cell_State_Analyzer_Tool: {adata_path}")
+                
                 # Construct analysis_data dict for Analysis_Visualizer_Tool
+                # Pass adata_path as-is: Cell_State_Analyzer_Tool should provide a well-defined path
                 analysis_data_dict = {
                     'adata_path': adata_path,
                     'cluster_key': cluster_key,

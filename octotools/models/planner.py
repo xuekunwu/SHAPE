@@ -331,6 +331,12 @@ Recommended Next Tools (considering dependencies and priorities):
    
    Then you MUST select Single_Cell_Cropper_Tool as the next tool. This is MANDATORY.
    Do NOT select any other tool. Do NOT skip this step.
+   
+   If the LAST tool executed was:
+   - Cell_State_Analyzer_Tool
+   
+   Then you MUST select Analysis_Visualizer_Tool as the next tool. This is MANDATORY.
+   Do NOT select any other tool. Do NOT skip this step.
 
 Tool Metadata:
 {toolbox_metadata}
@@ -394,6 +400,7 @@ Instructions:
    Some tools require other tools to run first:
    - Single_Cell_Cropper_Tool requires Nuclei_Segmenter_Tool, Cell_Segmenter_Tool, or Organoid_Segmenter_Tool
    - Cell_State_Analyzer_Tool requires Single_Cell_Cropper_Tool
+   - Analysis_Visualizer_Tool requires Cell_State_Analyzer_Tool (for cell state visualization)
    
    Ensure all dependencies are satisfied before selecting a tool.
 
@@ -467,6 +474,32 @@ Example (do not copy, use only as reference):
                         sub_goal="Generate single-cell crops from the segmentation mask produced in the previous step. "
                                "Extract individual cell regions with appropriate margins for downstream analysis.",
                         tool_name="Single_Cell_Cropper_Tool"
+                    )
+                    return forced_next_step
+            
+            # CRITICAL: Code-level enforcement for Analysis_Visualizer_Tool after Cell_State_Analyzer_Tool
+            if last_tool == "Cell_State_Analyzer_Tool":
+                # Extract tool name from next_step
+                selected_tool = getattr(next_step, 'tool_name', '') if hasattr(next_step, 'tool_name') else ''
+                # Parse from string if needed
+                if not selected_tool and isinstance(next_step, str):
+                    from octotools.utils.response_parser import ResponseParser
+                    _, _, selected_tool = ResponseParser.parse_next_step(next_step, available_tools)
+                
+                # Enforce: If LLM didn't select Analysis_Visualizer_Tool, override it
+                if selected_tool != 'Analysis_Visualizer_Tool' and 'Analysis_Visualizer_Tool' in available_tools:
+                    logger.warning(f"⚠️ CODE ENFORCEMENT: LLM selected '{selected_tool}' after Cell_State_Analyzer_Tool, "
+                                 f"overriding to Analysis_Visualizer_Tool")
+                    # Override: Create forced next step
+                    forced_context = self._format_memory_for_prompt(memory)
+                    forced_next_step = NextStep(
+                        justification=f"MANDATORY ENFORCEMENT: Previous tool 'Cell_State_Analyzer_Tool' completed cell state analysis. "
+                                    f"Analysis_Visualizer_Tool MUST be called next to visualize the analysis results (UMAP, clusters, exemplars). "
+                                    f"LLM selected '{selected_tool}' which was overridden by code-level enforcement.",
+                        context=forced_context,
+                        sub_goal="Visualize cell state analysis results from Cell_State_Analyzer_Tool. "
+                               "Generate publication-quality UMAP plots, cluster composition charts, and exemplar cell montages.",
+                        tool_name="Analysis_Visualizer_Tool"
                     )
                     return forced_next_step
         

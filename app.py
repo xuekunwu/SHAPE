@@ -34,6 +34,7 @@ from model_configs import HF_MODEL_CONFIGS
 from datetime import datetime
 from octotools.models.utils import make_json_serializable, normalize_tool_name
 from dataclasses import dataclass, field
+import pandas as pd
 
 _AVAILABLE_TOOLS_CACHE = None
 
@@ -138,7 +139,15 @@ if IS_SPACES:
 else:
     DATASET_DIR = Path("solver_cache")
 
-DATASET_DIR.mkdir(parents=True, exist_ok=True) 
+DATASET_DIR.mkdir(parents=True, exist_ok=True)
+
+def get_output_viz_dir() -> str:
+    """Get output visualizations directory path based on environment."""
+    if IS_SPACES:
+        return "/tmp/output_visualizations"
+    else:
+        return os.path.join(os.getcwd(), 'output_visualizations')
+
 global QUERY_ID
 QUERY_ID = None
 
@@ -458,33 +467,7 @@ def add_image_to_group(group_name: str, user_image, state: "AgentState", images_
 
         feature_path = encode_image_features(str(image_path), features_dir / group)
         # Extract original image name from upload_path_map or image path
-        image_name = None
-        # Try to find in upload_path_map by matching paths
-        if state.upload_path_map:
-            img_source_path = None
-            if isinstance(img, dict) and 'path' in img:
-                img_source_path = img['path']
-            elif isinstance(img, str):
-                img_source_path = img
-            
-            if img_source_path:
-                # Normalize paths for comparison
-                img_source_path_norm = os.path.normpath(str(img_source_path))
-                for orig_name, orig_path in state.upload_path_map.items():
-                    orig_path_norm = os.path.normpath(str(orig_path))
-                    if orig_path_norm == img_source_path_norm:
-                        image_name = os.path.splitext(orig_name)[0]  # Remove extension
-                        break
-        
-        # If not found in upload_path_map, extract from source path
-        if not image_name:
-            if isinstance(img, dict) and 'path' in img:
-                image_name = os.path.splitext(os.path.basename(img['path']))[0]
-            elif isinstance(img, str):
-                image_name = os.path.splitext(os.path.basename(img))[0]
-        
-        # Keep original image_name (including spaces and special characters) for consistent file naming
-        # The tools will handle the filename appropriately when saving files
+        image_name = _extract_image_name(img, state.upload_path_map)
         
         entry = {
             "image_id": image_id,
@@ -578,9 +561,76 @@ def normalize_tool_name(tool_name: str, available_tools=None) -> str:
     return "No matched tool given: " + clean_name
 
 
+def _extract_image_source_path(img) -> str:
+    """Extract source path from image object (dict or str)."""
+    if isinstance(img, dict) and 'path' in img:
+        return img['path']
+    elif isinstance(img, str):
+        return img
+    return None
+
+
+def _extract_image_name(img, upload_path_map: Dict[str, str] = None) -> str:
+    """Extract image name from image object, using upload_path_map if available."""
+    image_name = None
+    
+    # Try to find in upload_path_map by matching paths
+    if upload_path_map:
+        img_source_path = _extract_image_source_path(img)
+        if img_source_path:
+            img_source_path_norm = os.path.normpath(str(img_source_path))
+            for orig_name, orig_path in upload_path_map.items():
+                orig_path_norm = os.path.normpath(str(orig_path))
+                if orig_path_norm == img_source_path_norm:
+                    image_name = os.path.splitext(orig_name)[0]
+                    break
+    
+    # If not found in upload_path_map, extract from source path
+    if not image_name:
+        img_source_path = _extract_image_source_path(img)
+        if img_source_path:
+            image_name = os.path.splitext(os.path.basename(img_source_path))[0]
+    
+    return image_name
+
+
+def _build_upload_path_map(files: List[Any]) -> Dict[str, str]:
+    """Build upload_path_map from file list."""
+    upload_path_map = {}
+    for f in files:
+        path = f if isinstance(f, str) else f.get("name", "")
+        if path and os.path.basename(path):
+            upload_path_map[os.path.basename(path)] = path
+    return upload_path_map
+
+
+def _extract_group_from_table(group_table, row_index: int = 0) -> str:
+    """Extract group name from group_table at specified row index."""
+    if group_table is None:
+        return "default"
+    
+    if isinstance(group_table, pd.DataFrame) and not group_table.empty:
+        if len(group_table.columns) > 1 and len(group_table) > row_index:
+            return str(group_table.iloc[row_index, 1]).strip() or "default"
+    elif isinstance(group_table, list) and len(group_table) > row_index and len(group_table[row_index]) > 1:
+        return str(group_table[row_index][1]).strip() if group_table[row_index][1] else "default"
+    
+    return "default"
+
+
+def _find_path_in_map(upload_path_map: Dict[str, str], image_name: str) -> str:
+    """Find full path in upload_path_map, with case-insensitive fallback."""
+    full_path = upload_path_map.get(image_name)
+    if not full_path:
+        # Try case-insensitive match
+        for key, path in upload_path_map.items():
+            if key.lower() == image_name.lower():
+                return path
+    return full_path
+
+
 def _read_group_table_rows(group_table):
     """Extract rows from group_table (DataFrame or list format)."""
-    import pandas as pd
     if isinstance(group_table, pd.DataFrame) and not group_table.empty:
         rows = []
         for row_values in group_table.values:
@@ -1753,23 +1803,21 @@ def parse_arguments():
 def prepare_group_assignment(uploaded_files, conversation_state):
     """Prepare per-file group assignment table after upload and track path mapping."""
     state: AgentState = conversation_state if isinstance(conversation_state, AgentState) else AgentState()
-    state.upload_path_map = {}
+    
     if not uploaded_files:
+        state.upload_path_map = {}
         return gr.update(value=None, visible=True), "**Upload Status**: No files uploaded.", state
+    
     files = uploaded_files if isinstance(uploaded_files, list) else [uploaded_files]
+    state.upload_path_map = _build_upload_path_map(files)
+    
     if len(files) == 1:
-        f = files[0]
-        path = f if isinstance(f, str) else f.get("name", "")
-        image_name = os.path.basename(path)
-        state.upload_path_map[image_name] = path
         # Show table even for single image so user can edit group
+        image_name = list(state.upload_path_map.keys())[0] if state.upload_path_map else "image"
         return gr.update(value=[[image_name, "default"]], visible=True), "**Upload Status**: Single image detected. You can edit the group if needed.", state
-    rows = []
-    for f in files:
-        path = f if isinstance(f, str) else f.get("name", "")
-        image_name = os.path.basename(path)
-        state.upload_path_map[image_name] = path
-        rows.append([image_name, ""])
+    
+    # Multiple images: create rows for each
+    rows = [[image_name, ""] for image_name in state.upload_path_map.keys()]
     return gr.update(value=rows, visible=True), "**Upload Status**: Multiple images detected. Please assign a group per image.", state
 
 
@@ -1784,14 +1832,7 @@ def upload_image_to_group(user_image, group_table, conversation_state):
     
     # Build upload_path_map from user_image directly (don't rely on state)
     # This ensures we always have the correct mapping even if state is out of sync
-    upload_path_map = {}
-    for f in files:
-        path = f if isinstance(f, str) else f.get("name", "")
-        if not path:
-            continue  # Skip invalid paths
-        image_name = os.path.basename(path)
-        if image_name:  # Only add if image_name is not empty
-            upload_path_map[image_name] = path
+    upload_path_map = _build_upload_path_map(files)
     
     # Update state's upload_path_map if it's empty or incomplete
     if not state.upload_path_map or len(state.upload_path_map) < len(upload_path_map):
@@ -1799,34 +1840,15 @@ def upload_image_to_group(user_image, group_table, conversation_state):
 
     # If single image, check if group_table has a group assignment
     if len(files) == 1:
-        # Check if group_table exists and has a group value
-        import pandas as pd
-        if group_table is not None:
-            if isinstance(group_table, pd.DataFrame) and not group_table.empty:
-                # Extract group from the table
-                group = str(group_table.iloc[0, 1]).strip() if len(group_table.columns) > 1 and len(group_table) > 0 else "default"
-            elif isinstance(group_table, list) and len(group_table) > 0 and len(group_table[0]) > 1:
-                # Extract group from list format
-                group = str(group_table[0][1]).strip() if group_table[0][1] else "default"
-            else:
-                group = "default"
-        else:
-            group = "default"
-        status = add_image_to_group(group or "default", files[0], state, images_dir, features_dir)
+        group = _extract_group_from_table(group_table, row_index=0)
+        status = add_image_to_group(group, files[0], state, images_dir, features_dir)
         if status.startswith("✅") or status.startswith("♻️"):
-            import pandas as pd
             if group_table is not None and isinstance(group_table, pd.DataFrame) and not group_table.empty:
                 return state, f"**Progress**: {status}", gr.update(value=group_table.values.tolist(), visible=True)
         return state, f"**Progress**: {status}", gr.update()
 
     # Multiple images: require group_table rows [filepath, group]
-    import pandas as pd
-    if group_table is None:
-        return state, "**Progress**: ⚠️ Multiple images uploaded. Please assign a group per image before adding.", gr.update()
-    
-    # Convert group_table to proper format
-    import pandas as pd
-    if isinstance(group_table, pd.DataFrame) and group_table.empty:
+    if group_table is None or (isinstance(group_table, pd.DataFrame) and group_table.empty):
         return state, "**Progress**: ⚠️ Multiple images uploaded. Please assign a group per image before adding.", gr.update()
     
     rows = _read_group_table_rows(group_table)
@@ -1878,14 +1900,7 @@ def upload_image_to_group(user_image, group_table, conversation_state):
                 continue
             
             # Use the local upload_path_map (built from user_image) instead of state
-            full_path = upload_path_map.get(image_name)
-            if not full_path:
-                # Try case-insensitive match
-                for key, path in upload_path_map.items():
-                    if key.lower() == image_name.lower():
-                        full_path = path
-                        break
-            
+            full_path = _find_path_in_map(upload_path_map, image_name)
             if not full_path:
                 if attempt == 0:  # Only show error on first attempt
                     added_msgs.append(f"⚠️ Skipped file '{image_name}' because original path not found.")
@@ -1919,7 +1934,6 @@ def upload_image_to_group(user_image, group_table, conversation_state):
                 updated_rows.append(row)
     
     # Update group_table
-    import pandas as pd
     updated_table = pd.DataFrame(updated_rows, columns=["image_name", "group"]) if updated_rows else None
     
     progress = "**Progress**:\n" + "\n".join(f"- {m}" for m in added_msgs) if added_msgs else "**Progress**: ⚠️ No images processed."
@@ -2027,19 +2041,12 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
     global QUERY_ID
     QUERY_ID = query_id
     os.makedirs(DATASET_DIR / query_id, exist_ok=True)
-    if IS_SPACES:
-        output_viz_dir = "/tmp/output_visualizations"
-    else:
-        output_viz_dir = os.path.join(os.getcwd(), 'output_visualizations')
+    output_viz_dir = get_output_viz_dir()
     os.makedirs(output_viz_dir, exist_ok=True)
     print(f"✅ Output directory: {output_viz_dir}")
 
     query_cache_dir = os.path.join(str(session_dir), query_id)
     os.makedirs(query_cache_dir, exist_ok=True)
-    
-    # Debug: Print enabled_tools
-    print(f"Debug - enabled_tools: {enabled_tools}")
-    print(f"Debug - type of enabled_tools: {type(enabled_tools)}")
     
     # Ensure enabled_tools is a list and not empty
     if not enabled_tools:
@@ -2188,11 +2195,7 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
             if query_cache_dir != DATASET_DIR.name and DATASET_DIR.name in query_cache_dir:
                 # Preserve output_visualizations directory - DO NOT CLEAR IT
                 # This allows users to keep all generated charts until they start a new analysis
-                # For Spaces, use /tmp directory; for local, use current working directory
-                if IS_SPACES:
-                    output_viz_dir = "/tmp/output_visualizations"
-                else:
-                    output_viz_dir = os.path.join(os.getcwd(), 'output_visualizations')
+                output_viz_dir = get_output_viz_dir()
                 if os.path.exists(output_viz_dir):
                     print(f"📁 Preserving output_visualizations directory: {output_viz_dir}")
                     print(f"💡 All generated charts are preserved for review")

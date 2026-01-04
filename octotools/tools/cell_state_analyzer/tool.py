@@ -608,7 +608,9 @@ class Cell_State_Analyzer_Tool(BaseTool):
         cluster_key = self._compute_umap_and_clustering(adata, cluster_resolution, groups_extracted)
         
         # Save AnnData (contains UMAP coordinates and cluster assignments)
+        # Use absolute path to ensure clarity and reliability
         adata_path = os.path.join(output_dir, "cell_state_analyzed.h5ad")
+        adata_path = os.path.abspath(adata_path)  # Ensure absolute path for clarity
         adata.write(adata_path)
         logger.info(f"✅ AnnData saved to {adata_path}")
         
