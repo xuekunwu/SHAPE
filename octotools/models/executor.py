@@ -119,8 +119,10 @@ import glob
 
 # Dynamically find all metadata files (for multi-image processing)
 # _load_cell_data_from_metadata expects query_cache_dir (parent directory) and constructs tool_cache path internally
+# self.query_cache_dir is the parent directory, self.tool_cache_dir is the full path with tool_cache
 query_cache_dir_parent = r'{self.query_cache_dir}'
-metadata_dir = os.path.join(query_cache_dir_parent, 'tool_cache')
+# Use tool_cache_dir directly to find metadata files (it already contains 'tool_cache')
+metadata_dir = r'{self.tool_cache_dir}'
 metadata_files = glob.glob(os.path.join(metadata_dir, 'cell_crops_metadata_*.json'))
 if not metadata_files:
     execution = {{"error": "No metadata files found", "status": "failed"}}
