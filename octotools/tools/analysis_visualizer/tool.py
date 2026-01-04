@@ -187,28 +187,37 @@ class Analysis_Visualizer_Tool(BaseTool):
             # Default to bar chart
             return 'bar'
     
-    def _create_bar_chart(self, data_by_group: Dict[str, float], colors: List[tuple], 
-                          title: str, ylabel: str, output_path: str, 
+    def _create_bar_chart(self, data_by_group: Dict[str, float], colors: List[tuple],
+                          title: str, ylabel: str, output_path: str,
                           figure_size: tuple, dpi: int, stats_result: Optional[Dict] = None) -> str:
         """Create a bar chart comparing groups."""
         fig, ax = plt.subplots(figsize=figure_size, dpi=dpi)
-        
+
         groups = list(data_by_group.keys())
         values = [data_by_group[g] for g in groups]
+
+        bars = ax.bar(range(len(groups)), values, color=colors[:len(groups)], 
+                     width=0.6, alpha=0.7, edgecolor='white', linewidth=1.0)
         
-        bars = ax.bar(groups, values, color=colors[:len(groups)], alpha=0.7, edgecolor='black', linewidth=1.5)
+        ax.set_xticks(range(len(groups)))
+        ax.set_xticklabels(groups, rotation=45, ha='right')
         
         # Add value labels on bars
         for bar, val in zip(bars, values):
             height = bar.get_height()
             ax.text(bar.get_x() + bar.get_width()/2., height,
                    f'{val:.2f}' if isinstance(val, float) else f'{val}',
-                   ha='center', va='bottom', fontsize=10, fontweight='bold')
+                   ha='center', va='bottom', fontsize=11, fontweight='normal')
         
-        ax.set_xlabel('Group', fontsize=12, fontweight='bold')
-        ax.set_ylabel(ylabel, fontsize=12, fontweight='bold')
-        ax.set_title(title, fontsize=14, fontweight='bold', pad=20)
-        ax.grid(axis='y', alpha=0.3, linestyle='--')
+        ax.set_xlabel('Group', fontsize=14, fontweight='normal')
+        ax.set_ylabel(ylabel, fontsize=14, fontweight='normal')
+        ax.set_title(title, fontsize=16, fontweight='normal', pad=15)
+        ax.grid(axis='y', alpha=0.2, linestyle='-', linewidth=0.5)
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        ax.spines['left'].set_linewidth(1)
+        ax.spines['bottom'].set_linewidth(1)
+        ax.tick_params(labelsize=11)
         
         # Add statistical test result
         if stats_result and stats_result.get('test_type') != 'none':
@@ -241,9 +250,9 @@ class Analysis_Visualizer_Tool(BaseTool):
         # Create pie chart with labels
         wedges, texts, autotexts = ax.pie(values, labels=groups, colors=colors[:len(groups)],
                                           autopct='%1.1f%%', startangle=90,
-                                          textprops={'fontsize': 10, 'fontweight': 'bold'})
+                                          textprops={'fontsize': 11, 'fontweight': 'normal'})
         
-        ax.set_title(title, fontsize=14, fontweight='bold', pad=20)
+        ax.set_title(title, fontsize=16, fontweight='normal', pad=15)
         
         plt.tight_layout()
         plt.savefig(output_path, dpi=dpi, bbox_inches='tight')
@@ -268,10 +277,15 @@ class Analysis_Visualizer_Tool(BaseTool):
             patch.set_facecolor(color)
             patch.set_alpha(0.7)
         
-        ax.set_xlabel('Group', fontsize=12, fontweight='bold')
-        ax.set_ylabel(ylabel, fontsize=12, fontweight='bold')
-        ax.set_title(title, fontsize=14, fontweight='bold', pad=20)
-        ax.grid(axis='y', alpha=0.3, linestyle='--')
+        ax.set_xlabel('Group', fontsize=14, fontweight='normal')
+        ax.set_ylabel(ylabel, fontsize=14, fontweight='normal')
+        ax.set_title(title, fontsize=16, fontweight='normal', pad=15)
+        ax.grid(axis='y', alpha=0.2, linestyle='-', linewidth=0.5)
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        ax.spines['left'].set_linewidth(1)
+        ax.spines['bottom'].set_linewidth(1)
+        ax.tick_params(labelsize=11)
         
         # Add statistical test result
         if stats_result and stats_result.get('test_type') != 'none':
@@ -307,10 +321,15 @@ class Analysis_Visualizer_Tool(BaseTool):
         
         ax.set_xticks(range(len(groups)))
         ax.set_xticklabels(groups)
-        ax.set_xlabel('Group', fontsize=12, fontweight='bold')
-        ax.set_ylabel(ylabel, fontsize=12, fontweight='bold')
-        ax.set_title(title, fontsize=14, fontweight='bold', pad=20)
-        ax.grid(axis='y', alpha=0.3, linestyle='--')
+        ax.set_xlabel('Group', fontsize=14, fontweight='normal')
+        ax.set_ylabel(ylabel, fontsize=14, fontweight='normal')
+        ax.set_title(title, fontsize=16, fontweight='normal', pad=15)
+        ax.grid(axis='y', alpha=0.2, linestyle='-', linewidth=0.5)
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        ax.spines['left'].set_linewidth(1)
+        ax.spines['bottom'].set_linewidth(1)
+        ax.tick_params(labelsize=11)
         
         # Add statistical test result
         if stats_result and stats_result.get('test_type') != 'none':
@@ -617,11 +636,39 @@ class Analysis_Visualizer_Tool(BaseTool):
         
         # Load AnnData
         adata_path = analysis_data.get('adata_path')
-        if not adata_path or not os.path.exists(adata_path):
+        if not adata_path:
             return {
-                "error": f"AnnData file not found: {adata_path}",
+                "error": "AnnData file path not provided in analysis_data",
                 "summary": "Visualization failed"
             }
+        
+        # Try multiple possible paths if file doesn't exist at specified location
+        if not os.path.exists(adata_path):
+            # Try relative path from current working directory
+            possible_paths = [
+                adata_path,
+                os.path.join(os.getcwd(), adata_path),
+                os.path.abspath(adata_path)
+            ]
+            # Also try with common cache directories
+            if 'solver_cache' in adata_path:
+                possible_paths.extend([
+                    os.path.join('solver_cache', os.path.basename(adata_path)),
+                    os.path.join('.', adata_path)
+                ])
+            
+            found = False
+            for path in possible_paths:
+                if os.path.exists(path):
+                    adata_path = path
+                    found = True
+                    break
+            
+            if not found:
+                return {
+                    "error": f"AnnData file not found at: {analysis_data.get('adata_path')}. Tried: {', '.join(possible_paths[:3])}",
+                    "summary": "Visualization failed - AnnData file not accessible"
+                }
         
         adata = ad.read_h5ad(adata_path)
         cluster_key = analysis_data.get('cluster_key', 'leiden_0.5')
@@ -652,19 +699,30 @@ class Analysis_Visualizer_Tool(BaseTool):
             if composition_path:
                 visual_outputs.append(composition_path)
         
-        # 4. Create cluster size bar chart
-        cluster_size_path = self._create_cluster_size_chart(
+        # 4. Create pie chart of cluster proportions
+        cluster_pie_path = self._create_cluster_proportion_pie_chart(
             adata, cluster_key, output_dir, figure_size, dpi
         )
-        if cluster_size_path:
-            visual_outputs.append(cluster_size_path)
+        if cluster_pie_path:
+            visual_outputs.append(cluster_pie_path)
+        
+        # 5. Create cluster exemplar montage (separate from UMAP)
+        exemplar_path = self._create_cluster_exemplar_montage(
+            adata, cluster_key, cluster_resolution, output_dir, figure_size, dpi
+        )
+        if exemplar_path:
+            visual_outputs.append(exemplar_path)
+        
+        # Calculate cluster statistics
+        cluster_stats = self._calculate_cluster_statistics(adata, cluster_key)
         
         return {
             "summary": f"Generated {len(visual_outputs)} publication-quality visualizations for cell state analysis",
             "visual_outputs": visual_outputs,
             "cell_count": adata.n_obs,
             "num_clusters": adata.obs[cluster_key].nunique() if cluster_key in adata.obs else 0,
-            "cluster_key": cluster_key
+            "cluster_key": cluster_key,
+            "cluster_statistics": cluster_stats
         }
     
     def _create_publication_umap_by_cluster(self, adata, cluster_key: str, resolution: float,
@@ -673,8 +731,8 @@ class Analysis_Visualizer_Tool(BaseTool):
         if 'X_umap' not in adata.obsm or cluster_key not in adata.obs:
             return None
         
-        # Create figure with professional styling
-        fig, ax = VisualizationConfig.create_professional_figure(figsize=(12, 10))
+        # Create figure with professional styling - consistent size
+        fig, ax = VisualizationConfig.create_professional_figure(figsize=figure_size)
         
         # Get unique clusters and assign colors
         clusters = sorted(adata.obs[cluster_key].unique())
@@ -682,73 +740,30 @@ class Analysis_Visualizer_Tool(BaseTool):
         colors = self._get_color_scheme(n_clusters)
         cluster_colors = {cluster: colors[i] for i, cluster in enumerate(clusters)}
         
-        # Plot each cluster
+        # Plot each cluster with larger dots
         for cluster in clusters:
             cluster_mask = adata.obs[cluster_key] == cluster
             umap_coords = adata.obsm['X_umap'][cluster_mask]
             ax.scatter(umap_coords[:, 0], umap_coords[:, 1], 
                       c=[cluster_colors[cluster]], label=f'Cluster {cluster}',
-                      s=50, alpha=0.6, edgecolors='white', linewidths=0.5)
+                      s=100, alpha=0.7, edgecolors='white', linewidths=0.8)
         
-        # Add sample cell crops for each cluster (5 random cells per cluster)
-        if 'crop_path' in adata.obs:
-            crops_per_cluster = 5
-            random.seed(42)  # Set seed for reproducibility
-            
-            for cluster in clusters:
-                cluster_mask = adata.obs[cluster_key] == cluster
-                cluster_indices = np.where(cluster_mask)[0]
-                
-                if len(cluster_indices) == 0:
-                    continue
-                
-                # Randomly sample cells (up to crops_per_cluster)
-                n_samples = min(crops_per_cluster, len(cluster_indices))
-                sampled_indices = random.sample(list(cluster_indices), n_samples)
-                
-                for idx in sampled_indices:
-                    crop_path = adata.obs.iloc[idx]['crop_path']
-                    # Handle both string paths and list paths
-                    if isinstance(crop_path, (list, np.ndarray)) and len(crop_path) > 0:
-                        crop_path = crop_path[0] if isinstance(crop_path[0], str) else str(crop_path[0])
-                    elif not isinstance(crop_path, str):
-                        crop_path = str(crop_path) if crop_path is not None else None
-                    
-                    if crop_path and os.path.exists(crop_path):
-                        try:
-                            # Load and resize crop image
-                            crop_img = self._load_and_resize_crop(crop_path, size=(60, 60))
-                            if crop_img is not None:
-                                # Get UMAP coordinates
-                                umap_coords = adata.obsm['X_umap'][idx]
-                                
-                                # Create OffsetImage
-                                im = OffsetImage(crop_img, zoom=0.8, alpha=0.9)
-                                
-                                # Create AnnotationBbox with colored border matching cluster
-                                ab = AnnotationBbox(im, (umap_coords[0], umap_coords[1]),
-                                                   frameon=True, box_alignment=(0.5, 0.5),
-                                                   bboxprops=dict(boxstyle='round,pad=2',
-                                                                 edgecolor=cluster_colors[cluster],
-                                                                 linewidth=2.5,
-                                                                 facecolor='white'))
-                                ax.add_artist(ab)
-                        except Exception as e:
-                            # Skip if image loading fails
-                            continue
+        ax.set_xlabel('UMAP 1', fontsize=14, fontweight='normal')
+        ax.set_ylabel('UMAP 2', fontsize=14, fontweight='normal')
+        ax.set_title(f'UMAP - Leiden Clustering (resolution={resolution})', 
+                    fontsize=16, fontweight='normal', pad=15)
         
-        ax.set_xlabel('UMAP 1', fontsize=16, fontweight='bold')
-        ax.set_ylabel('UMAP 2', fontsize=16, fontweight='bold')
-        ax.set_title(f'UMAP Visualization - Leiden Clustering (resolution={resolution})', 
-                    fontsize=18, fontweight='bold', pad=20)
-        
-        # Professional legend
+        # Clean, simple legend
         ax.legend(bbox_to_anchor=(1.02, 1), loc='upper left', 
-                 frameon=True, fancybox=True, shadow=True, fontsize=12)
+                 frameon=True, fancybox=False, shadow=False, fontsize=11, 
+                 edgecolor='gray', facecolor='white')
         
-        ax.grid(True, alpha=0.3, linestyle='--')
+        ax.grid(True, alpha=0.2, linestyle='-', linewidth=0.5)
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
+        ax.spines['left'].set_linewidth(1)
+        ax.spines['bottom'].set_linewidth(1)
+        ax.tick_params(labelsize=11)
         
         output_path = os.path.join(output_dir, f"umap_cluster_res{resolution}.png")
         VisualizationConfig.save_professional_figure(fig, output_path)
@@ -789,7 +804,7 @@ class Analysis_Visualizer_Tool(BaseTool):
         if 'X_umap' not in adata.obsm or 'group' not in adata.obs:
             return None
         
-        fig, ax = VisualizationConfig.create_professional_figure(figsize=(10, 8))
+        fig, ax = VisualizationConfig.create_professional_figure(figsize=figure_size)
         
         groups = sorted(adata.obs['group'].unique())
         n_groups = len(groups)
@@ -801,19 +816,23 @@ class Analysis_Visualizer_Tool(BaseTool):
             umap_coords = adata.obsm['X_umap'][group_mask]
             ax.scatter(umap_coords[:, 0], umap_coords[:, 1],
                       c=[group_colors[group]], label=str(group),
-                      s=50, alpha=0.6, edgecolors='white', linewidths=0.5)
+                      s=100, alpha=0.7, edgecolors='white', linewidths=0.8)
         
-        ax.set_xlabel('UMAP 1', fontsize=16, fontweight='bold')
-        ax.set_ylabel('UMAP 2', fontsize=16, fontweight='bold')
-        ax.set_title('UMAP Visualization - Colored by Group',
-                    fontsize=18, fontweight='bold', pad=20)
+        ax.set_xlabel('UMAP 1', fontsize=14, fontweight='normal')
+        ax.set_ylabel('UMAP 2', fontsize=14, fontweight='normal')
+        ax.set_title('UMAP - Colored by Group',
+                    fontsize=16, fontweight='normal', pad=15)
         
-        ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left',
-                 frameon=True, fancybox=True, shadow=True, fontsize=12)
+        ax.legend(bbox_to_anchor=(1.02, 1), loc='upper left',
+                 frameon=True, fancybox=False, shadow=False, fontsize=11,
+                 edgecolor='gray', facecolor='white')
         
-        ax.grid(True, alpha=0.3, linestyle='--')
+        ax.grid(True, alpha=0.2, linestyle='-', linewidth=0.5)
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
+        ax.spines['left'].set_linewidth(1)
+        ax.spines['bottom'].set_linewidth(1)
+        ax.tick_params(labelsize=11)
         
         output_path = os.path.join(output_dir, "umap_by_group.png")
         VisualizationConfig.save_professional_figure(fig, output_path)
@@ -834,23 +853,27 @@ class Analysis_Visualizer_Tool(BaseTool):
             normalize='index'
         )
         
-        fig, ax = VisualizationConfig.create_professional_figure(figsize=(12, 8))
+        fig, ax = VisualizationConfig.create_professional_figure(figsize=figure_size)
         
-        # Stacked bar chart
+        # Stacked bar chart with narrower bars
         composition.plot(kind='bar', stacked=True, ax=ax, 
-                        colormap='tab20', width=0.8, edgecolor='white', linewidth=1.5)
+                        colormap='tab20', width=0.6, edgecolor='white', linewidth=1.0)
         
-        ax.set_xlabel('Group', fontsize=16, fontweight='bold')
-        ax.set_ylabel('Proportion', fontsize=16, fontweight='bold')
-        ax.set_title('Cluster Composition by Group', fontsize=18, fontweight='bold', pad=20)
+        ax.set_xlabel('Group', fontsize=14, fontweight='normal')
+        ax.set_ylabel('Proportion', fontsize=14, fontweight='normal')
+        ax.set_title('Cluster Composition by Group', fontsize=16, fontweight='normal', pad=15)
         
-        ax.legend(title='Cluster', bbox_to_anchor=(1.05, 1), loc='upper left',
-                 frameon=True, fancybox=True, shadow=True, fontsize=11)
+        ax.legend(title='Cluster', bbox_to_anchor=(1.02, 1), loc='upper left',
+                 frameon=True, fancybox=False, shadow=False, fontsize=10,
+                 edgecolor='gray', facecolor='white', title_fontsize=11)
         
         ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')
-        ax.grid(True, alpha=0.3, linestyle='--', axis='y')
+        ax.grid(True, alpha=0.2, linestyle='-', linewidth=0.5, axis='y')
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
+        ax.spines['left'].set_linewidth(1)
+        ax.spines['bottom'].set_linewidth(1)
+        ax.tick_params(labelsize=11)
         
         output_path = os.path.join(output_dir, "cluster_composition_by_group.png")
         VisualizationConfig.save_professional_figure(fig, output_path)
@@ -858,42 +881,136 @@ class Analysis_Visualizer_Tool(BaseTool):
         
         return output_path
     
-    def _create_cluster_size_chart(self, adata, cluster_key: str,
-                                  output_dir: str, figure_size: tuple, dpi: int) -> Optional[str]:
-        """Create cluster size distribution bar chart."""
+    def _create_cluster_exemplar_montage(self, adata, cluster_key: str, resolution: float,
+                                        output_dir: str, figure_size: tuple, dpi: int) -> Optional[str]:
+        """Create separate montage showing exemplar cell crops for each cluster."""
+        if cluster_key not in adata.obs or 'crop_path' not in adata.obs:
+            return None
+        
+        clusters = sorted(adata.obs[cluster_key].unique())
+        crops_per_cluster = 5
+        random.seed(42)  # Set seed for reproducibility
+        
+        # Calculate layout: rows = clusters, cols = crops_per_cluster
+        n_rows = len(clusters)
+        n_cols = crops_per_cluster
+        crop_size = 100  # Size for each crop in montage
+        
+        # Adjust figure size for montage (wider for 5 columns)
+        montage_figsize = (figure_size[0] * 1.2, figure_size[1] * (n_rows * 0.8))
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=montage_figsize, dpi=dpi)
+        if n_rows == 1:
+            axes = axes.reshape(1, -1)
+        
+        colors = self._get_color_scheme(len(clusters))
+        cluster_colors = {cluster: colors[i] for i, cluster in enumerate(clusters)}
+        
+        for row_idx, cluster in enumerate(clusters):
+            cluster_mask = adata.obs[cluster_key] == cluster
+            cluster_indices = np.where(cluster_mask)[0]
+            
+            if len(cluster_indices) == 0:
+                continue
+            
+            # Randomly sample cells
+            n_samples = min(crops_per_cluster, len(cluster_indices))
+            sampled_indices = random.sample(list(cluster_indices), n_samples)
+            
+            for col_idx in range(n_cols):
+                ax = axes[row_idx, col_idx]
+                ax.axis('off')
+                
+                if col_idx < len(sampled_indices):
+                    idx = sampled_indices[col_idx]
+                    crop_path = adata.obs.iloc[idx]['crop_path']
+                    
+                    # Handle path format
+                    if isinstance(crop_path, (list, np.ndarray)) and len(crop_path) > 0:
+                        crop_path = crop_path[0] if isinstance(crop_path[0], str) else str(crop_path[0])
+                    elif not isinstance(crop_path, str):
+                        crop_path = str(crop_path) if crop_path is not None else None
+                    
+                    if crop_path and os.path.exists(crop_path):
+                        try:
+                            crop_img = self._load_and_resize_crop(crop_path, size=(crop_size, crop_size))
+                            if crop_img is not None:
+                                ax.imshow(crop_img, cmap='gray' if len(crop_img.shape) == 2 else None)
+                                # Add border with cluster color
+                                for spine in ax.spines.values():
+                                    spine.set_visible(True)
+                                    spine.set_color(cluster_colors[cluster])
+                                    spine.set_linewidth(2)
+                        except Exception:
+                            pass
+                
+                # Add cluster label on first column
+                if col_idx == 0:
+                    ax.text(-0.08, 0.5, f'Cluster {cluster}', transform=ax.transAxes,
+                           fontsize=14, fontweight='normal', va='center', ha='right')
+        
+        plt.suptitle(f'Cluster Exemplars (resolution={resolution})', 
+                    fontsize=16, fontweight='normal', y=0.995)
+        plt.tight_layout(rect=[0.05, 0, 1, 0.96])
+        
+        output_path = os.path.join(output_dir, f"cluster_exemplars_res{resolution}.png")
+        fig.savefig(output_path, dpi=dpi, bbox_inches='tight', facecolor='white', edgecolor='none')
+        plt.close(fig)
+        
+        return output_path
+    
+    def _create_cluster_proportion_pie_chart(self, adata, cluster_key: str,
+                                            output_dir: str, figure_size: tuple, dpi: int) -> Optional[str]:
+        """Create pie chart showing cluster proportions."""
         if cluster_key not in adata.obs:
             return None
         
         cluster_counts = adata.obs[cluster_key].value_counts().sort_index()
+        total_cells = cluster_counts.sum()
+        proportions = cluster_counts / total_cells * 100
         
-        fig, ax = VisualizationConfig.create_professional_figure(figsize=(10, 6))
+        fig, ax = VisualizationConfig.create_professional_figure(figsize=figure_size)
         
         colors = self._get_color_scheme(len(cluster_counts))
-        bars = ax.bar(range(len(cluster_counts)), cluster_counts.values, 
-                     color=colors[:len(cluster_counts)], edgecolor='white', linewidth=1.5)
+        labels = [f'Cluster {c}\n({p:.1f}%)' for c, p in zip(cluster_counts.index, proportions)]
         
-        ax.set_xlabel('Cluster', fontsize=16, fontweight='bold')
-        ax.set_ylabel('Number of Cells', fontsize=16, fontweight='bold')
-        ax.set_title('Cluster Size Distribution', fontsize=18, fontweight='bold', pad=20)
+        wedges, texts, autotexts = ax.pie(cluster_counts.values, labels=labels,
+                                          colors=colors[:len(cluster_counts)],
+                                          autopct='', startangle=90,
+                                          textprops={'fontsize': 11, 'fontweight': 'normal'})
         
-        ax.set_xticks(range(len(cluster_counts)))
-        ax.set_xticklabels([f'Cluster {c}' for c in cluster_counts.index], rotation=45, ha='right')
+        ax.set_title('Cluster Proportions', fontsize=16, fontweight='normal', pad=15)
         
-        # Add value labels on bars
-        for i, (bar, count) in enumerate(zip(bars, cluster_counts.values)):
-            height = bar.get_height()
-            ax.text(bar.get_x() + bar.get_width()/2., height,
-                   f'{int(count)}', ha='center', va='bottom', fontsize=12, fontweight='bold')
-        
-        ax.grid(True, alpha=0.3, linestyle='--', axis='y')
-        ax.spines['top'].set_visible(False)
-        ax.spines['right'].set_visible(False)
-        
-        output_path = os.path.join(output_dir, "cluster_size_distribution.png")
+        output_path = os.path.join(output_dir, "cluster_proportion_pie_chart.png")
         VisualizationConfig.save_professional_figure(fig, output_path)
         plt.close(fig)
         
         return output_path
+    
+    def _calculate_cluster_statistics(self, adata, cluster_key: str) -> Dict[str, Any]:
+        """Calculate statistics for each cluster."""
+        if cluster_key not in adata.obs:
+            return {}
+        
+        cluster_counts = adata.obs[cluster_key].value_counts().sort_index()
+        total_cells = cluster_counts.sum()
+        
+        stats = {}
+        for cluster_id in cluster_counts.index:
+            cluster_mask = adata.obs[cluster_key] == cluster_id
+            cluster_size = cluster_counts[cluster_id]
+            
+            stats[str(cluster_id)] = {
+                'cell_count': int(cluster_size),
+                'proportion': float(cluster_size / total_cells * 100)
+            }
+            
+            # Add area statistics if available
+            if 'area' in adata.obs:
+                cluster_areas = adata.obs.loc[cluster_mask, 'area']
+                stats[str(cluster_id)]['mean_area'] = float(cluster_areas.mean())
+                stats[str(cluster_id)]['median_area'] = float(cluster_areas.median())
+        
+        return stats
     
     def execute(self, analysis_data: Union[Dict, str], 
                 chart_type: str = 'auto',
@@ -933,11 +1050,15 @@ class Analysis_Visualizer_Tool(BaseTool):
                     }
             
             # Check if this is cell state analysis output (from Cell_State_Analyzer_Tool)
-            # Also check if adata_path exists (even without analysis_type for backward compatibility)
+            # Detect by: (1) explicit analysis_type flag, or (2) presence of adata_path + cluster_key
+            # Also check if group_column is a cluster key (starts with 'leiden_' or matches cluster_key)
             is_cell_state_analysis = (
                 isinstance(analysis_data, dict) and 
                 'adata_path' in analysis_data and
                 (analysis_data.get('analysis_type') == 'cell_state_analysis' or 
+                 'cluster_key' in analysis_data or  # If cluster_key is present, assume cell state analysis
+                 group_column.startswith('leiden_') or  # If group_column is a cluster key
+                 group_column == analysis_data.get('cluster_key') or  # If group_column matches cluster_key
                  os.path.exists(analysis_data.get('adata_path', '')))
             )
             
@@ -947,7 +1068,7 @@ class Analysis_Visualizer_Tool(BaseTool):
                     analysis_data, output_dir, figure_size, dpi
                 )
             
-            # Prepare data for regular visualizations
+            # Prepare data for regular visualizations (only if not cell state analysis)
             data_by_group, stats_result, groups = self._prepare_data(
                 analysis_data, comparison_metric, group_column
             )
