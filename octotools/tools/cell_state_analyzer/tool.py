@@ -502,9 +502,40 @@ class Cell_State_Analyzer_Tool(BaseTool):
         
         cell_crops = data.get('cell_crops_paths', [])
         cell_metadata = data.get('cell_metadata', [])
+        cell_crop_objects = data.get('cell_crop_objects', [])
         
         # Normalize paths
         cell_crops = [os.path.normpath(path) for path in cell_crops]
+        
+        # If cell_crop_objects are available, extract group and image_name from them
+        # Otherwise, try to extract from cell_metadata or cell_id
+        if cell_crop_objects and len(cell_crop_objects) == len(cell_crops):
+            # Extract group and image_name from cell_crop_objects
+            for i, crop_obj in enumerate(cell_crop_objects):
+                if isinstance(crop_obj, dict):
+                    # Extract group and source_image_id (image_name) from cell_crop_objects
+                    group = crop_obj.get('group', 'default')
+                    image_name = crop_obj.get('source_image_id', '')
+                    cell_id = crop_obj.get('cell_id', '')
+                    
+                    # If cell_id is in format {group}_{image_name}_{crop_id}, parse it
+                    if cell_id and '_' in cell_id:
+                        parts = cell_id.split('_', 2)  # Split into max 3 parts
+                        if len(parts) >= 3:
+                            # Format: group_image_name_crop_id
+                            group = parts[0]
+                            image_name = parts[1]
+                    
+                    # Update cell_metadata to include group and image_name
+                    if i < len(cell_metadata):
+                        if isinstance(cell_metadata[i], dict):
+                            cell_metadata[i]['group'] = group
+                            cell_metadata[i]['image_name'] = image_name
+                            cell_metadata[i]['cell_id'] = cell_id
+                        else:
+                            cell_metadata[i] = {'group': group, 'image_name': image_name, 'cell_id': cell_id}
+                    else:
+                        cell_metadata.append({'group': group, 'image_name': image_name, 'cell_id': cell_id})
         
         return cell_crops, cell_metadata
     
@@ -546,13 +577,28 @@ class Cell_State_Analyzer_Tool(BaseTool):
         output_dir = os.path.join(query_cache_dir, "cell_state_analysis")
         os.makedirs(output_dir, exist_ok=True)
         
-        # Extract groups from metadata
+        # Extract groups and image_names from metadata
         groups = []
+        image_names = []
         for meta in cell_metadata:
-            if isinstance(meta, dict) and 'group' in meta:
-                groups.append(meta['group'])
+            if isinstance(meta, dict):
+                groups.append(meta.get('group', 'default'))
+                # Extract image_name from metadata, or from cell_id if available
+                image_name = meta.get('image_name', '')
+                if not image_name and 'cell_id' in meta:
+                    # Parse cell_id in format: {group}_{image_name}_{crop_id}
+                    cell_id = meta.get('cell_id', '')
+                    if cell_id and '_' in cell_id:
+                        parts = cell_id.split('_', 2)
+                        if len(parts) >= 3:
+                            image_name = parts[1]
+                if not image_name:
+                    # Fallback: extract from crop path if available
+                    image_name = 'unknown'
+                image_names.append(image_name)
             else:
                 groups.append("default")
+                image_names.append("unknown")
         
         # Create datasets
         train_transform = self._get_augmentation_transform()
@@ -598,14 +644,25 @@ class Cell_State_Analyzer_Tool(BaseTool):
             }
         
         adata = ad.AnnData(X=feats)
-        adata.obs["image_name"] = img_names
-        adata.obs["group"] = groups_extracted
+        # Use image_names extracted from metadata instead of img_names from paths
+        adata.obs["image_name"] = image_names if len(image_names) == adata.n_obs else img_names
+        adata.obs["group"] = groups if len(groups) == adata.n_obs else groups_extracted
         # Store full cell crop paths for visualization
         adata.obs["crop_path"] = cell_crops
-        adata.obs.index = [f"cell_{i}" for i in range(adata.n_obs)]
+        # Use cell_id from metadata as index if available, otherwise use default
+        if cell_metadata and len(cell_metadata) == adata.n_obs:
+            cell_ids = []
+            for meta in cell_metadata:
+                if isinstance(meta, dict) and 'cell_id' in meta:
+                    cell_ids.append(meta['cell_id'])
+                else:
+                    cell_ids.append(f"cell_{len(cell_ids)}")
+            adata.obs.index = cell_ids
+        else:
+            adata.obs.index = [f"cell_{i}" for i in range(adata.n_obs)]
         
         # Compute UMAP and clustering (no visualization - handled by Analysis_Visualizer_Tool)
-        cluster_key = self._compute_umap_and_clustering(adata, cluster_resolution, groups_extracted)
+        cluster_key = self._compute_umap_and_clustering(adata, cluster_resolution, groups if len(groups) == adata.n_obs else groups_extracted)
         
         # Save AnnData (contains UMAP coordinates and cluster assignments)
         # Use absolute path to ensure clarity and reliability

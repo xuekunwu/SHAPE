@@ -2215,153 +2215,168 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
 
 def main(args):
     #################### Gradio Interface ####################
-    # Apple-inspired theme: clean, minimal, elegant
-    apple_theme = gr.themes.Soft(
+    # Meta AI-inspired theme: clean, modern, professional
+    meta_theme = gr.themes.Soft(
         primary_hue="blue",
         secondary_hue="gray",
         neutral_hue="slate",
-        font=("SF Pro Display", "-apple-system", "BlinkMacSystemFont", "Segoe UI", "Helvetica Neue", "Arial", "sans-serif"),
-        font_mono=("SF Mono", "Monaco", "Menlo", "Consolas", "monospace"),
+        font=("Segoe UI", "-apple-system", "BlinkMacSystemFont", "Helvetica Neue", "Arial", "sans-serif"),
+        font_mono=("Consolas", "Monaco", "Menlo", "Courier New", "monospace"),
     ).set(
-        # Apple-style color palette
+        # Meta AI-style color palette
         body_background_fill="#ffffff",
-        body_background_fill_dark="#000000",
-        body_text_color="#1d1d1f",
-        body_text_color_dark="#f5f5f7",
-        background_fill_secondary="#f5f5f7",
-        background_fill_secondary_dark="#1d1d1f",
-        border_color_accent="#d2d2d7",
-        border_color_accent_dark="#424245",
-        button_primary_background_fill="#0071e3",
-        button_primary_background_fill_hover="#0077ed",
+        body_background_fill_dark="#18191a",
+        body_text_color="#050505",
+        body_text_color_dark="#e4e6eb",
+        background_fill_secondary="#f0f2f5",
+        background_fill_secondary_dark="#242526",
+        border_color_accent="#ccd0d5",
+        border_color_accent_dark="#3a3b3c",
+        button_primary_background_fill="#0866ff",
+        button_primary_background_fill_hover="#1877f2",
         button_primary_text_color="#ffffff",
-        button_secondary_background_fill="#f5f5f7",
-        button_secondary_background_fill_hover="#e8e8ed",
-        button_secondary_text_color="#1d1d1f",
+        button_secondary_background_fill="#e4e6eb",
+        button_secondary_background_fill_hover="#d8dadf",
+        button_secondary_text_color="#050505",
         input_background_fill="#ffffff",
-        input_background_fill_dark="#1d1d1f",
-        input_border_color="#d2d2d7",
-        shadow_drop="0 2px 8px rgba(0,0,0,0.08)",
-        shadow_drop_lg="0 4px 16px rgba(0,0,0,0.12)",
+        input_background_fill_dark="#242526",
+        input_border_color="#ccd0d5",
+        shadow_drop="0 2px 4px rgba(0,0,0,0.1)",
+        shadow_drop_lg="0 4px 12px rgba(0,0,0,0.15)",
     )
     
-    with gr.Blocks(theme=apple_theme, title="SHAPE - Single-Cell Bioimage Analysis") as demo:
-        # Custom CSS for Apple-style refinements
+    with gr.Blocks(theme=meta_theme, title="SHAPE - Single-Cell Bioimage Analysis") as demo:
+        # Custom CSS for Meta AI-style refinements
         demo.css = """
         .gradio-container {
             max-width: 95% !important;
             margin: 0 auto;
             padding: 20px 10px;
+            background: #ffffff !important;
         }
         h1 {
             font-size: 48px !important;
-            font-weight: 600 !important;
+            font-weight: 700 !important;
             letter-spacing: -0.5px !important;
-            color: #1d1d1f !important;
+            color: #050505 !important;
             margin-bottom: 8px !important;
-            line-height: 1.1 !important;
+            line-height: 1.2 !important;
         }
         h2, h3 {
             font-size: 24px !important;
             font-weight: 600 !important;
-            color: #1d1d1f !important;
-            letter-spacing: -0.3px !important;
+            color: #050505 !important;
+            letter-spacing: -0.2px !important;
         }
         .markdown p {
-            font-size: 20px !important;
-            line-height: 1.47059 !important;
-            color: #6e6e73 !important;
+            font-size: 17px !important;
+            line-height: 1.5 !important;
+            color: #65676b !important;
             margin-bottom: 12px !important;
         }
         button {
-            border: 1px solid #d2d2d7 !important;
-            border-radius: 12px !important;
-            font-weight: 500 !important;
-            font-size: 20px !important;
-            transition: all 0.3s ease !important;
+            border: none !important;
+            border-radius: 6px !important;
+            font-weight: 600 !important;
+            font-size: 17px !important;
+            transition: all 0.2s ease !important;
         }
         .button-primary {
-            border: 1px solid #0071e3 !important;
-            border-radius: 12px !important;
-            font-weight: 500 !important;
-            font-size: 20px !important;
-            padding: 12px 24px !important;
-            transition: all 0.3s ease !important;
+            background: #0866ff !important;
+            border: none !important;
+            border-radius: 6px !important;
+            font-weight: 600 !important;
+            font-size: 17px !important;
+            padding: 10px 20px !important;
+            color: #ffffff !important;
+            transition: all 0.2s ease !important;
         }
         .button-primary:hover {
-            transform: translateY(-1px) !important;
-            box-shadow: 0 4px 12px rgba(0, 113, 227, 0.3) !important;
+            background: #1877f2 !important;
+            box-shadow: 0 2px 4px rgba(8, 102, 255, 0.2) !important;
         }
         input, textarea, select {
-            border: 1px solid #d2d2d7 !important;
-            border-radius: 8px !important;
-            font-size: 20px !important;
+            border: 1px solid #ccd0d5 !important;
+            border-radius: 6px !important;
+            font-size: 17px !important;
+            background: #ffffff !important;
+        }
+        input:focus, textarea:focus, select:focus {
+            border-color: #0866ff !important;
+            outline: none !important;
+            box-shadow: 0 0 0 2px rgba(8, 102, 255, 0.1) !important;
         }
         .input-text {
-            border: 1px solid #d2d2d7 !important;
-            border-radius: 8px !important;
-            font-size: 20px !important;
-            padding: 12px 16px !important;
+            border: 1px solid #ccd0d5 !important;
+            border-radius: 6px !important;
+            font-size: 17px !important;
+            padding: 10px 12px !important;
         }
         .chatbot {
-            border-radius: 12px !important;
-            border: 1px solid #d2d2d7 !important;
+            border-radius: 8px !important;
+            border: 1px solid #ccd0d5 !important;
             background: #ffffff !important;
         }
         .gallery {
-            border-radius: 12px !important;
-            border: 1px solid #d2d2d7 !important;
+            border-radius: 8px !important;
+            border: 1px solid #ccd0d5 !important;
+            background: #ffffff !important;
         }
         .panel, .block, .form, .gr-block {
-            border: 1px solid #d2d2d7 !important;
-            border-radius: 12px !important;
+            border: 1px solid #e4e6eb !important;
+            border-radius: 8px !important;
             padding: 16px !important;
             margin-bottom: 16px !important;
+            background: #ffffff !important;
         }
         .section-header {
             margin-bottom: 16px !important;
         }
         .config-card {
             margin-bottom: 12px !important;
+            background: #f0f2f5 !important;
+            border: none !important;
         }
         .status-text {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif !important;
+            font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif !important;
         }
         .upload-area {
-            border-radius: 12px !important;
+            border-radius: 8px !important;
+            border: 1px solid #ccd0d5 !important;
         }
         .group-table {
             border-radius: 8px !important;
+            border: 1px solid #ccd0d5 !important;
         }
         .query-input textarea {
-            font-size: 20px !important;
-            line-height: 1.47059 !important;
+            font-size: 17px !important;
+            line-height: 1.5 !important;
             border-radius: 8px !important;
-            border: 1px solid #d2d2d7 !important;
+            border: 1px solid #ccd0d5 !important;
         }
         .chatbot-container {
-            box-shadow: 0 2px 8px rgba(0,0,0,0.08) !important;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.1) !important;
         }
         .gallery-container {
-            box-shadow: 0 2px 8px rgba(0,0,0,0.08) !important;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.1) !important;
         }
         .examples-header {
             margin-bottom: 8px !important;
         }
         """
         
-        # Header with Apple-style typography
+        # Header with Meta AI-style typography
         with gr.Column(elem_classes="header-section"):
             gr.Markdown(
                 """
                 <div style="text-align: center; padding: 60px 0 40px 0;">
-                    <h1 style="font-size: 48px; font-weight: 600; letter-spacing: -1px; color: #1d1d1f; margin-bottom: 12px; line-height: 1.1;">
+                    <h1 style="font-size: 48px; font-weight: 700; letter-spacing: -0.5px; color: #050505; margin-bottom: 12px; line-height: 1.2;">
                         SHAPE
                     </h1>
-                    <p style="font-size: 20px; color: #6e6e73; font-weight: 400; margin: 0; line-height: 1.47059;">
+                    <p style="font-size: 19px; color: #65676b; font-weight: 400; margin: 0; line-height: 1.5;">
                         Self-supervised morphology agent for single-cell bioimage analysis
                     </p>
-                    <p style="font-size: 20px; color: #86868b; margin-top: 12px; line-height: 1.47059;">
+                    <p style="font-size: 17px; color: #8a8d91; margin-top: 12px; line-height: 1.5;">
                         Powered by large language models and tool-based reasoning
                     </p>
                 </div>
@@ -2369,13 +2384,13 @@ def main(args):
                 elem_classes="main-title"
             )
         
-        # Model / tool configuration (top row, equal height) - Apple-style cards
+        # Model / tool configuration (top row, equal height) - Meta AI-style cards
         with gr.Row(equal_height=True):
             with gr.Column(scale=1, min_width=280):
                 gr.Markdown(
                     """
-                    <div style="background: #f5f5f7; border-radius: 12px; padding: 24px; margin-bottom: 20px;">
-                        <h3 style="font-size: 24px; font-weight: 600; color: #1d1d1f; margin-bottom: 16px; letter-spacing: -0.2px;">
+                    <div style="background: #f0f2f5; border-radius: 8px; padding: 20px; margin-bottom: 16px;">
+                        <h3 style="font-size: 20px; font-weight: 600; color: #050505; margin-bottom: 12px; letter-spacing: -0.2px;">
                             LLM Configuration
                         </h3>
                     </div>
@@ -2399,8 +2414,8 @@ def main(args):
             with gr.Column(scale=1):
                 gr.Markdown(
                     """
-                    <div style="background: #f5f5f7; border-radius: 12px; padding: 24px; margin-bottom: 20px;">
-                        <h3 style="font-size: 24px; font-weight: 600; color: #1d1d1f; margin-bottom: 16px; letter-spacing: -0.2px;">
+                    <div style="background: #f0f2f5; border-radius: 8px; padding: 20px; margin-bottom: 16px;">
+                        <h3 style="font-size: 20px; font-weight: 600; color: #050505; margin-bottom: 12px; letter-spacing: -0.2px;">
                             Available Tools
                         </h3>
                     </div>
@@ -2415,8 +2430,8 @@ def main(args):
             with gr.Column(scale=1):
                 gr.Markdown(
                     """
-                    <div style="background: #f5f5f7; border-radius: 12px; padding: 20px; margin-bottom: 20px;">
-                        <h3 style="font-size: 24px; font-weight: 600; color: #1d1d1f; margin-bottom: 0; letter-spacing: -0.2px;">
+                    <div style="background: #f0f2f5; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+                        <h3 style="font-size: 20px; font-weight: 600; color: #050505; margin-bottom: 0; letter-spacing: -0.2px;">
                             Image Groups
                         </h3>
                     </div>
@@ -2438,7 +2453,7 @@ def main(args):
                     elem_classes="group-table"
                 )
                 group_prompt = gr.Markdown(
-                    "<div style='color: #6e6e73; font-size: 15px; padding: 12px 0;'>Upload Status: No uploads yet</div>",
+                    "<div style='color: #65676b; font-size: 15px; padding: 12px 0;'>Upload Status: No uploads yet</div>",
                     elem_classes="status-text"
                 )
                 upload_btn = gr.Button(
@@ -2448,8 +2463,8 @@ def main(args):
                 )
                 gr.Markdown(
                     """
-                    <div style="background: #f5f5f7; border-radius: 12px; padding: 20px; margin: 24px 0 20px 0;">
-                        <h3 style="font-size: 24px; font-weight: 600; color: #1d1d1f; margin-bottom: 0; letter-spacing: -0.2px;">
+                    <div style="background: #f0f2f5; border-radius: 8px; padding: 16px; margin: 20px 0 16px 0;">
+                        <h3 style="font-size: 20px; font-weight: 600; color: #050505; margin-bottom: 0; letter-spacing: -0.2px;">
                             Ask Question
                         </h3>
                     </div>
@@ -2476,8 +2491,8 @@ def main(args):
             with gr.Column(scale=1):
                 gr.Markdown(
                     """
-                    <div style="background: #f5f5f7; border-radius: 12px; padding: 20px; margin-bottom: 20px;">
-                        <h3 style="font-size: 24px; font-weight: 600; color: #1d1d1f; margin-bottom: 0; letter-spacing: -0.2px;">
+                    <div style="background: #f0f2f5; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+                        <h3 style="font-size: 20px; font-weight: 600; color: #050505; margin-bottom: 0; letter-spacing: -0.2px;">
                             Conversation
                         </h3>
                     </div>
@@ -2495,8 +2510,8 @@ def main(args):
         # Bottom full-width: summary and visual outputs
         gr.Markdown(
             """
-            <div style="background: #f5f5f7; border-radius: 12px; padding: 20px; margin: 32px 0 20px 0;">
-                <h3 style="font-size: 19px; font-weight: 600; color: #1d1d1f; margin-bottom: 0; letter-spacing: -0.2px;">
+            <div style="background: #f0f2f5; border-radius: 8px; padding: 16px; margin: 24px 0 16px 0;">
+                <h3 style="font-size: 18px; font-weight: 600; color: #050505; margin-bottom: 0; letter-spacing: -0.2px;">
                     Summary
                 </h3>
             </div>
@@ -2509,8 +2524,8 @@ def main(args):
         )
         gr.Markdown(
             """
-            <div style="background: #f5f5f7; border-radius: 12px; padding: 20px; margin: 24px 0 20px 0;">
-                <h3 style="font-size: 19px; font-weight: 600; color: #1d1d1f; margin-bottom: 0; letter-spacing: -0.2px;">
+            <div style="background: #f0f2f5; border-radius: 8px; padding: 16px; margin: 20px 0 16px 0;">
+                <h3 style="font-size: 18px; font-weight: 600; color: #050505; margin-bottom: 0; letter-spacing: -0.2px;">
                     Visual Outputs
                 </h3>
             </div>
@@ -2532,10 +2547,10 @@ def main(args):
                 gr.Markdown(
                     """
                     <div style="text-align: center; padding: 40px 0 24px 0;">
-                        <h2 style="font-size: 32px; font-weight: 600; color: #1d1d1f; margin-bottom: 8px; letter-spacing: -0.5px;">
+                        <h2 style="font-size: 28px; font-weight: 600; color: #050505; margin-bottom: 8px; letter-spacing: -0.3px;">
                             Try these examples
                         </h2>
-                        <p style="font-size: 20px; color: #6e6e73; margin: 0; line-height: 1.47059;">
+                        <p style="font-size: 17px; color: #65676b; margin: 0; line-height: 1.5;">
                             Explore the capabilities with suggested tools
                         </p>
                     </div>
@@ -2559,7 +2574,7 @@ def main(args):
                 gr.Markdown(
                     """
                     <div style="text-align: center; padding: 20px 0;">
-                        <h4 style="font-size: 24px; font-weight: 600; color: #1d1d1f; letter-spacing: -0.2px;">
+                        <h4 style="font-size: 20px; font-weight: 600; color: #050505; letter-spacing: -0.2px;">
                             Analysis Examples
                         </h4>
                     </div>

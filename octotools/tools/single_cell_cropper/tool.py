@@ -404,19 +404,25 @@ class Single_Cell_Cropper_Tool(BaseTool):
                 print(f"Error saving crop for cell {idx}: {e}")
                 continue
             
-            # Create cell ID
-            cell_id = f"cell_{idx:04d}"
-            crop_id = cell_id  # For now, crop_id same as cell_id
+            # Create cell ID in format: {group}_{image_name}_{crop_id}
+            # This allows tracing back to group and image_name from cell_id
+            crop_id = f"cell_{idx:04d}"
+            # Use source_image_id as image_name (extracted from path if not provided)
+            image_name = source_image_id if source_image_id else Path(original_image_path).stem
+            # Create cell_id in format: group_image_name_crop_id (e.g., "control_image1_cell_0001")
+            cell_id = f"{group}_{image_name}_{crop_id}"
             
             # Create metadata for this crop (backward compatibility)
             crop_metadata = {
-                "cell_id": idx,
+                "cell_id": cell_id,  # Use full cell_id string instead of idx
                 "crop_path": crop_path,
                 "original_bbox": [minr, minc, maxr, maxc],
                 "crop_bbox": [new_minr, new_minc, new_maxr, new_maxc],
                 "area": region.area,
                 "centroid": list(region.centroid),  # Convert tuple to list for JSON serialization
-                "crop_size": cell_crop.shape
+                "crop_size": cell_crop.shape,
+                "group": group,  # Include group in metadata
+                "image_name": image_name  # Include image_name in metadata
             }
             
             # Create CellCrop object (atomic data unit for Stage 2)
