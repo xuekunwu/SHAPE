@@ -1187,7 +1187,13 @@ class Solver:
             
             merged_result = None  # Store merged result for tools that combine all images
             
+            # Debug: Log image processing info
+            print(f"🔍 Processing {len(image_items)} image(s) with {tool_name}")
+            print(f"   should_execute_once: {should_execute_once}")
+            print(f"   tools_that_merge_all_images: {tools_that_merge_all_images}")
+            
             for img_idx, img_item in enumerate(image_items):
+                print(f"   Processing image {img_idx + 1}/{len(image_items)}: {img_item.get('image_id', 'unknown')} (group: {img_item.get('group', 'unknown')})")
                 safe_path = img_item["image_path"].replace("\\", "\\\\") if img_item.get("image_path") else None
                 conversation_text = self._format_conversation_history()
                 artifact_key = make_artifact_key(tool_name, safe_path, context, sub_goal, image_id=img_item.get("image_id"))
