@@ -119,7 +119,7 @@ else:
             execution = tool.execute(
                 cell_crops=cell_crops, 
                 cell_metadata=cell_metadata, 
-                max_epochs=100,
+                max_epochs=25,
                 early_stop_loss=0.5,
                 batch_size=16,
                 learning_rate=3e-5,

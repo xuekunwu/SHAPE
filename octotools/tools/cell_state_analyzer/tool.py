@@ -119,12 +119,12 @@ class DinoV3Projector(nn.Module):
         }
         
         # Load DINOv3 backbone from Hugging Face Hub (PyTorch weights file)
-        # Using smaller vits16 model (384 dims) to reduce GPU memory usage
+        # Model filename indicates vitb16 (ViT-B/16, 768 dimensions)
         custom_repo_id = "5xuekun/dinov3_vits16"
         model_filename = "dinov3_vitb16_pretrain_lvd1689m-73cec8be.pth"
-        # Use dinov2-small as architecture base since the weights are for ViT-S/16 (384 dimensions)
-        architecture_repo_id = "facebook/dinov2-small"
-        fallback_repo_id = "facebook/dinov2-small"  # Official DINOv2-small model as fallback
+        # Use dinov2-base architecture since the weights are for ViT-B/16 (768 dimensions)
+        architecture_repo_id = "facebook/dinov2-base"
+        fallback_repo_id = "facebook/dinov2-base"  # Official DINOv2-base model as fallback
         
         logger.info(f"Attempting to load DINOv3 model weights from Hugging Face Hub: {custom_repo_id}/{model_filename}")
         
@@ -147,7 +147,7 @@ class DinoV3Projector(nn.Module):
             logger.info(f"DINOv3 weights downloaded to: {weights_path}")
             
             # Load DINOv3 weights into DINOv2 architecture (same ViT architecture)
-            # Use dinov2-large architecture since the weights are for ViT-L/16
+            # Use dinov2-base architecture since the weights are for ViT-B/16 (768 dimensions)
             logger.info(f"Loading DINOv3 weights into {architecture_repo_id} architecture...")
             base_model = AutoModel.from_pretrained(
                 architecture_repo_id,
@@ -184,17 +184,27 @@ class DinoV3Projector(nn.Module):
             missing_keys, unexpected_keys = base_model.load_state_dict(filtered_state_dict, strict=False)
             if missing_keys:
                 logger.warning(f"Some model keys were not initialized from weights: {len(missing_keys)} keys")
+                logger.debug(f"Missing keys (first 10): {missing_keys[:10]}")
             if unexpected_keys:
                 logger.warning(f"Some weight keys were not used: {len(unexpected_keys)} keys")
+                logger.debug(f"Unexpected keys (first 10): {unexpected_keys[:10]}")
+            if not missing_keys and not unexpected_keys:
+                logger.info(f"✅ Perfect match: All {len(filtered_state_dict)} weight keys matched model architecture")
+            elif len(filtered_state_dict) > 0:
+                matched_ratio = len(filtered_state_dict) / (len(filtered_state_dict) + len(missing_keys) + len(unexpected_keys)) * 100
+                logger.info(f"✅ Loaded {len(filtered_state_dict)}/{len(filtered_state_dict) + len(missing_keys) + len(unexpected_keys)} weight keys ({matched_ratio:.1f}% match)")
             
             self.backbone = base_model
             logger.info(f"✅ Successfully loaded DINOv3 model weights from {model_filename}")
             
-            # Update feat_dim for DINOv3 ViT-S/16 (384 dimensions)
-            # Note: model filename may say vitb16 but it's actually vits16 based on repo
-            if 'vits16' in backbone_name.lower() or custom_repo_id.endswith('dinov3_vits16'):
+            # Update feat_dim based on model architecture
+            # Model filename indicates vitb16 (ViT-B/16, 768 dimensions)
+            if 'vitb16' in model_filename.lower():
+                feat_dim_map[backbone_name] = 768
+                logger.info("Detected DINOv3 ViT-B/16 model (768 dimensions) - weights loaded into dinov2-base architecture")
+            elif 'vits16' in backbone_name.lower() or custom_repo_id.endswith('dinov3_vits16'):
                 feat_dim_map[backbone_name] = 384
-                logger.info("Detected DINOv3 ViT-S/16 model (384 dimensions) - using for reduced GPU memory")
+                logger.info("Detected DINOv3 ViT-S/16 model (384 dimensions)")
             elif 'vitl16' in model_filename.lower() or custom_repo_id.endswith('dinov3_vitl16'):
                 feat_dim_map[backbone_name] = 1024
                 logger.info("Detected DINOv3 ViT-L/16 model (1024 dimensions)")
@@ -213,8 +223,8 @@ class DinoV3Projector(nn.Module):
                     trust_remote_code=True
                 )
                 logger.info(f"✅ Loaded DINOv2 model from Hugging Face Hub: {fallback_repo_id}")
-                # Update feat_dim for DINOv2-small (384 dimensions)
-                feat_dim_map[backbone_name] = 384
+                # Update feat_dim for DINOv2-base (768 dimensions)
+                feat_dim_map[backbone_name] = 768
             except Exception as fallback_e:
                 logger.error(f"Failed to load fallback DINOv2 model: {fallback_e}")
                 raise ValueError(
@@ -289,7 +299,7 @@ class Cell_State_Analyzer_Tool(BaseTool):
             input_types={
                 "cell_crops": "List[str] - List of cell crop image paths from Single_Cell_Cropper_Tool output.",
                 "cell_metadata": "List[dict] - List of metadata dictionaries for each cell (must include 'group' field for multi-group analysis).",
-                "max_epochs": "int - Maximum number of training epochs (default: 100).",
+                "max_epochs": "int - Maximum number of training epochs (default: 25).",
                 "early_stop_loss": "float - Early stopping threshold for loss (default: 0.5). Training stops if loss <= this value.",
                 "batch_size": "int - Batch size for training (default: 16).",
                 "learning_rate": "float - Learning rate for optimizer (default: 3e-5).",
@@ -499,7 +509,7 @@ class Cell_State_Analyzer_Tool(BaseTool):
         
         return cell_crops, cell_metadata
     
-    def execute(self, cell_crops=None, cell_metadata=None, max_epochs=100, early_stop_loss=0.5,
+    def execute(self, cell_crops=None, cell_metadata=None, max_epochs=25, early_stop_loss=0.5,
                 batch_size=16, learning_rate=3e-5, cluster_resolution=0.5, query_cache_dir=None):
         """
         Execute self-supervised learning training and analysis.
@@ -507,7 +517,7 @@ class Cell_State_Analyzer_Tool(BaseTool):
         Args:
             cell_crops: List of cell crop image paths
             cell_metadata: List of metadata dictionaries (should include 'group' field)
-            max_epochs: Maximum training epochs (default: 100)
+            max_epochs: Maximum training epochs (default: 25)
             early_stop_loss: Early stopping loss threshold (default: 0.5)
             batch_size: Training batch size (default: 16)
             learning_rate: Learning rate (default: 3e-5)

@@ -24,7 +24,7 @@ class Single_Cell_Cropper_Tool(BaseTool):
                 "source_image_id": "str - Optional source image ID for cell tracking (default: extracted from image path).",
                 "group": "str - Optional group/condition label for multi-group analysis (default: 'default').",
                 "min_area": "int - Minimum area threshold for valid objects (auto-detected from mask type: cell_mask=50, nuclei_mask=50, organoid_mask=200).",
-                "margin": "int - Margin around each object for cropping (auto-detected from mask type: cell_mask=5, nuclei_mask=25, organoid_mask=50).",
+                "margin": "int - Margin around each object for cropping (auto-detected from mask type: cell_mask=1, nuclei_mask=25, organoid_mask=50).",
                 "output_format": "str - Output format for crops ('tif', 'png', 'jpg', default: 'png')."
             },
             output_type="dict - Contains cropped cell images, metadata, and visualization paths.",
@@ -76,9 +76,9 @@ class Single_Cell_Cropper_Tool(BaseTool):
             
             if min_area is None or margin is None:
                 if "cell_mask" in mask_filename_lower:
-                    # Cell mask: min_area=50, margin=5
+                    # Cell mask: min_area=50, margin=1
                     auto_min_area = 50
-                    auto_margin = 5
+                    auto_margin = 1
                     auto_detected = True
                     print(f"Auto-detected cell_mask - using min_area={auto_min_area}, margin={auto_margin}")
                 elif "organoid_mask" in mask_filename_lower:
