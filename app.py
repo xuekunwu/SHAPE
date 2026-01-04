@@ -1326,9 +1326,22 @@ class Solver:
             save_module_data(QUERY_ID, f"step_{step_count}_command_generation", command_generation_data)
             
             # Display the command execution result
+            # Include training logs if available (for Cell_State_Analyzer_Tool)
+            result_content = ""
+            if isinstance(result, dict):
+                if "training_logs" in result and result["training_logs"]:
+                    # Show training logs prominently
+                    result_content += f"**Training Progress:**\n```\n{result['training_logs']}\n```\n\n"
+                if "summary" in result and result["summary"]:
+                    result_content += f"**Summary:**\n{result['summary']}\n\n"
+                # Show full result in JSON for other details
+                result_content += f"**Full Result:**\n```json\n{json.dumps(make_json_serializable(result), indent=4)}\n```"
+            else:
+                result_content = f"**Result:**\n```json\n{json.dumps(make_json_serializable(result), indent=4)}\n```"
+            
             messages.append(ChatMessage(
                 role="assistant",
-                content=f"**Result:**\n```json\n{json.dumps(make_json_serializable(result), indent=4)}\n```",
+                content=result_content,
                 metadata={"title": f"### 🛠️ Step {step_count}: Command Execution ({tool_name})"}))
             
             # Update progress for command execution

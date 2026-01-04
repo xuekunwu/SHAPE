@@ -245,24 +245,21 @@ class DinoV3Projector(nn.Module):
         )
     
     def forward(self, x):
-        # Extract CLS token from backbone
-        # DINOv2/DINOv3 models: forward() returns BaseModelOutputWithPooling
-        # We need to get the last_hidden_state and extract CLS token (first token)
-        output = self.backbone(x)
+        # DINOv3 backbone directly returns CLS token as tensor (matching training script)
+        z = self.backbone(x)
         
-        # Handle different output formats
-        if hasattr(output, 'last_hidden_state'):
-            # Standard transformers output format
-            z = output.last_hidden_state[:, 0]  # CLS token (first token)
-        elif hasattr(output, 'pooler_output'):
-            # Pooler output (already pooled CLS token)
-            z = output.pooler_output
-        elif isinstance(output, torch.Tensor):
-            # Direct tensor output (already CLS token)
-            z = output
+        # Handle tensor output - if multi-dimensional, extract CLS token
+        if isinstance(z, torch.Tensor):
+            if z.dim() > 2:
+                # Shape is [B, N, D], take first token (CLS)
+                z = z[:, 0, :]
+            # Otherwise it's already CLS token [B, D]
         else:
-            # Fallback: try to get CLS token from first dimension
-            z = output[:, 0] if len(output.shape) > 1 else output
+            # Fallback for other formats (shouldn't happen with DINOv3)
+            if hasattr(z, 'last_hidden_state'):
+                z = z.last_hidden_state[:, 0]
+            elif hasattr(z, 'pooler_output'):
+                z = z.pooler_output
         
         # Project and normalize
         z = self.projector(z)
@@ -340,7 +337,10 @@ class Cell_State_Analyzer_Tool(BaseTool):
         ])
     
     def _extract_features(self, model, dataloader, device):
-        """Extract CLS features from the model backbone."""
+        """Extract CLS features from the model backbone.
+        
+        Following the training script pattern: DINOv3 backbone directly returns CLS token as tensor.
+        """
         model.eval()
         feats, img_names, groups = [], [], []
         proj_backup = model.projector
@@ -349,15 +349,32 @@ class Cell_State_Analyzer_Tool(BaseTool):
         with torch.no_grad():
             for v1, _, names, grps in tqdm(dataloader, desc="Extracting features"):
                 v1 = v1.to(device)
-                # Extract features from backbone directly (matching training script)
+                # DINOv3 backbone directly returns CLS token (matching training script pattern)
                 out = model.backbone(v1)
-                # The output should be CLS token directly
-                if isinstance(out, dict):
-                    # If backbone returns dict with 'x_norm_clstoken'
-                    out = out['x_norm_clstoken']
-                elif out.dim() > 2:
+                
+                # Handle tensor output (DINOv3 returns tensor directly)
+                if isinstance(out, torch.Tensor):
                     # If shape is [B, N, D], take first token (CLS)
-                    out = out[:, 0, :]
+                    # Otherwise it's already CLS token [B, D]
+                    if out.dim() > 2:
+                        out = out[:, 0, :]
+                else:
+                    # Fallback for other output formats (shouldn't happen with DINOv3)
+                    logger.warning(f"Unexpected output type from backbone: {type(out)}, trying to extract CLS token...")
+                    if hasattr(out, 'last_hidden_state'):
+                        out = out.last_hidden_state[:, 0]
+                    elif hasattr(out, 'pooler_output'):
+                        out = out.pooler_output
+                    elif isinstance(out, dict):
+                        # Try common keys
+                        if 'x_norm_clstoken' in out:
+                            out = out['x_norm_clstoken']
+                        elif 'last_hidden_state' in out:
+                            out = out['last_hidden_state'][:, 0]
+                        else:
+                            raise ValueError(f"Could not extract features from output dict. Available keys: {list(out.keys())}")
+                    else:
+                        raise ValueError(f"Unexpected output type from backbone: {type(out)}")
                 
                 feats.append(out.cpu())
                 img_names.extend(names)
@@ -368,7 +385,7 @@ class Cell_State_Analyzer_Tool(BaseTool):
         logger.info(f"✅ Extracted CLS features: {feats_all.shape}")
         return feats_all, img_names, groups
     
-    def _train_model(self, model, train_loader, max_epochs, early_stop_loss, learning_rate, output_dir):
+    def _train_model(self, model, train_loader, max_epochs, early_stop_loss, learning_rate, output_dir, training_logs=None):
         """Train the model with contrastive learning."""
         optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=1e-4)
         scaler = GradScaler()
@@ -376,6 +393,10 @@ class Cell_State_Analyzer_Tool(BaseTool):
         history = []
         best_loss = float("inf")
         best_model_path = os.path.join(output_dir, "best_model.pth")
+        
+        # Initialize training logs list if not provided
+        if training_logs is None:
+            training_logs = []
         
         for epoch in range(max_epochs):
             model.train()
@@ -400,20 +421,27 @@ class Cell_State_Analyzer_Tool(BaseTool):
             avg_loss = total_loss / num_batches if num_batches > 0 else float("inf")
             history.append(avg_loss)
             
-            logger.info(f"Epoch {epoch+1}/{max_epochs}: Loss = {avg_loss:.4f}")
+            # Log epoch progress
+            epoch_log = f"Epoch {epoch+1}/{max_epochs}: Loss = {avg_loss:.4f}"
+            logger.info(epoch_log)
+            training_logs.append(epoch_log)
             
             # Save best model
             if avg_loss < best_loss:
                 best_loss = avg_loss
                 torch.save(model.state_dict(), best_model_path)
-                logger.info(f"🔥 New best model saved (Loss = {best_loss:.4f})")
+                best_model_log = f"🔥 New best model saved (Loss = {best_loss:.4f})"
+                logger.info(best_model_log)
+                training_logs.append(best_model_log)
             
             # Early stopping
             if avg_loss <= early_stop_loss:
-                logger.info(f"✅ Early stopping triggered: Loss = {avg_loss:.4f} <= {early_stop_loss}")
+                early_stop_log = f"✅ Early stopping triggered: Loss = {avg_loss:.4f} <= {early_stop_loss}"
+                logger.info(early_stop_log)
+                training_logs.append(early_stop_log)
                 break
         
-        return history, best_model_path
+        return history, best_model_path, training_logs
     
     def _create_loss_curve(self, history, output_dir):
         """Create and save loss curve plot."""
@@ -572,8 +600,9 @@ class Cell_State_Analyzer_Tool(BaseTool):
         
         # Train model
         logger.info("🎯 Starting training...")
-        history, best_model_path = self._train_model(
-            model, train_loader, max_epochs, early_stop_loss, learning_rate, output_dir
+        training_logs = []  # Collect training progress logs
+        history, best_model_path, training_logs = self._train_model(
+            model, train_loader, max_epochs, early_stop_loss, learning_rate, output_dir, training_logs
         )
         
         # Load best model
@@ -622,8 +651,15 @@ class Cell_State_Analyzer_Tool(BaseTool):
         if group_composition_path:
             visual_outputs.append(group_composition_path)
         
+        # Format training logs for display
+        training_logs_text = "\n".join(training_logs) if training_logs else ""
+        
+        summary = f"Training completed. Processed {len(cell_crops)} cells in {len(history)} epochs. Final loss: {history[-1]:.4f}"
+        if training_logs_text:
+            summary = f"{summary}\n\n**Training Progress:**\n```\n{training_logs_text}\n```"
+        
         return {
-            "summary": f"Training completed. Processed {len(cell_crops)} cells in {len(history)} epochs. Final loss: {history[-1]:.4f}",
+            "summary": summary,
             "cell_count": len(cell_crops),
             "epochs_trained": len(history),
             "final_loss": history[-1],
@@ -634,6 +670,7 @@ class Cell_State_Analyzer_Tool(BaseTool):
             "adata_path": adata_path,
             "visual_outputs": visual_outputs,
             "training_history": history,
+            "training_logs": training_logs_text,  # Include training logs for display
             "cluster_key": cluster_key if umap_path else None
         }
 
