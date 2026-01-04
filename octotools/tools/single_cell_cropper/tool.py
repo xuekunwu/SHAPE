@@ -22,7 +22,7 @@ class Single_Cell_Cropper_Tool(BaseTool):
                 "nuclei_mask": "str - Path to the segmentation mask image. Accepts nuclei_mask, cell_mask, or organoid_mask from segmentation tools.",
                 "source_image_id": "str - Optional source image ID for cell tracking (default: extracted from image path).",
                 "group": "str - Optional group/condition label for multi-group analysis (default: 'default').",
-                "min_area": "int - Minimum area threshold for valid objects (auto-detected from mask type: cell_mask=100, nuclei_mask=50, organoid_mask=200).",
+                "min_area": "int - Minimum area threshold for valid objects (auto-detected from mask type: cell_mask=50, nuclei_mask=50, organoid_mask=200).",
                 "margin": "int - Margin around each object for cropping (auto-detected from mask type: cell_mask=5, nuclei_mask=25, organoid_mask=50).",
                 "output_format": "str - Output format for crops ('tif', 'png', 'jpg', default: 'png')."
             },
@@ -75,8 +75,8 @@ class Single_Cell_Cropper_Tool(BaseTool):
             
             if min_area is None or margin is None:
                 if "cell_mask" in mask_filename_lower:
-                    # Cell mask: min_area=100, margin=5
-                    auto_min_area = 100
+                    # Cell mask: min_area=50, margin=5
+                    auto_min_area = 50
                     auto_margin = 5
                     auto_detected = True
                     print(f"Auto-detected cell_mask - using min_area={auto_min_area}, margin={auto_margin}")
@@ -179,9 +179,41 @@ class Single_Cell_Cropper_Tool(BaseTool):
                 original_img, mask, cell_crops, stats, query_cache_dir, min_area, margin
             )
             
+            # Build detailed summary with filtering information
+            summary_parts = [f"Successfully generated {stats['final_cell_count']} single-cell crops."]
+            
+            # Add filtering statistics if available
+            total_detected = stats.get('total_objects', stats.get('initial_cell_count', 0))
+            filtered_by_area = stats.get('filtered_by_area', 0)
+            filtered_by_border = stats.get('filtered_by_border', 0)
+            invalid_crop_data = stats.get('invalid_crop_data', 0)
+            total_filtered = filtered_by_area + filtered_by_border + invalid_crop_data
+            
+            if total_detected > 0:
+                if total_filtered > 0:
+                    filter_details = []
+                    if filtered_by_area > 0:
+                        filter_details.append(f"{filtered_by_area} by min_area={min_area}px")
+                    if filtered_by_border > 0:
+                        filter_details.append(f"{filtered_by_border} by border constraints")
+                    if invalid_crop_data > 0:
+                        filter_details.append(f"{invalid_crop_data} invalid crops")
+                    
+                    filter_summary = ", ".join(filter_details)
+                    summary_parts.append(f"Detected {total_detected} objects in mask, filtered out {total_filtered} ({filter_summary}).")
+                    summary_parts.append(f"({total_detected} detected → {stats['final_cell_count']} valid crops)")
+                else:
+                    summary_parts.append(f"All {total_detected} detected objects were successfully cropped.")
+            
+            summary_parts.append(f"All paths and metadata are saved in '{Path(metadata_path).name}'.")
+            
             return {
-                "summary": f"Successfully generated {stats['final_cell_count']} single-cell crops. All paths and metadata are saved in '{Path(metadata_path).name}'.", 
+                "summary": " ".join(summary_parts),
                 "cell_count": stats['final_cell_count'],
+                "total_detected_objects": total_detected,
+                "filtered_by_area": filtered_by_area,
+                "filtered_by_border": filtered_by_border,
+                "invalid_crop_data": invalid_crop_data,
                 "cell_crops_metadata_path": metadata_path,
                 "cell_crop_objects": cell_crop_objects,  # Return CellCrop objects for Stage 2 tools
                 "visual_outputs": [summary_viz_path] if summary_viz_path else [],
@@ -405,6 +437,7 @@ class Single_Cell_Cropper_Tool(BaseTool):
             cell_crop_objects.append(cell_crop_obj)
         
         stats = {
+            "total_objects": initial_cell_count,  # Total objects detected in mask
             "initial_cell_count": initial_cell_count,
             "filtered_by_area": filtered_by_area,
             "filtered_by_border": filtered_by_border,

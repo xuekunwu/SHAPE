@@ -290,7 +290,7 @@ class Cell_State_Analyzer_Tool(BaseTool):
                 "cell_crops": "List[str] - List of cell crop image paths from Single_Cell_Cropper_Tool output.",
                 "cell_metadata": "List[dict] - List of metadata dictionaries for each cell (must include 'group' field for multi-group analysis).",
                 "max_epochs": "int - Maximum number of training epochs (default: 100).",
-                "early_stop_loss": "float - Early stopping threshold for loss (default: 0.05). Training stops if loss <= this value.",
+                "early_stop_loss": "float - Early stopping threshold for loss (default: 0.5). Training stops if loss <= this value.",
                 "batch_size": "int - Batch size for training (default: 16).",
                 "learning_rate": "float - Learning rate for optimizer (default: 3e-5).",
                 "cluster_resolution": "float - Resolution for Leiden clustering (default: 0.5).",
@@ -535,7 +535,7 @@ class Cell_State_Analyzer_Tool(BaseTool):
         
         return cell_crops, cell_metadata
     
-    def execute(self, cell_crops=None, cell_metadata=None, max_epochs=100, early_stop_loss=0.05,
+    def execute(self, cell_crops=None, cell_metadata=None, max_epochs=100, early_stop_loss=0.5,
                 batch_size=16, learning_rate=3e-5, cluster_resolution=0.5, query_cache_dir=None):
         """
         Execute self-supervised learning training and analysis.
@@ -544,7 +544,7 @@ class Cell_State_Analyzer_Tool(BaseTool):
             cell_crops: List of cell crop image paths
             cell_metadata: List of metadata dictionaries (should include 'group' field)
             max_epochs: Maximum training epochs (default: 100)
-            early_stop_loss: Early stopping loss threshold (default: 0.05)
+            early_stop_loss: Early stopping loss threshold (default: 0.5)
             batch_size: Training batch size (default: 16)
             learning_rate: Learning rate (default: 3e-5)
             cluster_resolution: Leiden clustering resolution (default: 0.5)

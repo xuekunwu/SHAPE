@@ -48,7 +48,6 @@ packaging>=21.0
 joblib>=1.1.0
 tqdm>=4.65.0
 
-# Optional: Additional bioinformatics tools
-# leidenalg>=0.9.0  # For clustering
-# louvain>=0.7.0    # For clustering
-# python-igraph>=0.9.0  # For network analysis
+# Additional bioinformatics tools (required for Leiden clustering)
+leidenalg>=0.9.0  # For Leiden clustering (required by scanpy.tl.leiden)
+python-igraph>=0.9.0  # For network analysis (required by leidenalg)
