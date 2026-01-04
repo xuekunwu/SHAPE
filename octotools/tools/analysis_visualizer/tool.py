@@ -1016,8 +1016,39 @@ class Analysis_Visualizer_Tool(BaseTool):
             # Load data from file if path is provided
             if isinstance(analysis_data, str):
                 if os.path.exists(analysis_data):
-                    with open(analysis_data, 'r') as f:
-                        analysis_data = json.load(f)
+                    # Check file extension to ensure it's a JSON file
+                    file_ext = os.path.splitext(analysis_data)[1].lower()
+                    if file_ext not in ['.json', '.jsonl']:
+                        # Try to detect if it's a binary file (image, etc.)
+                        try:
+                            with open(analysis_data, 'rb') as f:
+                                first_bytes = f.read(4)
+                            if first_bytes.startswith(b'\x89PNG') or first_bytes.startswith(b'\xff\xd8') or first_bytes.startswith(b'GIF'):
+                                return {
+                                    "error": f"Expected JSON file but got image file: {analysis_data}. Analysis_Visualizer_Tool requires a dict or JSON file path, not image paths.",
+                                    "summary": "Visualization failed: invalid file type"
+                                }
+                        except Exception:
+                            pass
+                        return {
+                            "error": f"Expected JSON file but got '{file_ext}' file: {analysis_data}. Analysis_Visualizer_Tool requires analysis_data to be a dict or a JSON file path.",
+                            "summary": "Visualization failed: invalid file type"
+                        }
+                    
+                    # Load JSON file
+                    try:
+                        with open(analysis_data, 'r', encoding='utf-8') as f:
+                            analysis_data = json.load(f)
+                    except json.JSONDecodeError as e:
+                        return {
+                            "error": f"Invalid JSON format in file {analysis_data}: {str(e)}",
+                            "summary": "Visualization failed: JSON decode error"
+                        }
+                    except UnicodeDecodeError as e:
+                        return {
+                            "error": f"File {analysis_data} is not a valid JSON file (encoding error: {str(e)}). It may be a binary file (image, etc.). Analysis_Visualizer_Tool requires analysis_data to be a dict or a JSON file path.",
+                            "summary": "Visualization failed: invalid file encoding"
+                        }
                 else:
                     return {
                         "error": f"File not found: {analysis_data}",
