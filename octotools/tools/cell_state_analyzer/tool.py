@@ -122,9 +122,9 @@ class DinoV3Projector(nn.Module):
         # Using dinov3-small (ViT-S/16, 384 dimensions)
         custom_repo_id = "5xuekun/dinov3_vits16"
         model_filename = "dinov3_vitb16_pretrain_lvd1689m-73cec8be.pth"
-        # Use dinov2-small architecture for dinov3-small (ViT-S/16, 384 dimensions)
+        # Architecture base (ViT-S/16, 384 dimensions for dinov3-small)
         architecture_repo_id = "facebook/dinov2-small"
-        fallback_repo_id = "facebook/dinov2-small"  # Official DINOv2-small model as fallback
+        fallback_repo_id = "facebook/dinov2-small"  # Fallback model
         
         logger.info(f"Attempting to load DINOv3 model weights from Hugging Face Hub: {custom_repo_id}/{model_filename}")
         
@@ -132,7 +132,7 @@ class DinoV3Projector(nn.Module):
         from transformers import AutoModel
         hf_token = os.getenv("HUGGINGFACE_TOKEN")
         
-        # Try custom DINOv3 model first (download .pth weights and load into DINOv2 architecture)
+        # Try custom DINOv3 model first (download .pth weights and load into model architecture)
         try:
             if not HF_HUB_AVAILABLE:
                 raise ImportError("huggingface_hub not available")
@@ -146,9 +146,8 @@ class DinoV3Projector(nn.Module):
             )
             logger.info(f"DINOv3 weights downloaded to: {weights_path}")
             
-            # Load DINOv3 weights into DINOv2 architecture (same ViT architecture)
-            # Use dinov2-small architecture for dinov3-small (ViT-S/16, 384 dimensions)
-            logger.info(f"Loading DINOv3 weights into {architecture_repo_id} architecture...")
+            # Load DINOv3 weights into model architecture (ViT-S/16, 384 dimensions)
+            logger.info("Loading DINOv3 model architecture...")
             base_model = AutoModel.from_pretrained(
                 architecture_repo_id,
                 token=hf_token,
@@ -201,7 +200,7 @@ class DinoV3Projector(nn.Module):
             # Using dinov3-small (ViT-S/16, 384 dimensions) as specified
             if 'vits16' in backbone_name.lower() or custom_repo_id.endswith('dinov3_vits16'):
                 feat_dim_map[backbone_name] = 384
-                logger.info("Detected DINOv3 ViT-S/16 model (384 dimensions) - dinov3-small loaded into dinov2-small architecture")
+                logger.info("✅ DINOv3-small model loaded (ViT-S/16, 384 dimensions)")
             elif 'vitb16' in model_filename.lower():
                 feat_dim_map[backbone_name] = 768
                 logger.info("Detected DINOv3 ViT-B/16 model (768 dimensions)")
@@ -213,24 +212,24 @@ class DinoV3Projector(nn.Module):
             logger.warning(f"Failed to load custom DINOv3 model ({custom_repo_id}/{model_filename}): {e}")
             import traceback
             logger.debug(traceback.format_exc())
-            logger.info(f"Falling back to official DINOv2 model: {fallback_repo_id}")
+            logger.info(f"Falling back to fallback model: {fallback_repo_id}")
             
-            # Fallback to official DINOv2 model
+            # Fallback model
             try:
                 self.backbone = AutoModel.from_pretrained(
                     fallback_repo_id,
                     token=hf_token,
                     trust_remote_code=True
                 )
-                logger.info(f"✅ Loaded DINOv2 model from Hugging Face Hub: {fallback_repo_id}")
-                # Update feat_dim for DINOv2-small (384 dimensions)
+                logger.info(f"✅ Loaded fallback model from Hugging Face Hub (384 dimensions)")
+                # Update feat_dim for small model (384 dimensions)
                 feat_dim_map[backbone_name] = 384
             except Exception as fallback_e:
-                logger.error(f"Failed to load fallback DINOv2 model: {fallback_e}")
+                logger.error(f"Failed to load fallback model: {fallback_e}")
                 raise ValueError(
                     f"Model loading failed. Tried:\n"
                     f"1. Custom DINOv3: {custom_repo_id}/{model_filename} - {str(e)}\n"
-                    f"2. Official DINOv2: {fallback_repo_id} - {str(fallback_e)}\n"
+                    f"2. Fallback model: {fallback_repo_id} - {str(fallback_e)}\n"
                     f"Please check your internet connection and Hugging Face Hub access."
                 )
         
@@ -241,7 +240,7 @@ class DinoV3Projector(nn.Module):
         # Try to infer actual feat_dim from loaded model if available
         if self.backbone is not None:
             try:
-                # DINOv2/DINOv3 models typically have a config attribute
+                # DINOv3 models typically have a config attribute
                 if hasattr(self.backbone, 'config') and hasattr(self.backbone.config, 'hidden_size'):
                     actual_feat_dim = self.backbone.config.hidden_size
                     logger.info(f"Model hidden_size: {actual_feat_dim}, using for projection head")
