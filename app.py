@@ -1092,16 +1092,12 @@ class Solver:
             filled = int(bar_length * progress_percent / 100)
             bar = "█" * filled + "░" * (bar_length - filled)
             
-            # Create detailed progress message
+            # Create simplified progress message
             progress_msg = f"""**Progress**: Step {step_count}/{total_steps_estimated} ({progress_percent}%)
 ```
 {bar} {progress_percent}%
 ```
-⏱️ **Step {step_count}** - Elapsed: {elapsed_total:.1f}s{estimated_remaining_str}
 """
-            if len(progress_info["step_times"]) > 0:
-                last_step_time = progress_info["step_times"][-1]
-                progress_msg += f"⏱️ Last step: {last_step_time:.2f}s | Avg: {progress_info['average_time_per_step']:.2f}s/step\n"
             
             messages.append(ChatMessage(role="OctoTools", 
                                         content=f"Generating the {step_count}-th step...",
@@ -1136,7 +1132,6 @@ class Solver:
 ```
 {bar} {progress_percent}%
 ```
-⏱️ **Step {step_count}** - Action predicted: {tool_name} | Elapsed: {elapsed_total:.1f}s
 """
             yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, progress_msg_predicted
 
@@ -1166,7 +1161,6 @@ class Solver:
 ```
 {bar} {progress_percent}%
 ```
-❌ **Step {step_count}** - Tool matching failed | Elapsed: {elapsed_total:.1f}s
 """
                 yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, progress_msg_error
                 continue
@@ -1189,7 +1183,6 @@ class Solver:
 ```
 {bar} {progress_percent}%
 ```
-❌ **Step {step_count}** - Tool not available: {tool_name} | Elapsed: {elapsed_total:.1f}s
 """
                 yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, progress_msg_unavailable
                 continue
@@ -1266,7 +1259,6 @@ class Solver:
 ```
 {bar} {progress_percent}%
 ```
-❌ **Step {step_count}** - Tool execution failed: {tool_name} | Elapsed: {elapsed_total:.1f}s
 """
                         yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, progress_msg_failed
                         # Store the error result
@@ -1321,7 +1313,6 @@ class Solver:
 ```
 {bar} {progress_percent}%
 ```
-📝 **Step {step_count}** - Command generated for {tool_name} | Elapsed: {elapsed_total:.1f}s
 """
             yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, progress_msg_command
 
@@ -1350,7 +1341,6 @@ class Solver:
 ```
 {bar} {progress_percent}%
 ```
-🛠️ **Step {step_count}** - Command executed: {tool_name} | Elapsed: {elapsed_total:.1f}s
 """
             yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, progress_msg_executed
 
@@ -1403,7 +1393,6 @@ class Solver:
 ```
 {bar} {progress_percent}%
 ```
-🛑 **Execution stopped** - Tool '{tool_name}' failed {same_tool_failures} times | Elapsed: {elapsed_total:.1f}s
 """
                 yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, progress_msg_stop
                 execution_successful = False
@@ -1412,6 +1401,10 @@ class Solver:
             conversation_text = self._format_conversation_history()
             stop_verification = self.planner.verificate_memory(user_query, analysis_img_ref, query_analysis, self.memory, conversation_context=conversation_text)
             context_verification, conclusion = self.planner.extract_conclusion(stop_verification)
+
+            # Calculate step duration before using it in progress messages
+            step_end = time.time()
+            step_duration = step_end - step_start
 
             # Save the context verification data
             context_verification_data = {
@@ -1446,8 +1439,6 @@ class Solver:
 ```
 {bar} {progress_percent}%
 ```
-⏱️ **Step {step_count} verified** - Duration: {step_duration:.2f}s | Total: {elapsed_total:.1f}s{estimated_remaining_str}
-📊 Avg: {progress_info['average_time_per_step']:.2f}s/step | Tool: {tool_name} | Status: {conclusion_emoji} {conclusion}
 """
             yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, progress_msg_verified
 
@@ -1465,8 +1456,8 @@ class Solver:
             self.step_memory.append(mem_after)
             if mem_after > self.max_memory:
                 self.max_memory = mem_after
-            step_end = time.time()
-            step_duration = step_end - step_start
+            
+            # step_duration already calculated above, now update tracking
             self.step_times.append(step_duration)
             progress_info["step_times"].append(step_duration)
             
@@ -1496,8 +1487,6 @@ class Solver:
 ```
 {bar} {progress_percent}%
 ```
-⏱️ **Step {step_count} completed** - Duration: {step_duration:.2f}s | Total: {elapsed_total:.1f}s{estimated_remaining_str}
-📊 Avg: {progress_info['average_time_per_step']:.2f}s/step | Tool: {tool_name}
 """
             
             # Update the last yield with completed step info (before context verification)
