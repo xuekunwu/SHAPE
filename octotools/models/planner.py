@@ -9,6 +9,7 @@ from octotools.models.memory import Memory
 from octotools.models.formatters import QueryAnalysis, NextStep, MemoryVerification
 from octotools.models.utils import normalize_tool_name
 from octotools.models.tool_priority import ToolPriorityManager, ToolPriority, TOOL_DEPENDENCIES
+from octotools.utils import logger, ResponseParser
 
 class Planner:
     def __init__(self, llm_engine_name: str, toolbox_metadata: dict = None, available_tools: List = None, api_key: str = None):
@@ -44,7 +45,7 @@ class Planner:
                     "height": height
                 })
             except Exception as e:
-                print(f"Error processing image file: {str(e)}")
+                logger.error(f"Error processing image file: {str(e)}")
         return image_info
     
     def get_image_info_bytes(self, bytes: str) -> Dict[str, Any]:
@@ -59,7 +60,7 @@ class Planner:
                     "height": height
                 })
             except Exception as e:
-                print(f"Error processing image bytes: {str(e)}")
+                logger.error(f"Error processing image bytes: {str(e)}")
         return image_info
 
     def generate_base_response(self, question: str, image: str, max_tokens: str = 4000, bytes_mode: bool = False) -> str:
@@ -74,7 +75,7 @@ class Planner:
 
     def analyze_query(self, question: str, image: str, bytes_mode: bool = False, conversation_context: str = "", **kwargs) -> str:
         image_info = self.get_image_info(image)
-        print("image_info: ", image_info)
+        logger.debug(f"image_info: {image_info}")
         
         # Detect task domain using priority manager
         self.detected_domain = self.priority_manager.detect_task_domain(question, "")
@@ -94,9 +95,9 @@ class Planner:
         }
         
         if excluded_tools:
-            print(f"Task domain detected: {self.detected_domain}")
-            print(f"Excluded tools for this domain: {excluded_tools}")
-            print(f"Available tools after filtering: {available_tools}")
+            logger.info(f"Task domain detected: {self.detected_domain}")
+            logger.debug(f"Excluded tools for this domain: {excluded_tools}")
+            logger.debug(f"Available tools after filtering: {available_tools}")
 
         query_prompt = f"""
 Task: Analyze the given query with accompanying inputs and determine the skills and tools needed to address it effectively.
@@ -137,22 +138,22 @@ Please present your analysis in a clear, structured format.
             self.query_analysis = llm_response['content']
             # Store usage info for later access
             self.last_usage = llm_response.get('usage', {})
-            print(f"Query analysis usage: {self.last_usage}")
+            logger.debug(f"Query analysis usage: {self.last_usage}")
         else:
             self.query_analysis = llm_response
             self.last_usage = {}
 
         # Check if we got a string response (non-structured model like gpt-4-turbo) instead of QueryAnalysis object
         if isinstance(self.query_analysis, str):
-            print("WARNING: Received string response instead of QueryAnalysis object")
+            logger.warning("Received string response instead of QueryAnalysis object")
             # Try to parse the string response to extract the analysis components
             try:
                 # For string responses, we'll use the entire response as the analysis
                 # This is simpler since QueryAnalysis is mainly used for display
                 analysis_text = self.query_analysis.strip()
-                print(f"Using string response as query analysis: {len(analysis_text)} characters")
+                logger.debug(f"Using string response as query analysis: {len(analysis_text)} characters")
             except Exception as parse_error:
-                print(f"Error parsing string response: {parse_error}")
+                logger.error(f"Error parsing string response: {parse_error}")
                 analysis_text = "Error parsing query analysis"
         else:
             analysis_text = str(self.query_analysis).strip()
@@ -160,101 +161,14 @@ Please present your analysis in a clear, structured format.
         return analysis_text
 
     def extract_context_subgoal_and_tool(self, response) -> Tuple[str, str, str]:
-        def normalize_tool_name_local(tool_name: str) -> str:
-            """Local normalization function that uses available_tools from planner."""
-            # Strip any "No matched tool given: " prefix if present (handle recursive calls)
-            clean_name = tool_name
-            if "No matched tool given: " in tool_name:
-                # Handle multiple nested prefixes
-                while "No matched tool given: " in clean_name:
-                    clean_name = clean_name.split("No matched tool given: ")[-1].strip()
-            
-            # First try exact match (case-insensitive)
-            for tool in self.available_tools:
-                if tool.lower() == clean_name.lower():
-                    print(f"planner.normalize_tool_name_local: Exact match found: '{tool_name}' -> '{tool}'")
-                    return tool
-            
-            # Then try partial match (tool name contained in the given string)
-            for tool in self.available_tools:
-                if tool.lower() in clean_name.lower() or clean_name.lower() in tool.lower():
-                    print(f"planner.normalize_tool_name_local: Partial match found: '{tool_name}' -> '{tool}'")
-                    return tool
-            
-            # If still no match, return error with cleaned name
-            print(f"planner.normalize_tool_name_local: No match found for '{tool_name}' (cleaned: '{clean_name}'). Available tools: {self.available_tools[:5]}...")
-            return "No matched tool given: " + clean_name
-        
+        """Extract context, sub_goal, and tool_name from LLM response."""
         try:
-            print(f"DEBUG: extract_context_subgoal_and_tool - response type: {type(response)}")
-            print(f"DEBUG: extract_context_subgoal_and_tool - response: {response}")
-            
-            # Check if response is a NextStep object
-            if hasattr(response, 'context') and hasattr(response, 'sub_goal') and hasattr(response, 'tool_name'):
-                print(f"DEBUG: Processing NextStep object")
-                print(f"DEBUG: response.context: {response.context}")
-                print(f"DEBUG: response.sub_goal: {response.sub_goal}")
-                print(f"DEBUG: response.tool_name: {response.tool_name}")
-                print(f"DEBUG: available_tools: {self.available_tools}")
-                
-                context = response.context.strip()
-                sub_goal = response.sub_goal.strip()
-                tool_name = normalize_tool_name_local(response.tool_name.strip())
-                
-                print(f"DEBUG: Normalized tool_name: {tool_name}")
-                
-                return context, sub_goal, tool_name
-            # Check if response is a string (fallback for non-structured models)
-            elif isinstance(response, str):
-                print("WARNING: Received string response instead of NextStep object")
-                # Try to parse the string response to extract context, sub_goal, and tool_name
-                try:
-                    lines = response.split('\n')
-                    context = ""
-                    sub_goal = ""
-                    tool_name = ""
-                    
-                    for line in lines:
-                        line = line.strip()
-                        if line.lower().startswith('<context>') and not line.lower().startswith('<context>:'):
-                            # Only handle <context>...</context> tags, not <context>: format
-                            context = line.split('<context>')[1].split('</context>')[0].strip()
-                        elif line.lower().startswith('context:'):
-                            # Handle both <context>: and context: formats
-                            parts = line.split('context:', 1)
-                            if len(parts) > 1:
-                                context = parts[1].lstrip(' :')
-                            else:
-                                context = ""
-                        elif line.lower().startswith('<sub_goal>') and not line.lower().startswith('<sub_goal>:'):
-                            sub_goal = line.split('<sub_goal>')[1].split('</sub_goal>')[0].strip()
-                        elif line.lower().startswith('sub_goal:'):
-                            parts = line.split('sub_goal:', 1)
-                            if len(parts) > 1:
-                                sub_goal = parts[1].lstrip(' :')
-                            else:
-                                sub_goal = ""
-                        elif line.lower().startswith('<tool_name>') and not line.lower().startswith('<tool_name>:'):
-                            tool_name = line.split('<tool_name>')[1].split('</tool_name>')[0].strip()
-                        elif line.lower().startswith('tool_name:'):
-                            parts = line.split('tool_name:', 1)
-                            if len(parts) > 1:
-                                tool_name = parts[1].lstrip(' :')
-                            else:
-                                tool_name = ""
-                    
-                    # Normalize tool name
-                    tool_name = normalize_tool_name_local(tool_name)
-                    
-                    return context, sub_goal, tool_name
-                    
-                except Exception as parse_error:
-                    print(f"Error parsing string response: {parse_error}")
-                    return "", "", "Error parsing tool name"
-            else:
-                return "", "", "Unknown response type"
+            # Use unified response parser
+            context, sub_goal, tool_name = ResponseParser.parse_next_step(response, self.available_tools)
+            logger.debug(f"Extracted: context='{context[:50]}...', sub_goal='{sub_goal[:50]}...', tool_name='{tool_name}'")
+            return context, sub_goal, tool_name
         except Exception as e:
-            print(f"Error in extract_context_subgoal_and_tool: {e}")
+            logger.error(f"Error in extract_context_subgoal_and_tool: {e}")
             return "", "", "Error extracting tool name"
     
     def _is_bioimage_task(self, question: str, query_analysis: str, memory: Memory) -> bool:
@@ -303,7 +217,7 @@ Please present your analysis in a clear, structured format.
         }
         
         if excluded_tools:
-            print(f"Step {step_count}: Domain={self.detected_domain}, Excluded tools: {excluded_tools}")
+            logger.debug(f"Step {step_count}: Domain={self.detected_domain}, Excluded tools: {excluded_tools}")
         
         # Get tools grouped by priority for prompt
         tools_by_priority = self.priority_manager.format_tools_by_priority(available_tools)
@@ -457,7 +371,7 @@ Example (do not copy, use only as reference):
             next_step = llm_response['content']
             # Store usage info for later access
             self.last_usage = llm_response.get('usage', {})
-            print(f"Next step usage: {self.last_usage}")
+            logger.debug(f"Next step usage: {self.last_usage}")
         else:
             next_step = llm_response
             self.last_usage = {}
@@ -468,7 +382,7 @@ Example (do not copy, use only as reference):
                 next_step.tool_name, available_tools, used_tools, self.detected_domain
             )
             if not validation_result['valid']:
-                print(f"WARNING: Tool selection validation failed: {validation_result['reason']}")
+                logger.warning(f"Tool selection validation failed: {validation_result['reason']}")
                 # The tool is still returned, but warning is logged
                 # In production, you might want to retry or use a fallback
         
@@ -566,8 +480,8 @@ Example (do not copy, use only as reference):
             "Fibroblast_Activation_Scorer_Tool" not in finished_tools and
             "Fibroblast_Activation_Scorer_Tool" in self.available_tools):
             
-            print(f"DEBUG: Fibroblast analysis detected - cell state analyzer finished but activation scorer not run yet")
-            print(f"DEBUG: Continuing to activation scorer for complete fibroblast analysis")
+            logger.debug("Fibroblast analysis detected - cell state analyzer finished but activation scorer not run yet")
+            logger.debug("Continuing to activation scorer for complete fibroblast analysis")
             
             return MemoryVerification(
                 analysis="Cell state analysis completed successfully. However, the complete fibroblast analysis pipeline requires activation scoring to provide quantitative activation scores. The Fibroblast_Activation_Scorer_Tool is available and should be run to complete the analysis.",
@@ -663,7 +577,7 @@ stop_signal: [True or False]
                     image_bytes = file.read()
                 input_data.append(image_bytes)
             except Exception as e:
-                print(f"Error reading image file: {str(e)}")
+                logger.error(f"Error reading image file: {str(e)}")
 
         try:
             llm_response = self.llm_engine_mm.generate(input_data, response_format=MemoryVerification)
@@ -673,61 +587,24 @@ stop_signal: [True or False]
                 stop_verification = llm_response['content']
                 # Store usage info for later access
                 self.last_usage = llm_response.get('usage', {})
-                print(f"Memory verification usage: {self.last_usage}")
+                logger.debug(f"Memory verification usage: {self.last_usage}")
             else:
                 stop_verification = llm_response
                 self.last_usage = {}
             
-            # Debug: Check if the response is properly formatted
-            print(f"Stop verification response type: {type(stop_verification)}")
-            print(f"Stop verification response: {stop_verification}")
-            
             # Check if we got a string response (non-structured model) instead of MemoryVerification object
             if isinstance(stop_verification, str):
-                print("WARNING: Received string response instead of MemoryVerification object")
-                # Try to parse the string response to extract analysis and stop_signal
-                try:
-                    # Look for patterns in the response to extract information
-                    lines = stop_verification.split('\n')
-                    analysis = ""
-                    stop_signal = False
-                    
-                    for line in lines:
-                        line = line.strip()
-                        if line.lower().startswith('analysis:'):
-                            analysis = line[9:].strip()
-                        elif line.lower().startswith('stop_signal:'):
-                            signal_text = line[12:].strip().lower()
-                            stop_signal = signal_text in ['true', 'yes', '1']
-                    
-                    # If we couldn't parse properly, use the whole response as analysis
-                    if not analysis:
-                        analysis = stop_verification
-                    
-                    # Create MemoryVerification object manually
-                    stop_verification = MemoryVerification(
-                        analysis=analysis,
-                        stop_signal=stop_signal
-                    )
-                    print(f"Created MemoryVerification object: analysis='{analysis}', stop_signal={stop_signal}")
-                    
-                except Exception as parse_error:
-                    print(f"Error parsing string response: {parse_error}")
-                    # Create a default MemoryVerification object
-                    stop_verification = MemoryVerification(
-                        analysis=stop_verification,
-                        stop_signal=False
-                    )
-            
-            if hasattr(stop_verification, 'analysis'):
-                print(f"Analysis attribute exists: {stop_verification.analysis}")
-            if hasattr(stop_verification, 'stop_signal'):
-                print(f"Stop signal attribute exists: {stop_verification.stop_signal}")
-            else:
-                print("WARNING: stop_signal attribute not found!")
+                logger.warning("Received string response instead of MemoryVerification object")
+                # Use unified parser
+                analysis, stop_signal = ResponseParser.parse_memory_verification(stop_verification)
+                stop_verification = MemoryVerification(
+                    analysis=analysis,
+                    stop_signal=stop_signal
+                )
+                logger.debug(f"Created MemoryVerification object: analysis length={len(analysis)}, stop_signal={stop_signal}")
                 
         except Exception as e:
-            print(f"Error in response format parsing: {e}")
+            logger.error(f"Error in response format parsing: {e}")
             # Fallback: try without response format
             try:
                 raw_response = self.llm_engine_mm.generate(input_data)
@@ -740,14 +617,14 @@ stop_signal: [True or False]
                     raw_content = raw_response
                     self.last_usage = {}
                     
-                print(f"Raw response: {raw_content}")
+                logger.debug(f"Raw response length: {len(str(raw_content))}")
                 # Create a basic MemoryVerification object with default values
                 stop_verification = MemoryVerification(
                     analysis=raw_content,
                     stop_signal=False  # Default to continue
                 )
             except Exception as fallback_error:
-                print(f"Fallback error: {fallback_error}")
+                logger.error(f"Fallback error: {fallback_error}")
                 # Create a minimal MemoryVerification object
                 stop_verification = MemoryVerification(
                     analysis="Error in memory verification",
@@ -758,22 +635,16 @@ stop_signal: [True or False]
 
     def extract_conclusion(self, response: MemoryVerification) -> str:
         try:
-            print(f"Extract conclusion - Response type: {type(response)}")
-            print(f"Extract conclusion - Response: {response}")
-            
-            analysis = response.analysis
-            stop_signal = response.stop_signal
-            print(f"Extract conclusion - Analysis: {analysis}")
-            print(f"Extract conclusion - Stop signal: {stop_signal}")
+            # Use unified parser
+            analysis, stop_signal = ResponseParser.parse_memory_verification(response)
+            logger.debug(f"Extract conclusion - Analysis length: {len(analysis)}, Stop signal: {stop_signal}")
             
             if stop_signal:
                 return analysis, 'STOP'
             else:
                 return analysis, 'CONTINUE'
-        except AttributeError as e:
-            print(f"Error accessing MemoryVerification attributes: {e}")
-            print(f"Response object type: {type(response)}")
-            print(f"Response object attributes: {dir(response)}")
+        except Exception as e:
+            logger.error(f"Error accessing MemoryVerification attributes: {e}")
             # Fallback: try to extract from string representation or default to continue
             try:
                 if hasattr(response, 'analysis'):
@@ -784,7 +655,7 @@ stop_signal: [True or False]
                 # Default to continue if we can't determine stop_signal
                 return analysis, 'CONTINUE'
             except Exception as fallback_error:
-                print(f"Fallback error: {fallback_error}")
+                logger.error(f"Fallback error: {fallback_error}")
                 return "Error processing verification response", 'CONTINUE'
 
     def generate_final_output(self, question: str, image: str, memory: Memory, bytes_mode: bool = False, conversation_context: str = "", **kwargs) -> str:
@@ -846,7 +717,7 @@ Your response should be well-organized and include the following sections:
                     image_bytes = file.read()
                 input_data.append(image_bytes)
             except Exception as e:
-                print(f"Error reading image file: {str(e)}")
+                logger.error(f"Error reading image file: {str(e)}")
 
         llm_response = self.llm_engine_mm.generate(input_data)
         
@@ -855,7 +726,7 @@ Your response should be well-organized and include the following sections:
             final_output = llm_response['content']
             # Store usage info for later access
             self.last_usage = llm_response.get('usage', {})
-            print(f"Final output usage: {self.last_usage}")
+            logger.debug(f"Final output usage: {self.last_usage}")
         else:
             final_output = llm_response
             self.last_usage = {}
@@ -893,7 +764,7 @@ Answer:
                     image_bytes = file.read()
                 input_data.append(image_bytes)
             except Exception as e:
-                print(f"Error reading image file: {str(e)}")
+                logger.error(f"Error reading image file: {str(e)}")
 
         llm_response = self.llm_engine_mm.generate(input_data)
         
@@ -902,7 +773,7 @@ Answer:
             final_output = llm_response['content']
             # Store usage info for later access
             self.last_usage = llm_response.get('usage', {})
-            print(f"Direct output usage: {self.last_usage}")
+            logger.debug(f"Direct output usage: {self.last_usage}")
         else:
             final_output = llm_response
             self.last_usage = {}

@@ -181,6 +181,7 @@ class Initializer:
         """Verify tools are available (without instantiation)."""
         print("\nVerifying tool availability (no instantiation)...")
         self.available_tools = []
+        failed_tools = []
         for tool_class_name in self.enabled_tools:
             print(f"\nChecking availability of {tool_class_name}...")
             try:
@@ -188,9 +189,20 @@ class Initializer:
                 if tool_class:
                     self.available_tools.append(tool_class_name)
                     print(f"✓ Tool {tool_class_name} is available")
+                else:
+                    failed_tools.append((tool_class_name, "Failed to load tool class (returned None)"))
+                    print(f"✗ Tool {tool_class_name} failed to load (returned None)")
             except Exception as e:
-                print(f"Error checking availability of {tool_class_name}: {str(e)}")
+                error_msg = f"Error checking availability of {tool_class_name}: {str(e)}"
+                failed_tools.append((tool_class_name, error_msg))
+                print(error_msg)
                 print(traceback.format_exc())
+        
+        if failed_tools:
+            print(f"\n⚠️ {len(failed_tools)} tool(s) failed to load:")
+            for tool_name, error in failed_tools:
+                print(f"  - {tool_name}: {error}")
+        
         print(f"\nUpdated total number of available tools: {len(self.available_tools)}")
         print(f"\nAvailable tools: {self.available_tools}")
         return self.available_tools

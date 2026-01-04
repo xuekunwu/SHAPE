@@ -20,21 +20,18 @@ import logging
 import tempfile
 from PIL import Image
 import numpy as np
-from tifffile import imwrite as tiff_write
 from typing import List, Dict, Any, Iterator
 import matplotlib.pyplot as plt
 import gradio as gr
 from gradio import ChatMessage
 from pathlib import Path
 import hashlib
-from huggingface_hub import CommitScheduler
 from octotools.models.formatters import ToolCommand
-import random
 import traceback
 import psutil
-from llm_evaluation_scripts.hf_model_configs import HF_MODEL_CONFIGS
+from model_configs import HF_MODEL_CONFIGS
 from datetime import datetime
-from octotools.models.utils import make_json_serializable, VisualizationConfig, normalize_tool_name
+from octotools.models.utils import make_json_serializable, normalize_tool_name
 from dataclasses import dataclass, field
 
 _AVAILABLE_TOOLS_CACHE = None
@@ -53,12 +50,17 @@ def get_available_tools() -> List[str]:
         print(f"Warning: Tools directory not found: {tools_dir}")
         return tools
     
+    # Iterate through all items in tools directory
     for item in os.listdir(tools_dir):
         tool_dir = os.path.join(tools_dir, item)
+        
+        # Skip if not a directory or starts with underscore/dot
         if not os.path.isdir(tool_dir) or item.startswith('_') or item.startswith('.'):
             continue
         
-        if os.path.isfile(os.path.join(tool_dir, 'tool.py')):
+        # Check if tool.py exists in this directory
+        tool_file = os.path.join(tool_dir, 'tool.py')
+        if os.path.isfile(tool_file):
             # Special cases: handle tools with non-standard capitalization
             special_cases = {
                 'url_text_extractor': 'URL_Text_Extractor_Tool',  # URL is all uppercase
@@ -69,12 +71,16 @@ def get_available_tools() -> List[str]:
                 class_name = special_cases[item]
             else:
                 # Standard conversion: snake_case -> Pascal_Case_Tool
+                # Example: single_cell_cropper -> Single_Cell_Cropper_Tool
                 parts = item.split('_')
                 class_name = '_'.join([p.capitalize() for p in parts]) + '_Tool'
+            
             tools.append(class_name)
+            print(f"✓ Discovered tool: {item} -> {class_name}")
     
     tools.sort()
     _AVAILABLE_TOOLS_CACHE = tools
+    print(f"Total tools discovered: {len(tools)}")
     return tools
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -118,7 +124,7 @@ def make_json_serializable(obj):
         return obj
 
 def get_openai_model_configs():
-    from llm_evaluation_scripts.hf_model_configs import HF_MODEL_CONFIGS
+    from model_configs import HF_MODEL_CONFIGS
     return {k: v for k, v in HF_MODEL_CONFIGS.items() if v.get('model_type') == 'openai'}
 
 OPENAI_MODEL_CONFIGS = get_openai_model_configs()

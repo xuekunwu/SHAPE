@@ -8,6 +8,7 @@ from datetime import datetime
 from octotools.engine.openai import ChatOpenAI 
 from octotools.models.formatters import ToolCommand
 from octotools.models.utils import get_llm_safe_result
+from octotools.utils import logger, ResponseParser
 
 import signal
 from typing import Dict, Any, List, Optional
@@ -49,8 +50,8 @@ class Executor:
         # Ensure both directories exist
         os.makedirs(self.query_cache_dir, exist_ok=True)
         os.makedirs(self.tool_cache_dir, exist_ok=True)
-        print(f"Executor: Updated query_cache_dir to {self.query_cache_dir}")
-        print(f"Executor: Updated tool_cache_dir to {self.tool_cache_dir}")
+        logger.debug(f"Executor: Updated query_cache_dir to {self.query_cache_dir}")
+        logger.debug(f"Executor: Updated tool_cache_dir to {self.tool_cache_dir}")
     
     def generate_tool_command(self, question: str, image: str, context: str, sub_goal: str, tool_name: str, tool_metadata: Dict[str, Any], memory=None, bytes_mode:bool = False, conversation_context: str = "", image_id: str = None, **kwargs) -> ToolCommand:
         """
@@ -85,7 +86,7 @@ class Executor:
                     previous_outputs = last_action['result']
                     # Create LLM-safe version (summary only, no file paths)
                     previous_outputs_for_llm = get_llm_safe_result(previous_outputs)
-                    print(f"DEBUG: Extracted previous outputs: {list(previous_outputs.keys()) if isinstance(previous_outputs, dict) else 'Not a dict'}")
+                    logger.debug(f"Extracted previous outputs: {list(previous_outputs.keys()) if isinstance(previous_outputs, dict) else 'Not a dict'}")
         
         # Special handling for Cell_State_Analyzer_Tool to use dynamic metadata file discovery
         state_analyzer_tools = ["Cell_State_Analyzer_Tool"]
@@ -106,7 +107,7 @@ if not metadata_files:
 else:
     # Use the most recent metadata file
     latest_metadata_file = max(metadata_files, key=os.path.getctime)
-    print("Using metadata file: " + latest_metadata_file)
+    logger.info("Using metadata file: " + latest_metadata_file)
     
     try:
         # Use the tool's improved metadata loading method
@@ -128,7 +129,7 @@ else:
             execution = {"error": "No valid cell crops found in metadata", "status": "failed"}
         
     except Exception as e:
-        print("Error loading metadata: " + str(e))
+        logger.error("Error loading metadata: " + str(e))
         execution = {"error": "Failed to load metadata: " + str(e), "status": "failed"}"""
             )
         
@@ -142,7 +143,7 @@ else:
             processed_image_path = os.path.normpath(processed_image_path) if isinstance(processed_image_path, str) else str(processed_image_path)
             # Verify file exists before using it
             if not os.path.exists(processed_image_path):
-                print(f"Warning: processed_image_path does not exist: {processed_image_path}")
+                logger.warning(f"processed_image_path does not exist: {processed_image_path}")
                 # Fall through to standard command generation
             else:
                 # Escape backslashes for Python string in command
@@ -164,25 +165,25 @@ else:
             # Find mask file from previous outputs (support nuclei_mask, cell_mask, organoid_mask)
             mask_path = None
             mask_type = None
-            print(f"DEBUG: Looking for mask in previous outputs: {previous_outputs['visual_outputs']}")
+            logger.debug(f"Looking for mask in previous outputs: {previous_outputs['visual_outputs']}")
             for output_path in previous_outputs['visual_outputs']:
-                print(f"DEBUG: Checking output path: {output_path}")
+                logger.debug(f"Checking output path: {output_path}")
                 # Check for various mask types
                 if output_path.endswith('.png') and 'viz' not in output_path:
                     if 'nuclei_mask' in output_path:
                         mask_path = output_path
                         mask_type = "nuclei_mask"
-                        print(f"DEBUG: Found nuclei mask path: {mask_path}")
+                        logger.debug(f"Found nuclei mask path: {mask_path}")
                         break
                     elif 'cell_mask' in output_path:
                         mask_path = output_path
                         mask_type = "nuclei_mask"  # Use same parameter name for compatibility
-                        print(f"DEBUG: Found cell mask path: {mask_path}")
+                        logger.debug(f"Found cell mask path: {mask_path}")
                         break
                     elif 'organoid_mask' in output_path:
                         mask_path = output_path
                         mask_type = "nuclei_mask"  # Use same parameter name for compatibility
-                        print(f"DEBUG: Found organoid mask path: {mask_path}")
+                        logger.debug(f"Found organoid mask path: {mask_path}")
                         break
             
             if mask_path:
@@ -199,7 +200,7 @@ else:
                     command=f"""execution = tool.execute(original_image="{actual_image_path}", nuclei_mask="{mask_path}", min_area=50, margin=25)"""
                 )
             else:
-                print(f"DEBUG: No mask found in previous outputs: {previous_outputs['visual_outputs']}")
+                logger.debug(f"No mask found in previous outputs: {previous_outputs['visual_outputs']}")
                 # Fallback to standard command generation
                 pass
         
@@ -325,83 +326,25 @@ Remember: Your <command> field MUST be valid Python code including any necessary
             if isinstance(llm_response, dict) and 'content' in llm_response:
                 tool_command = llm_response['content']
                 usage_info = llm_response.get('usage', {})
-                print(f"Tool command generation usage: {usage_info}")
+                logger.debug(f"Tool command generation usage: {usage_info}")
             else:
                 tool_command = llm_response
                 usage_info = {}
             
             # Check if we got a string response (non-structured model like gpt-4-turbo) instead of ToolCommand object
             if isinstance(tool_command, str):
-                print("WARNING: Received string response instead of ToolCommand object")
-                # Try to parse the string response to extract analysis, explanation, and command
+                logger.warning("Received string response instead of ToolCommand object")
+                # Use unified parser
                 try:
-                    lines = tool_command.split('\n')
-                    analysis = ""
-                    explanation = ""
-                    command = ""
-                    
-                    for line in lines:
-                        line = line.strip()
-                        if line.lower().startswith('<analysis>') and not line.lower().startswith('<analysis>:'):
-                            analysis = line.split('<analysis>')[1].split('</analysis>')[0].strip()
-                        elif line.lower().startswith('analysis:'):
-                            parts = line.split('analysis:', 1)
-                            if len(parts) > 1:
-                                analysis = parts[1].lstrip(' :')
-                            else:
-                                analysis = ""
-                        elif line.lower().startswith('<explanation>') and not line.lower().startswith('<explanation>:'):
-                            explanation = line.split('<explanation>')[1].split('</explanation>')[0].strip()
-                        elif line.lower().startswith('explanation:'):
-                            parts = line.split('explanation:', 1)
-                            if len(parts) > 1:
-                                explanation = parts[1].lstrip(' :')
-                            else:
-                                explanation = ""
-                        elif line.lower().startswith('<command>') and not line.lower().startswith('<command>:'):
-                            command = line.split('<command>')[1].split('</command>')[0].strip()
-                        elif line.lower().startswith('command:'):
-                            parts = line.split('command:', 1)
-                            if len(parts) > 1:
-                                command = parts[1].lstrip(' :')
-                            else:
-                                command = ""
-                    
-                    # If we couldn't parse properly, try alternative patterns
-                    if not analysis or not explanation or not command:
-                        for line in lines:
-                            line = line.strip()
-                            if line.lower().startswith('analysis:') and not analysis:
-                                parts = line.split('analysis:', 1)
-                                if len(parts) > 1:
-                                    analysis = parts[1].lstrip(' :')
-                            elif line.lower().startswith('explanation:') and not explanation:
-                                parts = line.split('explanation:', 1)
-                                if len(parts) > 1:
-                                    explanation = parts[1].lstrip(' :')
-                            elif line.lower().startswith('command:') and not command:
-                                parts = line.split('command:', 1)
-                                if len(parts) > 1:
-                                    command = parts[1].lstrip(' :')
-                    
-                    # If still missing, use defaults
-                    if not analysis:
-                        analysis = "No analysis provided"
-                    if not explanation:
-                        explanation = "No explanation provided"
-                    if not command:
-                        command = "execution = tool.execute(error='No command provided')"
-                    
-                    # Create ToolCommand object manually
+                    analysis, explanation, command = ResponseParser.parse_tool_command(tool_command)
                     tool_command = ToolCommand(
                         analysis=analysis,
                         explanation=explanation,
                         command=command
                     )
-                    print(f"Created ToolCommand object from string: analysis='{analysis[:50]}...', explanation='{explanation[:50]}...', command='{command[:50]}...'")
-                    
+                    logger.debug(f"Created ToolCommand object from string: analysis length={len(analysis)}, explanation length={len(explanation)}, command length={len(command)}")
                 except Exception as parse_error:
-                    print(f"Error parsing string response: {parse_error}")
+                    logger.error(f"Error parsing string response: {parse_error}")
                     # Create a default ToolCommand object
                     tool_command = ToolCommand(
                         analysis="Error parsing analysis",
@@ -419,7 +362,7 @@ Remember: Your <command> field MUST be valid Python code including any necessary
                 
             return tool_command
         except Exception as e:
-            print(f"Error in tool command generation: {e}")
+            logger.error(f"Error in tool command generation: {e}")
             # Fallback: create a basic ToolCommand with error information
             error_msg = str(e).replace("'", "\\'")  # Escape single quotes
             return ToolCommand(
@@ -429,97 +372,14 @@ Remember: Your <command> field MUST be valid Python code including any necessary
             )
 
     def extract_explanation_and_command(self, response) -> tuple:
-        def normalize_code(code: str) -> str:
-            # Remove ```python at the beginning
-            code = re.sub(r'^```python\s*', '', code)
-            # Remove ``` at the end (handle both with and without newlines)
-            code = re.sub(r'\s*```\s*$', '', code)
-            return code.strip()
-        
+        """Extract analysis, explanation, and command from ToolCommand response."""
         try:
-            # Check if response is a ToolCommand object
-            if hasattr(response, 'analysis') and hasattr(response, 'explanation') and hasattr(response, 'command'):
-                analysis = response.analysis.strip()
-                explanation = response.explanation.strip()
-                command = normalize_code(response.command.strip())
-                return analysis, explanation, command
-            # Check if response is a string (fallback for non-structured models like gpt-4-turbo)
-            elif isinstance(response, str):
-                print("WARNING: Received string response instead of ToolCommand object")
-                # Try to parse the string response to extract analysis, explanation, and command
-                try:
-                    lines = response.split('\n')
-                    analysis = ""
-                    explanation = ""
-                    command = ""
-                    
-                    for line in lines:
-                        line = line.strip()
-                        if line.lower().startswith('<analysis>') and not line.lower().startswith('<analysis>:'):
-                            analysis = line.split('<analysis>')[1].split('</analysis>')[0].strip()
-                        elif line.lower().startswith('analysis:'):
-                            parts = line.split('analysis:', 1)
-                            if len(parts) > 1:
-                                analysis = parts[1].lstrip(' :')
-                            else:
-                                analysis = ""
-                        elif line.lower().startswith('<explanation>') and not line.lower().startswith('<explanation>:'):
-                            explanation = line.split('<explanation>')[1].split('</explanation>')[0].strip()
-                        elif line.lower().startswith('explanation:'):
-                            parts = line.split('explanation:', 1)
-                            if len(parts) > 1:
-                                explanation = parts[1].lstrip(' :')
-                            else:
-                                explanation = ""
-                        elif line.lower().startswith('<command>') and not line.lower().startswith('<command>:'):
-                            command = line.split('<command>')[1].split('</command>')[0].strip()
-                        elif line.lower().startswith('command:'):
-                            parts = line.split('command:', 1)
-                            if len(parts) > 1:
-                                command = parts[1].lstrip(' :')
-                            else:
-                                command = ""
-                    
-                    # If we couldn't parse properly, try alternative patterns
-                    if not analysis or not explanation or not command:
-                        for line in lines:
-                            line = line.strip()
-                            if line.lower().startswith('analysis:') and not analysis:
-                                parts = line.split('analysis:', 1)
-                                if len(parts) > 1:
-                                    analysis = parts[1].lstrip(' :')
-                            elif line.lower().startswith('explanation:') and not explanation:
-                                parts = line.split('explanation:', 1)
-                                if len(parts) > 1:
-                                    explanation = parts[1].lstrip(' :')
-                            elif line.lower().startswith('command:') and not command:
-                                parts = line.split('command:', 1)
-                                if len(parts) > 1:
-                                    command = parts[1].lstrip(' :')
-                    
-                    # If still missing, use defaults
-                    if not analysis:
-                        analysis = "No analysis provided"
-                    if not explanation:
-                        explanation = "No explanation provided"
-                    if not command:
-                        command = "execution = tool.execute(error='No command provided')"
-                    
-                    # Normalize the command
-                    command = normalize_code(command)
-                    
-                    print(f"Parsed from string: analysis='{analysis[:50]}...', explanation='{explanation[:50]}...', command='{command[:50]}...'")
-                    return analysis, explanation, command
-                    
-                except Exception as parse_error:
-                    print(f"Error parsing string response: {parse_error}")
-                    return "Error parsing analysis", "Error parsing explanation", "execution = tool.execute(error='Error parsing command')"
-            else:
-                print(f"Unexpected response type: {type(response)}")
-                return "Unknown analysis", "Unknown explanation", "execution = tool.execute(error='Unknown response type')"
-                
+            # Use unified parser
+            analysis, explanation, command = ResponseParser.parse_tool_command(response)
+            logger.debug(f"Extracted: analysis length={len(analysis)}, explanation length={len(explanation)}, command length={len(command)}")
+            return analysis, explanation, command
         except Exception as e:
-            print(f"Error extracting explanation and command: {str(e)}")
+            logger.error(f"Error extracting explanation and command: {str(e)}")
             return "Error extracting analysis", "Error extracting explanation", "execution = tool.execute(error='Error extracting command')"
 
     def execute_tool_command(self, tool_name: str, command: str) -> Any:
@@ -532,7 +392,7 @@ Remember: Your <command> field MUST be valid Python code including any necessary
                 f"This may indicate a mismatch between the tool name returned by the planner and the available tools. "
                 f"Please check that the tool is properly registered and available."
             )
-            print(f"ERROR: {error_msg}")
+            logger.error(error_msg)
             return {
                 "error": error_msg,
                 "summary": f"Failed to execute tool: {clean_tool_name} not found",
@@ -622,7 +482,7 @@ Remember: Your <command> field MUST be valid Python code including any necessary
             if tool_name == "Cell_State_Analyzer_Tool" and isinstance(result, dict):
                 # Cell_State_Analyzer_Tool saves adata_path directly in result
                 if 'adata_path' in result:
-                    print(f"AnnData already saved by Cell_State_Analyzer_Tool: {result['adata_path']}")
+                    logger.debug(f"AnnData already saved by Cell_State_Analyzer_Tool: {result['adata_path']}")
             
             return result
 
