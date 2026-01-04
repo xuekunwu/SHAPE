@@ -112,18 +112,59 @@ class DinoV3Projector(nn.Module):
             "dinov3_vit7b16": 4096,
         }
         
-        # Load DINOv3 backbone directly from Hugging Face Hub
-        repo_id = "5xuekun/dinov3_vitb16"  # UPDATE THIS with actual repo ID after uploading
-        logger.info(f"Loading DINOv3 backbone from Hugging Face Hub: {repo_id}")
-        try:
-            from transformers import AutoModel
-            self.backbone = AutoModel.from_pretrained(repo_id, token=os.getenv("HUGGINGFACE_TOKEN"))
-            logger.info("✅ Loaded DINOv3 model from Hugging Face Hub")
-        except Exception as e:
-            logger.error(f"Failed to load DINOv3 from Hugging Face Hub: {e}")
-            raise ValueError(f"DINOv3 model loading failed. Please ensure the model is uploaded to Hugging Face Hub at {repo_id}")
+        # Load DINOv3 backbone directly from Hugging Face Hub with fallback to DINOv2
+        custom_repo_id = "5xuekun/dinov3_vitb16"
+        fallback_repo_id = "facebook/dinov2-base"  # Official DINOv2 model as fallback
+        logger.info(f"Attempting to load DINOv3 backbone from Hugging Face Hub: {custom_repo_id}")
         
+        self.backbone = None
+        from transformers import AutoModel
+        
+        # Try custom DINOv3 model first
+        try:
+            hf_token = os.getenv("HUGGINGFACE_TOKEN")
+            self.backbone = AutoModel.from_pretrained(
+                custom_repo_id, 
+                token=hf_token,
+                trust_remote_code=True
+            )
+            logger.info(f"✅ Loaded custom DINOv3 model from Hugging Face Hub: {custom_repo_id}")
+        except Exception as e:
+            logger.warning(f"Failed to load custom DINOv3 model ({custom_repo_id}): {e}")
+            logger.info(f"Falling back to official DINOv2 model: {fallback_repo_id}")
+            
+            # Fallback to official DINOv2 model
+            try:
+                self.backbone = AutoModel.from_pretrained(
+                    fallback_repo_id,
+                    token=hf_token,
+                    trust_remote_code=True
+                )
+                logger.info(f"✅ Loaded DINOv2 model from Hugging Face Hub: {fallback_repo_id}")
+                # Update feat_dim for DINOv2-base (768 dimensions)
+                feat_dim_map[backbone_name] = 768
+            except Exception as fallback_e:
+                logger.error(f"Failed to load fallback DINOv2 model: {fallback_e}")
+                raise ValueError(
+                    f"Model loading failed. Tried:\n"
+                    f"1. Custom DINOv3: {custom_repo_id} - {str(e)}\n"
+                    f"2. Official DINOv2: {fallback_repo_id} - {str(fallback_e)}\n"
+                    f"Please check your internet connection and Hugging Face Hub access."
+                )
+        
+        # Get feature dimension - use map value as default, will be adjusted if needed
         feat_dim = feat_dim_map.get(backbone_name, 768)
+        
+        # Try to infer actual feat_dim from loaded model if available
+        if self.backbone is not None:
+            try:
+                # DINOv2/DINOv3 models typically have a config attribute
+                if hasattr(self.backbone, 'config') and hasattr(self.backbone.config, 'hidden_size'):
+                    actual_feat_dim = self.backbone.config.hidden_size
+                    logger.info(f"Model hidden_size: {actual_feat_dim}, using for projection head")
+                    feat_dim = actual_feat_dim
+            except Exception as e:
+                logger.debug(f"Could not infer feat_dim from model config: {e}, using default: {feat_dim}")
         self.projector = nn.Sequential(
             nn.Linear(feat_dim, 512),
             nn.ReLU(inplace=True),

@@ -381,8 +381,8 @@ class Analysis_Visualizer_Tool(BaseTool):
                             comparison_metric: result[comparison_metric]
                         })
                 df = pd.DataFrame(records)
-            elif 'cell_metadata' in analysis_data:
-                # Cell metadata structure
+            elif 'cell_metadata' in analysis_data and 'cell_crop_objects' not in analysis_data:
+                # Cell metadata structure (only if not already handled by cell_crop_objects)
                 records = []
                 for metadata in analysis_data['cell_metadata']:
                     group = metadata.get(group_column, metadata.get('group', 'default'))
@@ -391,7 +391,53 @@ class Analysis_Visualizer_Tool(BaseTool):
                             group_column: group,
                             comparison_metric: metadata[comparison_metric]
                         })
+                    elif comparison_metric == 'cell_count':
+                        records.append({
+                            group_column: group
+                        })
                 df = pd.DataFrame(records)
+            elif 'cell_crop_objects' in analysis_data:
+                # Single cell cropper output format
+                # cell_crop_objects is a list of CellCrop objects (serialized as dicts)
+                records = []
+                for obj in analysis_data['cell_crop_objects']:
+                    group = obj.get(group_column, obj.get('group', 'default'))
+                    # Try to get comparison_metric from the object
+                    if comparison_metric in obj:
+                        records.append({
+                            group_column: group,
+                            comparison_metric: obj[comparison_metric]
+                        })
+                    # For cell_count metric, just record group (will count later)
+                    elif comparison_metric == 'cell_count':
+                        records.append({
+                            group_column: group
+                        })
+                    # For other metrics like 'area', try to find in object
+                    else:
+                        # Check if metric exists in object (e.g., 'area' from CellCrop)
+                        if comparison_metric in obj:
+                            records.append({
+                                group_column: group,
+                                comparison_metric: obj[comparison_metric]
+                            })
+                df = pd.DataFrame(records) if records else pd.DataFrame()
+                
+                # If no records were created and we have cell_metadata, try that instead
+                if df.empty and 'cell_metadata' in analysis_data:
+                    records = []
+                    for metadata in analysis_data['cell_metadata']:
+                        group = metadata.get(group_column, metadata.get('group', 'default'))
+                        if comparison_metric in metadata:
+                            records.append({
+                                group_column: group,
+                                comparison_metric: metadata[comparison_metric]
+                            })
+                        elif comparison_metric == 'cell_count':
+                            records.append({
+                                group_column: group
+                            })
+                    df = pd.DataFrame(records) if records else pd.DataFrame()
             else:
                 # Try to convert directly to DataFrame
                 try:
@@ -408,26 +454,50 @@ class Analysis_Visualizer_Tool(BaseTool):
                             raise ValueError("Unable to parse analysis data structure")
                     else:
                         raise ValueError("Unable to parse analysis data structure")
-        elif isinstance(analysis_data, list):
-            # List of records (row-oriented)
-            if len(analysis_data) == 0:
-                raise ValueError("Empty data list provided")
-            # Check if it's a list of dicts
-            if all(isinstance(item, dict) for item in analysis_data):
-                df = pd.DataFrame(analysis_data)
+        # Handle list case if df wasn't created above
+        if 'df' not in locals() or ('df' in locals() and df is None):
+            if isinstance(analysis_data, list):
+                # List of records (row-oriented)
+                if len(analysis_data) == 0:
+                    raise ValueError("Empty data list provided")
+                # Check if it's a list of dicts
+                if all(isinstance(item, dict) for item in analysis_data):
+                    # Check if this is a list of cell crop objects
+                    first_item = analysis_data[0]
+                    if 'group' in first_item or 'crop_path' in first_item:
+                        # List of cell crop objects from single cell cropper
+                        records = []
+                        for obj in analysis_data:
+                            group = obj.get(group_column, obj.get('group', 'default'))
+                            if comparison_metric in obj:
+                                records.append({
+                                    group_column: group,
+                                    comparison_metric: obj[comparison_metric]
+                                })
+                            elif comparison_metric == 'cell_count':
+                                records.append({
+                                    group_column: group
+                                })
+                        df = pd.DataFrame(records)
+                    else:
+                        df = pd.DataFrame(analysis_data)
+                else:
+                    raise ValueError(f"List must contain dictionaries, got {type(analysis_data[0])}")
             else:
-                raise ValueError(f"List must contain dictionaries, got {type(analysis_data[0])}")
-        else:
-            raise ValueError(f"Unsupported data type: {type(analysis_data)}")
+                raise ValueError(f"Unsupported data type: {type(analysis_data)}")
         
         if df.empty:
             raise ValueError("No data found for visualization")
         
         if group_column not in df.columns:
-            raise ValueError(f"Group column '{group_column}' not found in data")
+            raise ValueError(f"Group column '{group_column}' not found in data. Available columns: {list(df.columns)}")
         
-        if comparison_metric not in df.columns:
-            raise ValueError(f"Comparison metric '{comparison_metric}' not found in data")
+        # Handle cell_count metric specially (count rows per group)
+        if comparison_metric == 'cell_count' and comparison_metric not in df.columns:
+            # Count cells per group
+            df = df.groupby(group_column).size().reset_index(name=comparison_metric)
+        elif comparison_metric not in df.columns:
+            raise ValueError(f"Comparison metric '{comparison_metric}' not found in data. Available columns: {list(df.columns)}")
         
         # Convert any list/array values in group_column to strings to avoid unhashable type errors
         if df[group_column].dtype == 'object':
