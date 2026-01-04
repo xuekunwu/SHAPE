@@ -32,6 +32,51 @@ class Planner:
         
         # Initialize token usage tracking
         self.last_usage = {}
+    
+    def _format_memory_for_prompt(self, memory: Memory, max_recent_actions: int = 10) -> str:
+        """
+        Format memory actions for prompt, using LLM-safe summaries and limiting to recent actions.
+        This prevents context length overflow while preserving essential information.
+        
+        Args:
+            memory: Memory object
+            max_recent_actions: Maximum number of recent actions to include
+            
+        Returns:
+            Formatted string of actions
+        """
+        actions = memory.get_actions(llm_safe=True)  # Use LLM-safe summaries
+        if not actions:
+            return "No previous steps"
+        
+        # Take only the most recent actions to prevent context overflow
+        recent_actions = actions[-max_recent_actions:] if len(actions) > max_recent_actions else actions
+        
+        # Format actions compactly
+        formatted = []
+        for i, action in enumerate(recent_actions, 1):
+            tool_name = action.get('tool_name', 'Unknown')
+            sub_goal = action.get('sub_goal', '')
+            result_summary = action.get('result', {})
+            
+            # Truncate long summaries
+            if isinstance(result_summary, dict):
+                result_str = str(result_summary)
+            elif isinstance(result_summary, str):
+                result_str = result_summary
+            else:
+                result_str = str(result_summary)
+            
+            # Limit result summary length
+            if len(result_str) > 500:
+                result_str = result_str[:500] + "... (truncated)"
+            
+            formatted.append(f"Step {i}: {tool_name}\n  Goal: {sub_goal[:200] if len(sub_goal) > 200 else sub_goal}\n  Result: {result_str}")
+        
+        if len(actions) > max_recent_actions:
+            formatted.insert(0, f"[Showing last {max_recent_actions} of {len(actions)} steps. Earlier steps omitted to save context.]")
+        
+        return "\n\n".join(formatted)
 
     def get_image_info(self, image_path: str) -> Dict[str, Any]:
         image_info = {}
@@ -187,7 +232,7 @@ Please present your analysis in a clear, structured format.
             'Cell_State_Analyzer_Tool',
             'Image_Preprocessor_Tool'
         ]
-        actions = memory.get_actions()
+        actions = memory.get_actions(llm_safe=True)
         for action in actions:
             tool_name = action.get('tool_name', '')
             if any(bio_tool in tool_name for bio_tool in bioimage_tools):
@@ -222,8 +267,28 @@ Please present your analysis in a clear, structured format.
         # Get tools grouped by priority for prompt
         tools_by_priority = self.priority_manager.format_tools_by_priority(available_tools)
         
-        # Get used tools from memory for dependency checking
-        used_tools = [action.get('tool_name', '') for action in memory.get_actions() if 'tool_name' in action]
+        # Get used tools from memory for dependency checking (use llm_safe to avoid loading full results)
+        actions_for_tools = memory.get_actions(llm_safe=True)
+        used_tools = [action.get('tool_name', '') for action in actions_for_tools if 'tool_name' in action]
+        
+        # CRITICAL: Force Single_Cell_Cropper_Tool if last tool was a segmentation tool
+        if used_tools:
+            last_tool = used_tools[-1]
+            segmentation_tools = ["Cell_Segmenter_Tool", "Nuclei_Segmenter_Tool", "Organoid_Segmenter_Tool"]
+            if last_tool in segmentation_tools:
+                # Override LLM selection - MUST use Single_Cell_Cropper_Tool next
+                logger.info(f"⚠️ FORCING Single_Cell_Cropper_Tool: Last tool '{last_tool}' was a segmentation tool")
+                if "Single_Cell_Cropper_Tool" not in available_tools:
+                    logger.error(f"Single_Cell_Cropper_Tool not available! Available: {available_tools}")
+                else:
+                    # Create a forced next step
+                    forced_context = self._format_memory_for_prompt(memory)
+                    return NextStep(
+                        justification=f"MANDATORY: Previous tool '{last_tool}' was a segmentation tool. Single_Cell_Cropper_Tool MUST be called next according to the bioimage analysis chain.",
+                        context=forced_context,
+                        sub_goal="Generate single-cell crops from the segmentation mask produced in the previous step. Extract individual cell regions with appropriate margins for downstream analysis.",
+                        tool_name="Single_Cell_Cropper_Tool"
+                    )
         recommended_tools = self.priority_manager.get_recommended_next_tools(
             available_tools, used_tools, self.detected_domain
         )
@@ -271,7 +336,7 @@ Tool Metadata:
 {toolbox_metadata}
 
 Previous Steps and Their Results:
-{memory.get_actions()}
+{self._format_memory_for_prompt(memory)}
 
 Tools Already Used: {used_tools if used_tools else "None"}
 
@@ -470,7 +535,7 @@ Example (do not copy, use only as reference):
         is_fibroblast_query = any(keyword.lower() in question.lower() for keyword in fibroblast_keywords)
         
         # Get finished tools from memory
-        finished_tools = [action['tool_name'] for action in memory.get_actions() if 'tool_name' in action]
+        finished_tools = [action['tool_name'] for action in memory.get_actions(llm_safe=True) if 'tool_name' in action]
         
         # Special case: If this is a fibroblast analysis and cell state analyzer just finished,
         # but activation scorer hasn't run yet, we should continue
@@ -487,7 +552,7 @@ Image: {image_info}
 Available Tools: {self.available_tools}
 Toolbox Metadata: {self.toolbox_metadata}
 Initial Analysis: {query_analysis}
-Memory (tools used and results): {memory.get_actions(llm_safe=True)}
+Memory (tools used and results): {self._format_memory_for_prompt(memory)}
 
 Detailed Instructions:
 1. Carefully analyze the query, initial analysis, and image (if provided):
@@ -674,7 +739,7 @@ Context:
 Query: {question}
 Image: {image_info}
 Actions Taken:
-{memory.get_actions()}
+{self._format_memory_for_prompt(memory)}
 
 Instructions:
 1. Review the query, image, and all actions taken during the process.
@@ -750,7 +815,7 @@ Image: {image_info}
 Initial Analysis:
 {self.query_analysis}
 Actions Taken:
-{memory.get_actions()}
+{self._format_memory_for_prompt(memory)}
 
 Please generate the concise output based on the query, image information, initial analysis, and actions taken. Break down the process into clear, logical, and conherent steps. Conclude with a precise and direct answer to the query.
 
