@@ -119,47 +119,48 @@ import glob
 
 # Dynamically find all metadata files (for multi-image processing)
 # _load_cell_data_from_metadata expects query_cache_dir (parent directory) and constructs tool_cache path internally
-# Handle case where self.query_cache_dir may already contain 'tool_cache' (from app.py)
+# Get parent directory from tool_cache_dir (remove 'tool_cache' suffix if present)
 tool_cache_dir_str = r'{self.tool_cache_dir}'
 query_cache_dir_str = r'{self.query_cache_dir}'
 
-# If query_cache_dir already contains 'tool_cache', get parent directory
-# Otherwise, use query_cache_dir as-is (it's the parent directory)
-if 'tool_cache' in query_cache_dir_str and query_cache_dir_str.endswith('tool_cache'):
-    query_cache_dir_parent = os.path.dirname(query_cache_dir_str)
+# Determine parent directory: if tool_cache_dir ends with 'tool_cache', get its parent
+# Otherwise, tool_cache_dir is already the parent and we need to append 'tool_cache' (but this shouldn't happen)
+if tool_cache_dir_str.endswith(os.path.sep + 'tool_cache') or tool_cache_dir_str.endswith('/tool_cache'):
+    query_cache_dir_parent = os.path.dirname(tool_cache_dir_str)
+elif tool_cache_dir_str.endswith('tool_cache'):
+    query_cache_dir_parent = os.path.dirname(tool_cache_dir_str)
 else:
-    query_cache_dir_parent = query_cache_dir_str
+    # Fallback: use query_cache_dir if it doesn't contain tool_cache
+    query_cache_dir_parent = query_cache_dir_str if 'tool_cache' not in query_cache_dir_str else os.path.dirname(query_cache_dir_str)
 
-# Use tool_cache_dir directly to find metadata files
-metadata_files = glob.glob(os.path.join(tool_cache_dir_str, 'cell_crops_metadata_*.json'))
-if not metadata_files:
-    execution = {{"error": "No metadata files found", "status": "failed"}}
-else:
-    logger.info(f"Found {{len(metadata_files)}} metadata file(s), will merge all for multi-image processing")
+logger.info(f"Looking for metadata files in: {{tool_cache_dir_str}}")
+logger.info(f"Using query_cache_dir_parent: {{query_cache_dir_parent}}")
+
+try:
+    # Use the tool's improved metadata loading method (merges all metadata files)
+    # Pass query_cache_dir (parent directory), the method will construct tool_cache path internally
+    cell_crops, cell_metadata = tool._load_cell_data_from_metadata(query_cache_dir_parent)
     
-    try:
-        # Use the tool's improved metadata loading method (merges all metadata files)
-        # Pass query_cache_dir (parent directory), the method will construct tool_cache path internally
-        cell_crops, cell_metadata = tool._load_cell_data_from_metadata(query_cache_dir_parent)
-        
-        if cell_crops and len(cell_crops) > 0:
-            # Execute the tool with loaded data (merged from all metadata files)
-            execution = tool.execute(
-                cell_crops=cell_crops, 
-                cell_metadata=cell_metadata, 
-                max_epochs=25,
-                early_stop_loss=0.5,
-                batch_size=16,
-                learning_rate=3e-5,
-                cluster_resolution=0.5,
-                query_cache_dir=query_cache_dir_parent
-            )
-        else:
-            execution = {{"error": "No valid cell crops found in metadata", "status": "failed"}}
-        
-    except Exception as e:
-        logger.error("Error loading metadata: " + str(e))
-        execution = {{"error": "Failed to load metadata: " + str(e), "status": "failed"}}"""
+    if cell_crops and len(cell_crops) > 0:
+        # Execute the tool with loaded data (merged from all metadata files)
+        execution = tool.execute(
+            cell_crops=cell_crops, 
+            cell_metadata=cell_metadata, 
+            max_epochs=25,
+            early_stop_loss=0.5,
+            batch_size=16,
+            learning_rate=3e-5,
+            cluster_resolution=0.5,
+            query_cache_dir=query_cache_dir_parent
+        )
+    else:
+        execution = {{"error": "No valid cell crops found in metadata", "status": "failed"}}
+    
+except Exception as e:
+    logger.error("Error loading metadata: " + str(e))
+    import traceback
+    logger.error("Traceback: " + traceback.format_exc())
+    execution = {{"error": "Failed to load metadata: " + str(e), "status": "failed"}}"""
             )
         
         # Special handling for segmentation tools (Nuclei_Segmenter_Tool, Cell_Segmenter_Tool, Organoid_Segmenter_Tool) 
