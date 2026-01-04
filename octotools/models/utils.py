@@ -45,6 +45,7 @@ import numpy as np
 from typing import Any, Dict, List
 import matplotlib.pyplot as plt
 import matplotlib as mpl
+from matplotlib import colors, cm
 import os
 from pathlib import Path
 
@@ -67,39 +68,89 @@ class VisualizationConfig:
     """
     Centralized configuration for all visualizations to ensure consistency.
     All tools should use this configuration for generating images.
+    Based on professional plotting standards from plotting/palettes.py and plotting/utils.py
     """
     
-    # Professional visualization settings
+    # Professional color palettes (based on plotting/palettes.py)
+    # Colorblindness-adjusted vega_10_scanpy palette
+    VEGA_10_SCANPY = [
+        "#1f77b4",  # blue
+        "#279e68",  # green (adjusted for colorblindness)
+        "#ff7f0e",  # orange
+        "#aa40fc",  # purple (adjusted)
+        "#d62728",  # red
+        "#9467bd",  # purple
+        "#8c564b",  # brown
+        "#b5bd61",  # khaki (adjusted)
+        "#17becf",  # cyan
+        "#bcbd22"   # yellow-green
+    ]
+    
+    # Extended vega_20_scanpy palette
+    VEGA_20_SCANPY = [
+        *["#1f77b4", "#aec7e8", "#ff7f0e", "#ffbb78", "#279e68", "#98df8a", 
+          "#d62728", "#ff9896", "#9467bd", "#c5b0d5", "#8c564b", "#c49c94",
+          "#e377c2", "#f7b6d3", "#aa40fc", "#c7c7c7", "#bcbd22", "#dbdb8d",
+          "#b5bd61", "#dede5f"],
+        "#ad494a",
+        "#8c6d31"
+    ]
+    
+    # Default palettes for different numbers of categories
+    DEFAULT_26 = [
+        "#023fa5", "#7d87b9", "#bec1d4", "#d6bcc0", "#bb7784", "#8e063b", "#4a6fe3",
+        "#8595e1", "#b5bbe3", "#e6afb9", "#e07b91", "#d33f6a", "#11c638", "#8dd593",
+        "#c6dec7", "#ead3c6", "#f0b98d", "#ef9708", "#0fcfc0", "#9cded6", "#d5eae7",
+        "#f3e1eb", "#f6c4e1", "#f79cd4", "#7f7f7f", "#c7c7c7"
+    ]
+    
+    DEFAULT_64 = [
+        "#FFFF00", "#1CE6FF", "#FF34FF", "#FF4A46", "#008941", "#006FA6", "#A30059",
+        "#FFDBE5", "#7A4900", "#0000A6", "#63FFAC", "#B79762", "#004D43", "#8FB0FF",
+        "#997D87", "#5A0007", "#809693", "#FEFFE6", "#1B4400", "#4FC601", "#3B5DFF",
+        "#4A3B53", "#FF2F80", "#61615A", "#BA0900", "#6B7900", "#00C2A0", "#FFAA92",
+        "#FF90C9", "#B903AA", "#D16100", "#DDEFFF", "#000035", "#7B4F4B", "#A1C299",
+        "#300018", "#0AA6D8", "#013349", "#00846F", "#372101", "#FFB500", "#C2FFED",
+        "#A079BF", "#CC0744", "#C0B9B2", "#C2FF99", "#001E09", "#00489C", "#6F0062",
+        "#0CBD66", "#EEC3FF", "#456D75", "#B77B68", "#7A87A1", "#788D66", "#885578",
+        "#FAD09F", "#FF8A9A", "#D157A0", "#BEC459", "#456648", "#0086ED", "#886F4C",
+        "#34362D", "#B4A8BD", "#00A6AA", "#452C2C", "#636375", "#A3C8C9", "#FF913F"
+    ]
+    
+    # Professional visualization settings (optimized for publication quality)
     PROFESSIONAL_STYLE = {
-        'figure.figsize': (12, 8),
+        'figure.figsize': (10, 6),  # Consistent figure size
         'figure.dpi': 300,
         'savefig.dpi': 300,
         'savefig.format': 'png',
         'savefig.bbox': 'tight',
         'savefig.pad_inches': 0.1,
-        'font.size': 16,  # Increased base font size
-        'axes.titlesize': 22,  # Increased title size
-        'axes.labelsize': 20,  # Increased label size
-        'xtick.labelsize': 18,  # Increased tick label size
-        'ytick.labelsize': 18,  # Increased tick label size
-        'legend.fontsize': 17,  # Increased legend font size
-        'legend.title_fontsize': 18,  # Increased legend title size
-        'lines.linewidth': 2.5,  # Increased line width
-        'axes.linewidth': 2.0,  # Increased axis line width
-        'grid.linewidth': 1.0,  # Increased grid line width
-        'grid.alpha': 0.4,  # Increased grid alpha
+        'font.size': 11,  # Base font size (professional standard)
+        'axes.titlesize': 16,  # Title size
+        'axes.labelsize': 14,  # Label size
+        'xtick.labelsize': 11,  # Tick label size
+        'ytick.labelsize': 11,  # Tick label size
+        'legend.fontsize': 11,  # Legend font size
+        'legend.title_fontsize': 11,  # Legend title size
+        'lines.linewidth': 1.5,  # Line width
+        'axes.linewidth': 1.0,  # Axis line width (cleaner look)
+        'grid.linewidth': 0.5,  # Grid line width
+        'grid.alpha': 0.2,  # Light grid (professional standard)
         'axes.grid': True,
         'axes.axisbelow': True,
         'figure.facecolor': 'white',
         'axes.facecolor': 'white',
         'axes.edgecolor': 'black',
-        'axes.spines.top': True,
-        'axes.spines.right': True,
+        'axes.spines.top': False,  # Remove top spine (cleaner)
+        'axes.spines.right': False,  # Remove right spine (cleaner)
         'axes.spines.bottom': True,
         'axes.spines.left': True,
         'text.usetex': False,
         'font.family': 'sans-serif',
-        'font.sans-serif': ['Arial', 'DejaVu Sans', 'Liberation Sans', 'Bitstream Vera Sans', 'sans-serif']
+        'font.sans-serif': ['Arial', 'DejaVu Sans', 'Liberation Sans', 'Bitstream Vera Sans', 'sans-serif'],
+        'font.weight': 'normal',  # Normal weight (not bold) for cleaner look
+        'axes.labelweight': 'normal',
+        'axes.titleweight': 'normal'
     }
     
     # Output directory configuration
@@ -222,9 +273,35 @@ class VisualizationConfig:
         }
     
     @classmethod
+    def get_color_palette(cls, n_colors: int) -> List[str]:
+        """
+        Get professional color palette for given number of colors.
+        Uses colorblindness-adjusted palettes from plotting standards.
+        
+        Args:
+            n_colors: Number of colors needed
+            
+        Returns:
+            List of hex color strings
+        """
+        if n_colors <= 10:
+            return cls.VEGA_10_SCANPY[:n_colors]
+        elif n_colors <= 20:
+            return cls.VEGA_20_SCANPY[:n_colors]
+        elif n_colors <= 26:
+            return cls.DEFAULT_26[:n_colors]
+        elif n_colors <= 64:
+            return cls.DEFAULT_64[:n_colors]
+        else:
+            # For more than 64 colors, cycle through default_64
+            palette = cls.DEFAULT_64 * ((n_colors // 64) + 1)
+            return palette[:n_colors]
+    
+    @classmethod
     def apply_professional_styling(cls, ax, title: str = "", xlabel: str = "", ylabel: str = ""):
         """
         Apply professional styling to a matplotlib axis.
+        Based on plotting/utils.py standards for publication-quality figures.
         
         Args:
             ax: matplotlib axis object
@@ -233,25 +310,29 @@ class VisualizationConfig:
             ylabel: Y-axis label
         """
         if title:
-            ax.set_title(title, fontsize=22, fontweight='bold', pad=20)
+            ax.set_title(title, fontsize=16, fontweight='normal', pad=15)
         if xlabel:
-            ax.set_xlabel(xlabel, fontsize=20, fontweight='bold')
+            ax.set_xlabel(xlabel, fontsize=14, fontweight='normal')
         if ylabel:
-            ax.set_ylabel(ylabel, fontsize=20, fontweight='bold')
+            ax.set_ylabel(ylabel, fontsize=14, fontweight='normal')
         
-        # Apply professional grid and spine styling
-        ax.grid(True, alpha=0.4, linewidth=1.0)
-        ax.tick_params(axis='both', which='major', labelsize=18, width=2, length=6)
+        # Apply professional grid and spine styling (cleaner, publication-quality)
+        ax.grid(True, alpha=0.2, linestyle='-', linewidth=0.5, axis='both')
+        ax.tick_params(axis='both', which='major', labelsize=11, width=1.0, length=4)
         
-        # Make spines more prominent
-        for spine in ax.spines.values():
-            spine.set_linewidth(2.0)
-            spine.set_color('black')
+        # Clean spine styling (remove top/right, thin lines)
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        ax.spines['left'].set_linewidth(1.0)
+        ax.spines['bottom'].set_linewidth(1.0)
+        ax.spines['left'].set_color('black')
+        ax.spines['bottom'].set_color('black')
     
     @classmethod
     def create_professional_legend(cls, ax, title: str = "Cell States", **kwargs):
         """
         Create a professional legend with consistent formatting.
+        Clean, simple style without shadows for publication quality.
         
         Args:
             ax: matplotlib axis object
@@ -261,20 +342,27 @@ class VisualizationConfig:
         Returns:
             matplotlib legend object
         """
-        legend = ax.legend(
-            title=title,
-            title_fontsize=18,
-            fontsize=17,
-            frameon=True,
-            fancybox=True,
-            shadow=True,
-            **kwargs
-        )
+        # Set default kwargs for professional style
+        default_kwargs = {
+            'title': title,
+            'title_fontsize': 11,
+            'fontsize': 11,
+            'frameon': True,
+            'fancybox': False,
+            'shadow': False,
+            'edgecolor': 'gray',
+            'facecolor': 'white'
+        }
+        default_kwargs.update(kwargs)
         
-        # Style the legend frame
-        legend.get_frame().set_facecolor('white')
-        legend.get_frame().set_alpha(0.9)
-        legend.get_frame().set_linewidth(1.5)
+        legend = ax.legend(**default_kwargs)
+        
+        # Style the legend frame (clean, simple)
+        if legend:
+            legend.get_frame().set_facecolor('white')
+            legend.get_frame().set_alpha(1.0)
+            legend.get_frame().set_linewidth(0.8)
+            legend.get_frame().set_edgecolor('gray')
         
         return legend
 

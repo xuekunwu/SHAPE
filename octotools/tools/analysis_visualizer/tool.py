@@ -66,28 +66,22 @@ class Analysis_Visualizer_Tool(BaseTool):
                 "limitation": "Requires analysis data with group labels. Statistical tests assume normal distribution for t-test and ANOVA.",
                 "best_practice": "Use 'auto' chart type to let the tool automatically select the most appropriate visualization based on data characteristics. For cell counts, bar charts are recommended. For proportions, pie charts work well.",
                 "statistical_tests": "Automatically performs t-test for 2 groups and ANOVA for 3+ groups. Results are included in the output.",
-                "color_scheme": "Automatically uses tab10 colors for ≤10 groups and tab20 colors for >10 groups."
+                "color_scheme": "Automatically uses colorblindness-adjusted professional palettes (vega_10_scanpy, vega_20_scanpy, default_26, default_64) based on number of groups."
             }
         )
         
-        # Color schemes
-        self.tab10_colors = plt.cm.tab10.colors
-        self.tab20_colors = plt.cm.tab20.colors
-        
-    def _get_color_scheme(self, n_groups: int) -> List[tuple]:
+    def _get_color_scheme(self, n_groups: int) -> List[str]:
         """
-        Get color scheme based on number of groups.
+        Get professional color scheme based on number of groups.
+        Uses colorblindness-adjusted palettes from VisualizationConfig.
         
         Args:
             n_groups: Number of groups to visualize
             
         Returns:
-            List of color tuples (RGBA)
+            List of hex color strings
         """
-        if n_groups <= 10:
-            return [self.tab10_colors[i % 10] for i in range(n_groups)]
-        else:
-            return [self.tab20_colors[i % 20] for i in range(n_groups)]
+        return VisualizationConfig.get_color_palette(n_groups)
     
     def _perform_statistical_test(self, data_by_group: Dict[str, List[float]]) -> Dict[str, Any]:
         """
@@ -187,9 +181,9 @@ class Analysis_Visualizer_Tool(BaseTool):
             # Default to bar chart
             return 'bar'
     
-    def _create_bar_chart(self, data_by_group: Dict[str, float], colors: List[tuple],
-                          title: str, ylabel: str, output_path: str,
-                          figure_size: tuple, dpi: int, stats_result: Optional[Dict] = None) -> str:
+    def _create_bar_chart(self, data_by_group: Dict[str, float], colors: List[str],
+                         title: str, ylabel: str, output_path: str, 
+                         figure_size: tuple, dpi: int, stats_result: Optional[Dict] = None) -> str:
         """Create a bar chart comparing groups."""
         fig, ax = plt.subplots(figsize=figure_size, dpi=dpi)
 
@@ -235,10 +229,10 @@ class Analysis_Visualizer_Tool(BaseTool):
         
         return output_path
     
-    def _create_pie_chart(self, data_by_group: Dict[str, float], colors: List[tuple],
+    def _create_pie_chart(self, data_by_group: Dict[str, float], colors: List[str],
                          title: str, output_path: str, figure_size: tuple, dpi: int) -> str:
         """Create a pie chart showing group composition."""
-        fig, ax = plt.subplots(figsize=figure_size, dpi=dpi)
+        fig, ax = VisualizationConfig.create_professional_figure(figsize=figure_size)
         
         groups = list(data_by_group.keys())
         values = [data_by_group[g] for g in groups]
@@ -252,19 +246,19 @@ class Analysis_Visualizer_Tool(BaseTool):
                                           autopct='%1.1f%%', startangle=90,
                                           textprops={'fontsize': 11, 'fontweight': 'normal'})
         
-        ax.set_title(title, fontsize=16, fontweight='normal', pad=15)
+        # Apply professional styling (title only for pie chart)
+        VisualizationConfig.apply_professional_styling(ax, title=title)
         
-        plt.tight_layout()
-        plt.savefig(output_path, dpi=dpi, bbox_inches='tight')
+        VisualizationConfig.save_professional_figure(fig, output_path, dpi=dpi)
         plt.close()
         
         return output_path
     
-    def _create_box_plot(self, data_by_group: Dict[str, List[float]], colors: List[tuple],
+    def _create_box_plot(self, data_by_group: Dict[str, List[float]], colors: List[str],
                         title: str, ylabel: str, output_path: str, 
                         figure_size: tuple, dpi: int, stats_result: Optional[Dict] = None) -> str:
         """Create a box plot comparing distributions across groups."""
-        fig, ax = plt.subplots(figsize=figure_size, dpi=dpi)
+        fig, ax = VisualizationConfig.create_professional_figure(figsize=figure_size)
         
         groups = list(data_by_group.keys())
         data_list = [data_by_group[g] for g in groups]
@@ -277,15 +271,8 @@ class Analysis_Visualizer_Tool(BaseTool):
             patch.set_facecolor(color)
             patch.set_alpha(0.7)
         
-        ax.set_xlabel('Group', fontsize=14, fontweight='normal')
-        ax.set_ylabel(ylabel, fontsize=14, fontweight='normal')
-        ax.set_title(title, fontsize=16, fontweight='normal', pad=15)
-        ax.grid(axis='y', alpha=0.2, linestyle='-', linewidth=0.5)
-        ax.spines['top'].set_visible(False)
-        ax.spines['right'].set_visible(False)
-        ax.spines['left'].set_linewidth(1)
-        ax.spines['bottom'].set_linewidth(1)
-        ax.tick_params(labelsize=11)
+        # Apply professional styling
+        VisualizationConfig.apply_professional_styling(ax, title=title, xlabel='Group', ylabel=ylabel)
         
         # Add statistical test result
         if stats_result and stats_result.get('test_type') != 'none':
@@ -297,17 +284,16 @@ class Analysis_Visualizer_Tool(BaseTool):
                    bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
         
         plt.xticks(rotation=45, ha='right')
-        plt.tight_layout()
-        plt.savefig(output_path, dpi=dpi, bbox_inches='tight')
+        VisualizationConfig.save_professional_figure(fig, output_path, dpi=dpi)
         plt.close()
         
         return output_path
     
-    def _create_violin_plot(self, data_by_group: Dict[str, List[float]], colors: List[tuple],
+    def _create_violin_plot(self, data_by_group: Dict[str, List[float]], colors: List[str],
                            title: str, ylabel: str, output_path: str,
                            figure_size: tuple, dpi: int, stats_result: Optional[Dict] = None) -> str:
         """Create a violin plot comparing distributions across groups."""
-        fig, ax = plt.subplots(figsize=figure_size, dpi=dpi)
+        fig, ax = VisualizationConfig.create_professional_figure(figsize=figure_size)
         
         groups = list(data_by_group.keys())
         data_list = [data_by_group[g] for g in groups]
@@ -321,15 +307,9 @@ class Analysis_Visualizer_Tool(BaseTool):
         
         ax.set_xticks(range(len(groups)))
         ax.set_xticklabels(groups)
-        ax.set_xlabel('Group', fontsize=14, fontweight='normal')
-        ax.set_ylabel(ylabel, fontsize=14, fontweight='normal')
-        ax.set_title(title, fontsize=16, fontweight='normal', pad=15)
-        ax.grid(axis='y', alpha=0.2, linestyle='-', linewidth=0.5)
-        ax.spines['top'].set_visible(False)
-        ax.spines['right'].set_visible(False)
-        ax.spines['left'].set_linewidth(1)
-        ax.spines['bottom'].set_linewidth(1)
-        ax.tick_params(labelsize=11)
+        
+        # Apply professional styling
+        VisualizationConfig.apply_professional_styling(ax, title=title, xlabel='Group', ylabel=ylabel)
         
         # Add statistical test result
         if stats_result and stats_result.get('test_type') != 'none':
@@ -341,8 +321,7 @@ class Analysis_Visualizer_Tool(BaseTool):
                    bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
         
         plt.xticks(rotation=45, ha='right')
-        plt.tight_layout()
-        plt.savefig(output_path, dpi=dpi, bbox_inches='tight')
+        VisualizationConfig.save_professional_figure(fig, output_path, dpi=dpi)
         plt.close()
         
         return output_path
@@ -748,22 +727,18 @@ class Analysis_Visualizer_Tool(BaseTool):
                       c=[cluster_colors[cluster]], label=f'Cluster {cluster}',
                       s=100, alpha=0.7, edgecolors='white', linewidths=0.8)
         
-        ax.set_xlabel('UMAP 1', fontsize=14, fontweight='normal')
-        ax.set_ylabel('UMAP 2', fontsize=14, fontweight='normal')
-        ax.set_title(f'UMAP - Leiden Clustering (resolution={resolution})', 
-                    fontsize=16, fontweight='normal', pad=15)
+        # Apply professional styling
+        VisualizationConfig.apply_professional_styling(
+            ax, 
+            title=f'UMAP - Leiden Clustering (resolution={resolution})',
+            xlabel='UMAP 1', 
+            ylabel='UMAP 2'
+        )
         
-        # Clean, simple legend
-        ax.legend(bbox_to_anchor=(1.02, 1), loc='upper left', 
-                 frameon=True, fancybox=False, shadow=False, fontsize=11, 
-                 edgecolor='gray', facecolor='white')
-        
-        ax.grid(True, alpha=0.2, linestyle='-', linewidth=0.5)
-        ax.spines['top'].set_visible(False)
-        ax.spines['right'].set_visible(False)
-        ax.spines['left'].set_linewidth(1)
-        ax.spines['bottom'].set_linewidth(1)
-        ax.tick_params(labelsize=11)
+        # Professional legend
+        VisualizationConfig.create_professional_legend(
+            ax, title='Cluster', bbox_to_anchor=(1.02, 1), loc='upper left'
+        )
         
         output_path = os.path.join(output_dir, f"umap_cluster_res{resolution}.png")
         VisualizationConfig.save_professional_figure(fig, output_path)
@@ -818,21 +793,18 @@ class Analysis_Visualizer_Tool(BaseTool):
                       c=[group_colors[group]], label=str(group),
                       s=100, alpha=0.7, edgecolors='white', linewidths=0.8)
         
-        ax.set_xlabel('UMAP 1', fontsize=14, fontweight='normal')
-        ax.set_ylabel('UMAP 2', fontsize=14, fontweight='normal')
-        ax.set_title('UMAP - Colored by Group',
-                    fontsize=16, fontweight='normal', pad=15)
+        # Apply professional styling
+        VisualizationConfig.apply_professional_styling(
+            ax, 
+            title='UMAP - Colored by Group',
+            xlabel='UMAP 1', 
+            ylabel='UMAP 2'
+        )
         
-        ax.legend(bbox_to_anchor=(1.02, 1), loc='upper left',
-                 frameon=True, fancybox=False, shadow=False, fontsize=11,
-                 edgecolor='gray', facecolor='white')
-        
-        ax.grid(True, alpha=0.2, linestyle='-', linewidth=0.5)
-        ax.spines['top'].set_visible(False)
-        ax.spines['right'].set_visible(False)
-        ax.spines['left'].set_linewidth(1)
-        ax.spines['bottom'].set_linewidth(1)
-        ax.tick_params(labelsize=11)
+        # Professional legend
+        VisualizationConfig.create_professional_legend(
+            ax, title='Group', bbox_to_anchor=(1.02, 1), loc='upper left'
+        )
         
         output_path = os.path.join(output_dir, "umap_by_group.png")
         VisualizationConfig.save_professional_figure(fig, output_path)
@@ -855,25 +827,27 @@ class Analysis_Visualizer_Tool(BaseTool):
         
         fig, ax = VisualizationConfig.create_professional_figure(figsize=figure_size)
         
-        # Stacked bar chart with narrower bars
+        # Get professional colors for clusters
+        n_clusters = len(composition.columns)
+        cluster_colors = self._get_color_scheme(n_clusters)
+        
+        # Stacked bar chart with professional colors
         composition.plot(kind='bar', stacked=True, ax=ax, 
-                        colormap='tab20', width=0.6, edgecolor='white', linewidth=1.0)
+                        color=cluster_colors[:n_clusters], width=0.6, 
+                        edgecolor='white', linewidth=1.0)
         
-        ax.set_xlabel('Group', fontsize=14, fontweight='normal')
-        ax.set_ylabel('Proportion', fontsize=14, fontweight='normal')
-        ax.set_title('Cluster Composition by Group', fontsize=16, fontweight='normal', pad=15)
+        # Apply professional styling
+        VisualizationConfig.apply_professional_styling(
+            ax, title='Cluster Composition by Group', 
+            xlabel='Group', ylabel='Proportion'
+        )
         
-        ax.legend(title='Cluster', bbox_to_anchor=(1.02, 1), loc='upper left',
-                 frameon=True, fancybox=False, shadow=False, fontsize=10,
-                 edgecolor='gray', facecolor='white', title_fontsize=11)
+        # Professional legend
+        VisualizationConfig.create_professional_legend(
+            ax, title='Cluster', bbox_to_anchor=(1.02, 1), loc='upper left'
+        )
         
         ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')
-        ax.grid(True, alpha=0.2, linestyle='-', linewidth=0.5, axis='y')
-        ax.spines['top'].set_visible(False)
-        ax.spines['right'].set_visible(False)
-        ax.spines['left'].set_linewidth(1)
-        ax.spines['bottom'].set_linewidth(1)
-        ax.tick_params(labelsize=11)
         
         output_path = os.path.join(output_dir, "cluster_composition_by_group.png")
         VisualizationConfig.save_professional_figure(fig, output_path)
@@ -978,7 +952,8 @@ class Analysis_Visualizer_Tool(BaseTool):
                                           autopct='', startangle=90,
                                           textprops={'fontsize': 11, 'fontweight': 'normal'})
         
-        ax.set_title('Cluster Proportions', fontsize=16, fontweight='normal', pad=15)
+        # Apply professional styling
+        VisualizationConfig.apply_professional_styling(ax, title='Cluster Proportions')
         
         output_path = os.path.join(output_dir, "cluster_proportion_pie_chart.png")
         VisualizationConfig.save_professional_figure(fig, output_path)
