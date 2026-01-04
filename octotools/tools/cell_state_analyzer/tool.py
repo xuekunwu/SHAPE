@@ -591,6 +591,8 @@ class Cell_State_Analyzer_Tool(BaseTool):
         adata = ad.AnnData(X=feats)
         adata.obs["image_name"] = img_names
         adata.obs["group"] = groups_extracted
+        # Store full cell crop paths for visualization
+        adata.obs["crop_path"] = cell_crops
         adata.obs.index = [f"cell_{i}" for i in range(adata.n_obs)]
         
         # Compute UMAP and clustering (no visualization - handled by Analysis_Visualizer_Tool)

@@ -13,6 +13,10 @@ from typing import List, Dict, Any, Optional, Union
 from pathlib import Path
 import json
 from collections import Counter, defaultdict
+import random
+from matplotlib.offsetbox import OffsetImage, AnnotationBbox
+from PIL import Image
+import cv2
 
 # Add the project root to the Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -665,12 +669,12 @@ class Analysis_Visualizer_Tool(BaseTool):
     
     def _create_publication_umap_by_cluster(self, adata, cluster_key: str, resolution: float,
                                            output_dir: str, figure_size: tuple, dpi: int) -> Optional[str]:
-        """Create publication-quality UMAP visualization colored by cluster."""
+        """Create publication-quality UMAP visualization colored by cluster with sample cell crops."""
         if 'X_umap' not in adata.obsm or cluster_key not in adata.obs:
             return None
         
         # Create figure with professional styling
-        fig, ax = VisualizationConfig.create_professional_figure(figsize=(10, 8))
+        fig, ax = VisualizationConfig.create_professional_figure(figsize=(12, 10))
         
         # Get unique clusters and assign colors
         clusters = sorted(adata.obs[cluster_key].unique())
@@ -686,13 +690,60 @@ class Analysis_Visualizer_Tool(BaseTool):
                       c=[cluster_colors[cluster]], label=f'Cluster {cluster}',
                       s=50, alpha=0.6, edgecolors='white', linewidths=0.5)
         
+        # Add sample cell crops for each cluster (5 random cells per cluster)
+        if 'crop_path' in adata.obs:
+            crops_per_cluster = 5
+            random.seed(42)  # Set seed for reproducibility
+            
+            for cluster in clusters:
+                cluster_mask = adata.obs[cluster_key] == cluster
+                cluster_indices = np.where(cluster_mask)[0]
+                
+                if len(cluster_indices) == 0:
+                    continue
+                
+                # Randomly sample cells (up to crops_per_cluster)
+                n_samples = min(crops_per_cluster, len(cluster_indices))
+                sampled_indices = random.sample(list(cluster_indices), n_samples)
+                
+                for idx in sampled_indices:
+                    crop_path = adata.obs.iloc[idx]['crop_path']
+                    # Handle both string paths and list paths
+                    if isinstance(crop_path, (list, np.ndarray)) and len(crop_path) > 0:
+                        crop_path = crop_path[0] if isinstance(crop_path[0], str) else str(crop_path[0])
+                    elif not isinstance(crop_path, str):
+                        crop_path = str(crop_path) if crop_path is not None else None
+                    
+                    if crop_path and os.path.exists(crop_path):
+                        try:
+                            # Load and resize crop image
+                            crop_img = self._load_and_resize_crop(crop_path, size=(60, 60))
+                            if crop_img is not None:
+                                # Get UMAP coordinates
+                                umap_coords = adata.obsm['X_umap'][idx]
+                                
+                                # Create OffsetImage
+                                im = OffsetImage(crop_img, zoom=0.8, alpha=0.9)
+                                
+                                # Create AnnotationBbox with colored border matching cluster
+                                ab = AnnotationBbox(im, (umap_coords[0], umap_coords[1]),
+                                                   frameon=True, box_alignment=(0.5, 0.5),
+                                                   bboxprops=dict(boxstyle='round,pad=2',
+                                                                 edgecolor=cluster_colors[cluster],
+                                                                 linewidth=2.5,
+                                                                 facecolor='white'))
+                                ax.add_artist(ab)
+                        except Exception as e:
+                            # Skip if image loading fails
+                            continue
+        
         ax.set_xlabel('UMAP 1', fontsize=16, fontweight='bold')
         ax.set_ylabel('UMAP 2', fontsize=16, fontweight='bold')
         ax.set_title(f'UMAP Visualization - Leiden Clustering (resolution={resolution})', 
                     fontsize=18, fontweight='bold', pad=20)
         
         # Professional legend
-        ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', 
+        ax.legend(bbox_to_anchor=(1.02, 1), loc='upper left', 
                  frameon=True, fancybox=True, shadow=True, fontsize=12)
         
         ax.grid(True, alpha=0.3, linestyle='--')
@@ -704,6 +755,33 @@ class Analysis_Visualizer_Tool(BaseTool):
         plt.close(fig)
         
         return output_path
+    
+    def _load_and_resize_crop(self, crop_path: str, size: tuple = (60, 60)) -> Optional[np.ndarray]:
+        """Load and resize cell crop image for display in UMAP plot."""
+        try:
+            # Try to load with PIL first (handles various formats)
+            if os.path.exists(crop_path):
+                # Try PIL
+                try:
+                    img = Image.open(crop_path)
+                    if img.mode != 'RGB':
+                        img = img.convert('RGB')
+                    img = img.resize(size, Image.Resampling.LANCZOS)
+                    return np.array(img)
+                except Exception:
+                    # Fallback to cv2
+                    try:
+                        img = cv2.imread(crop_path, cv2.IMREAD_GRAYSCALE)
+                        if img is not None:
+                            # Convert grayscale to RGB
+                            img_rgb = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
+                            img_resized = cv2.resize(img_rgb, size, interpolation=cv2.INTER_LANCZOS4)
+                            return img_resized
+                    except Exception:
+                        pass
+            return None
+        except Exception:
+            return None
     
     def _create_publication_umap_by_group(self, adata, output_dir: str, 
                                          figure_size: tuple, dpi: int) -> Optional[str]:
@@ -843,11 +921,24 @@ class Analysis_Visualizer_Tool(BaseTool):
             # Create output directory
             os.makedirs(output_dir, exist_ok=True)
             
+            # Load data from file if path is provided
+            if isinstance(analysis_data, str):
+                if os.path.exists(analysis_data):
+                    with open(analysis_data, 'r') as f:
+                        analysis_data = json.load(f)
+                else:
+                    return {
+                        "error": f"File not found: {analysis_data}",
+                        "summary": "Visualization failed"
+                    }
+            
             # Check if this is cell state analysis output (from Cell_State_Analyzer_Tool)
+            # Also check if adata_path exists (even without analysis_type for backward compatibility)
             is_cell_state_analysis = (
                 isinstance(analysis_data, dict) and 
-                analysis_data.get('analysis_type') == 'cell_state_analysis' and
-                'adata_path' in analysis_data
+                'adata_path' in analysis_data and
+                (analysis_data.get('analysis_type') == 'cell_state_analysis' or 
+                 os.path.exists(analysis_data.get('adata_path', '')))
             )
             
             # For cell state analysis, generate publication-quality UMAP and cluster composition plots
