@@ -84,7 +84,18 @@ class Executor:
                 # Get the most recent action's result
                 last_action = actions[-1]
                 if 'result' in last_action:
-                    previous_outputs = last_action['result']
+                    raw_result = last_action['result']
+                    # Handle per_image structure: extract the actual result from per_image if present
+                    if isinstance(raw_result, dict) and 'per_image' in raw_result:
+                        per_image_list = raw_result['per_image']
+                        # Use the first image's result if available, or the last one
+                        if per_image_list and len(per_image_list) > 0:
+                            previous_outputs = per_image_list[-1]  # Use last image's result
+                            logger.debug(f"Extracted previous outputs from per_image structure (using last image)")
+                        else:
+                            previous_outputs = raw_result
+                    else:
+                        previous_outputs = raw_result
                     # Create LLM-safe version (summary only, no file paths)
                     previous_outputs_for_llm = get_llm_safe_result(previous_outputs)
                     logger.debug(f"Extracted previous outputs: {list(previous_outputs.keys()) if isinstance(previous_outputs, dict) else 'Not a dict'}")
@@ -163,12 +174,17 @@ else:
         # Special handling for Analysis_Visualizer_Tool to use Cell_State_Analyzer_Tool results
         if tool_name == "Analysis_Visualizer_Tool" and previous_outputs:
             # Robust check: verify we have cell state analysis output
-            has_adata_path = 'adata_path' in previous_outputs and previous_outputs.get('adata_path')
-            has_analysis_type = previous_outputs.get('analysis_type') == 'cell_state_analysis'
-            has_cluster_key = 'cluster_key' in previous_outputs
+            has_adata_path = isinstance(previous_outputs, dict) and 'adata_path' in previous_outputs and previous_outputs.get('adata_path')
+            has_analysis_type = isinstance(previous_outputs, dict) and previous_outputs.get('analysis_type') == 'cell_state_analysis'
+            has_cluster_key = isinstance(previous_outputs, dict) and 'cluster_key' in previous_outputs
+            
+            logger.debug(f"Analysis_Visualizer_Tool special handling check: has_adata_path={has_adata_path}, "
+                        f"has_analysis_type={has_analysis_type}, has_cluster_key={has_cluster_key}, "
+                        f"previous_outputs_keys={list(previous_outputs.keys()) if isinstance(previous_outputs, dict) else 'not a dict'}")
             
             # Only proceed if we have the required fields
             if has_adata_path or (has_analysis_type and has_cluster_key):
+                logger.info(f"✅ Using special handling for Analysis_Visualizer_Tool with Cell_State_Analyzer_Tool results")
                 adata_path = previous_outputs.get('adata_path', '')
                 cluster_key = previous_outputs.get('cluster_key', 'leiden_0.5')
                 cluster_resolution = previous_outputs.get('cluster_resolution', 0.5)
@@ -211,9 +227,12 @@ execution = tool.execute(
                 )
             else:
                 # Fallback: Let LLM generate command if fields are missing
-                logger.warning(f"Analysis_Visualizer_Tool special handling skipped: missing required fields. "
+                logger.warning(f"⚠️ Analysis_Visualizer_Tool special handling skipped: missing required fields. "
                              f"Has adata_path: {has_adata_path}, has analysis_type: {has_analysis_type}, "
-                             f"has cluster_key: {has_cluster_key}. Falling back to standard command generation.")
+                             f"has cluster_key: {has_cluster_key}. "
+                             f"Previous outputs type: {type(previous_outputs)}, "
+                             f"Keys: {list(previous_outputs.keys()) if isinstance(previous_outputs, dict) else 'N/A'}. "
+                             f"Falling back to standard command generation.")
                 # Continue to standard command generation below
         
         # Special handling for Single_Cell_Cropper_Tool to use mask from segmentation tools
