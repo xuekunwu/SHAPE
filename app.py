@@ -2249,9 +2249,9 @@ def main(args):
         # Custom CSS for Apple-style refinements
         demo.css = """
         .gradio-container {
-            max-width: 1400px !important;
+            max-width: 95% !important;
             margin: 0 auto;
-            padding: 40px 20px;
+            padding: 20px 10px;
         }
         h1 {
             font-size: 48px !important;
@@ -2262,20 +2262,29 @@ def main(args):
             line-height: 1.1 !important;
         }
         h2, h3 {
+            font-size: 24px !important;
             font-weight: 600 !important;
             color: #1d1d1f !important;
             letter-spacing: -0.3px !important;
         }
         .markdown p {
-            font-size: 17px !important;
+            font-size: 20px !important;
             line-height: 1.47059 !important;
             color: #6e6e73 !important;
             margin-bottom: 12px !important;
         }
-        .button-primary {
+        button {
+            border: 1px solid #d2d2d7 !important;
             border-radius: 12px !important;
             font-weight: 500 !important;
-            font-size: 17px !important;
+            font-size: 20px !important;
+            transition: all 0.3s ease !important;
+        }
+        .button-primary {
+            border: 1px solid #0071e3 !important;
+            border-radius: 12px !important;
+            font-weight: 500 !important;
+            font-size: 20px !important;
             padding: 12px 24px !important;
             transition: all 0.3s ease !important;
         }
@@ -2283,9 +2292,15 @@ def main(args):
             transform: translateY(-1px) !important;
             box-shadow: 0 4px 12px rgba(0, 113, 227, 0.3) !important;
         }
-        .input-text {
+        input, textarea, select {
+            border: 1px solid #d2d2d7 !important;
             border-radius: 8px !important;
-            font-size: 17px !important;
+            font-size: 20px !important;
+        }
+        .input-text {
+            border: 1px solid #d2d2d7 !important;
+            border-radius: 8px !important;
+            font-size: 20px !important;
             padding: 12px 16px !important;
         }
         .chatbot {
@@ -2296,6 +2311,12 @@ def main(args):
         .gallery {
             border-radius: 12px !important;
             border: 1px solid #d2d2d7 !important;
+        }
+        .panel, .block, .form, .gr-block {
+            border: 1px solid #d2d2d7 !important;
+            border-radius: 12px !important;
+            padding: 16px !important;
+            margin-bottom: 16px !important;
         }
         .section-header {
             margin-bottom: 16px !important;
@@ -2313,9 +2334,10 @@ def main(args):
             border-radius: 8px !important;
         }
         .query-input textarea {
-            font-size: 17px !important;
+            font-size: 20px !important;
             line-height: 1.47059 !important;
             border-radius: 8px !important;
+            border: 1px solid #d2d2d7 !important;
         }
         .chatbot-container {
             box-shadow: 0 2px 8px rgba(0,0,0,0.08) !important;
@@ -2333,13 +2355,13 @@ def main(args):
             gr.Markdown(
                 """
                 <div style="text-align: center; padding: 60px 0 40px 0;">
-                    <h1 style="font-size: 56px; font-weight: 600; letter-spacing: -1px; color: #1d1d1f; margin-bottom: 12px; line-height: 1.1;">
+                    <h1 style="font-size: 48px; font-weight: 600; letter-spacing: -1px; color: #1d1d1f; margin-bottom: 12px; line-height: 1.1;">
                         SHAPE
                     </h1>
-                    <p style="font-size: 21px; color: #6e6e73; font-weight: 400; margin: 0; line-height: 1.47059;">
+                    <p style="font-size: 20px; color: #6e6e73; font-weight: 400; margin: 0; line-height: 1.47059;">
                         Self-supervised morphology agent for single-cell bioimage analysis
                     </p>
-                    <p style="font-size: 17px; color: #86868b; margin-top: 12px; line-height: 1.47059;">
+                    <p style="font-size: 20px; color: #86868b; margin-top: 12px; line-height: 1.47059;">
                         Powered by large language models and tool-based reasoning
                     </p>
                 </div>
@@ -2353,7 +2375,7 @@ def main(args):
                 gr.Markdown(
                     """
                     <div style="background: #f5f5f7; border-radius: 12px; padding: 24px; margin-bottom: 20px;">
-                        <h3 style="font-size: 19px; font-weight: 600; color: #1d1d1f; margin-bottom: 16px; letter-spacing: -0.2px;">
+                        <h3 style="font-size: 24px; font-weight: 600; color: #1d1d1f; margin-bottom: 16px; letter-spacing: -0.2px;">
                             LLM Configuration
                         </h3>
                     </div>
@@ -2378,7 +2400,7 @@ def main(args):
                 gr.Markdown(
                     """
                     <div style="background: #f5f5f7; border-radius: 12px; padding: 24px; margin-bottom: 20px;">
-                        <h3 style="font-size: 19px; font-weight: 600; color: #1d1d1f; margin-bottom: 16px; letter-spacing: -0.2px;">
+                        <h3 style="font-size: 24px; font-weight: 600; color: #1d1d1f; margin-bottom: 16px; letter-spacing: -0.2px;">
                             Available Tools
                         </h3>
                     </div>
@@ -2394,7 +2416,7 @@ def main(args):
                 gr.Markdown(
                     """
                     <div style="background: #f5f5f7; border-radius: 12px; padding: 20px; margin-bottom: 20px;">
-                        <h3 style="font-size: 19px; font-weight: 600; color: #1d1d1f; margin-bottom: 0; letter-spacing: -0.2px;">
+                        <h3 style="font-size: 24px; font-weight: 600; color: #1d1d1f; margin-bottom: 0; letter-spacing: -0.2px;">
                             Image Groups
                         </h3>
                     </div>
@@ -2427,7 +2449,7 @@ def main(args):
                 gr.Markdown(
                     """
                     <div style="background: #f5f5f7; border-radius: 12px; padding: 20px; margin: 24px 0 20px 0;">
-                        <h3 style="font-size: 19px; font-weight: 600; color: #1d1d1f; margin-bottom: 0; letter-spacing: -0.2px;">
+                        <h3 style="font-size: 24px; font-weight: 600; color: #1d1d1f; margin-bottom: 0; letter-spacing: -0.2px;">
                             Ask Question
                         </h3>
                     </div>
@@ -2455,7 +2477,7 @@ def main(args):
                 gr.Markdown(
                     """
                     <div style="background: #f5f5f7; border-radius: 12px; padding: 20px; margin-bottom: 20px;">
-                        <h3 style="font-size: 19px; font-weight: 600; color: #1d1d1f; margin-bottom: 0; letter-spacing: -0.2px;">
+                        <h3 style="font-size: 24px; font-weight: 600; color: #1d1d1f; margin-bottom: 0; letter-spacing: -0.2px;">
                             Conversation
                         </h3>
                     </div>
@@ -2513,7 +2535,7 @@ def main(args):
                         <h2 style="font-size: 32px; font-weight: 600; color: #1d1d1f; margin-bottom: 8px; letter-spacing: -0.5px;">
                             Try these examples
                         </h2>
-                        <p style="font-size: 17px; color: #6e6e73; margin: 0; line-height: 1.47059;">
+                        <p style="font-size: 20px; color: #6e6e73; margin: 0; line-height: 1.47059;">
                             Explore the capabilities with suggested tools
                         </p>
                     </div>
@@ -2537,7 +2559,7 @@ def main(args):
                 gr.Markdown(
                     """
                     <div style="text-align: center; padding: 20px 0;">
-                        <h4 style="font-size: 17px; font-weight: 600; color: #1d1d1f; letter-spacing: -0.2px;">
+                        <h4 style="font-size: 24px; font-weight: 600; color: #1d1d1f; letter-spacing: -0.2px;">
                             Analysis Examples
                         </h4>
                     </div>
