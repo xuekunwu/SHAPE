@@ -510,6 +510,8 @@ Detailed Instructions:
       - IMPORTANT: For analysis tasks, ensure that the actual analysis has been performed, not just data preparation.
       - For example: If the query asks to "analyze cell states", ensure that cell state analysis has been performed, not just cell cropping.
       - CRITICAL: If the query asks for analysis and you see analysis results with visualizations, distributions, and statistics, the task is COMPLETE.
+      - For cell state analysis: If preprocessing → segmentation → cropping → clustering → visualization is complete, STOP.
+      - Technical analysis results (clusters, UMAP, exemplars) are SUFFICIENT - do NOT require biological label mapping or validation.
 
    b) Unused Tools: Are there any unused tools that could provide additional relevant information?
       - Specify which unused tools might be helpful and why.
@@ -521,9 +523,12 @@ Detailed Instructions:
 
    d) Verification Needs: Is there any information that requires further verification due to tool limitations?
       - Identify specific pieces of information that need verification and explain why.
+      - IMPORTANT: Do NOT require verification or QC steps if technical analysis is complete. Only flag critical errors or failures.
 
    e) Ambiguities: Are there any unclear or ambiguous results that could be clarified by using another tool?
       - Point out specific ambiguities and suggest which tools could help clarify them.
+      - IMPORTANT: Do NOT flag technical analysis results as "ambiguous" just because they lack biological labels.
+      - Do NOT require additional tools for "validation" if the main analysis pipeline is complete.
 
 5. Final Determination:
    Based on your thorough analysis, decide if the memory is complete and accurate enough to generate the final output, or if additional tool usage is necessary.
@@ -536,6 +541,14 @@ Detailed Instructions:
    - DO NOT continue just because there are unused tools available.
    - DO NOT use Python_Code_Generator_Tool unless NO other tools can solve the query.
    - STOP if the query is satisfied, even if some tools haven't been used.
+   
+   IMPORTANT: For cell state analysis queries ("what cell states", "analyze cell states", etc.):
+   - If Analysis_Visualizer_Tool has been executed and produced visualizations (UMAP, clusters, exemplars), the task is COMPLETE. STOP.
+   - If you see the full pipeline: preprocessing → segmentation → cropping → clustering → visualization, STOP immediately.
+   - Technical analysis results (UMAP plots, cluster assignments, exemplar images, statistics) are SUFFICIENT.
+   - DO NOT require biological label mapping, marker validation, manual QC, or additional verification steps.
+   - DO NOT suggest "missing biological interpretation" - technical cluster analysis IS the answer to "what cell states" queries.
+   - The presence of cluster analysis with visualizations means the task is DONE. Stop immediately.
 
    CRITICAL CHECKLIST FOR CONTINUING (Only continue if query is NOT satisfied):
    - Is the MAIN query still UNANSWERED?
