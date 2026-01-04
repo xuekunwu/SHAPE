@@ -1149,11 +1149,12 @@ class Solver:
                     
                     # Create a ToolCommand object for memory consistency
                     from octotools.models.formatters import ToolCommand
-                    tool_command = ToolCommand(
-                        analysis=analysis,
-                        explanation=explanation,
-                        command=command
-                    )
+                    if tool_command is None:  # Only create once if multiple images
+                        tool_command = ToolCommand(
+                            analysis=analysis,
+                            explanation=explanation,
+                            command=command
+                        )
                     
                     messages.append(ChatMessage(
                         role="assistant",

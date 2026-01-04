@@ -1,4 +1,5 @@
 import os
+import json
 # import sys
 import importlib
 import re
@@ -157,6 +158,51 @@ else:
                     analysis=f"Using the processed image from Image_Preprocessor_Tool for {tool_label}",
                     explanation=f"Using the processed image path '{processed_image_path}' from the previous Image_Preprocessor_Tool step",
                     command=f"""execution = tool.execute(image="{safe_processed_path}"{image_id_param})"""
+                )
+        
+        # Special handling for Analysis_Visualizer_Tool to use Cell_State_Analyzer_Tool results
+        if tool_name == "Analysis_Visualizer_Tool" and previous_outputs:
+            # Check if we have Cell_State_Analyzer_Tool output
+            if 'adata_path' in previous_outputs or 'analysis_type' in previous_outputs:
+                adata_path = previous_outputs.get('adata_path', '')
+                cluster_key = previous_outputs.get('cluster_key', 'leiden_0.5')
+                cluster_resolution = previous_outputs.get('cluster_resolution', 0.5)
+                
+                # Construct analysis_data dict for Analysis_Visualizer_Tool
+                analysis_data_dict = {
+                    'adata_path': adata_path,
+                    'cluster_key': cluster_key,
+                    'cluster_resolution': cluster_resolution,
+                    'analysis_type': 'cell_state_analysis'
+                }
+                
+                # Add metadata path if available
+                if 'cell_metadata_path' in previous_outputs:
+                    analysis_data_dict['cell_metadata_path'] = previous_outputs['cell_metadata_path']
+                elif 'metadata_path' in previous_outputs:
+                    analysis_data_dict['cell_metadata_path'] = previous_outputs['metadata_path']
+                
+                # Add cell count if available
+                if 'cell_count' in previous_outputs:
+                    analysis_data_dict['cell_count'] = previous_outputs['cell_count']
+                
+                # Use proper group_column - use 'group' if available in metadata, otherwise use cluster_key for cluster-based grouping
+                group_col = 'group'  # Default to 'group' for multi-group comparison
+                
+                return ToolCommand(
+                    analysis=f"Using Cell_State_Analyzer_Tool results for visualization",
+                    explanation=f"Loading analysis data from Cell_State_Analyzer_Tool output (adata_path={adata_path}, cluster_key={cluster_key})",
+                    command=f"""import json
+analysis_data = {json.dumps(analysis_data_dict, indent=2).replace(chr(10), chr(10)+'    ')}
+execution = tool.execute(
+    analysis_data=analysis_data,
+    chart_type='auto',
+    comparison_metric='cell_count',
+    group_column='{group_col}',
+    output_dir='output_visualizations/cell_state_analysis',
+    figure_size=(10, 6),
+    dpi=300
+)"""
                 )
         
         # Special handling for Single_Cell_Cropper_Tool to use mask from segmentation tools
