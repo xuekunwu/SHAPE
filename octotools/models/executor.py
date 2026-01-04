@@ -117,22 +117,23 @@ class Executor:
 import os
 import glob
 
-# Dynamically find the most recent metadata file
-metadata_dir = r'{self.tool_cache_dir}'
+# Dynamically find all metadata files (for multi-image processing)
+# _load_cell_data_from_metadata expects query_cache_dir (parent directory) and constructs tool_cache path internally
+query_cache_dir_parent = r'{self.query_cache_dir}'
+metadata_dir = os.path.join(query_cache_dir_parent, 'tool_cache')
 metadata_files = glob.glob(os.path.join(metadata_dir, 'cell_crops_metadata_*.json'))
 if not metadata_files:
     execution = {{"error": "No metadata files found", "status": "failed"}}
 else:
-    # Use the most recent metadata file
-    latest_metadata_file = max(metadata_files, key=os.path.getctime)
-    logger.info("Using metadata file: " + latest_metadata_file)
+    logger.info(f"Found {{len(metadata_files)}} metadata file(s), will merge all for multi-image processing")
     
     try:
-        # Use the tool's improved metadata loading method
-        cell_crops, cell_metadata = tool._load_cell_data_from_metadata(r'{self.tool_cache_dir}')
+        # Use the tool's improved metadata loading method (merges all metadata files)
+        # Pass query_cache_dir (parent directory), the method will construct tool_cache path internally
+        cell_crops, cell_metadata = tool._load_cell_data_from_metadata(query_cache_dir_parent)
         
         if cell_crops and len(cell_crops) > 0:
-            # Execute the tool with loaded data
+            # Execute the tool with loaded data (merged from all metadata files)
             execution = tool.execute(
                 cell_crops=cell_crops, 
                 cell_metadata=cell_metadata, 
@@ -141,7 +142,7 @@ else:
                 batch_size=16,
                 learning_rate=3e-5,
                 cluster_resolution=0.5,
-                query_cache_dir=r'{self.query_cache_dir}'
+                query_cache_dir=query_cache_dir_parent
             )
         else:
             execution = {{"error": "No valid cell crops found in metadata", "status": "failed"}}

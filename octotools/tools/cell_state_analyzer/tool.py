@@ -487,31 +487,52 @@ class Cell_State_Analyzer_Tool(BaseTool):
         return cluster_key
     
     def _load_cell_data_from_metadata(self, query_cache_dir):
-        """Load cell crops and metadata from metadata files."""
+        """Load cell crops and metadata from metadata files. Merges all metadata files for multi-image processing."""
         metadata_dir = os.path.join(query_cache_dir, "tool_cache")
         metadata_files = glob.glob(os.path.join(metadata_dir, 'cell_crops_metadata_*.json'))
         
         if not metadata_files:
             raise ValueError(f"No metadata files found in {metadata_dir}")
         
-        latest_metadata_file = max(metadata_files, key=os.path.getctime)
-        logger.info(f"Loading metadata from: {latest_metadata_file}")
+        # Merge all metadata files (for multi-image processing)
+        all_cell_crops = []
+        all_cell_metadata = []
+        all_cell_crop_objects = []
         
-        with open(latest_metadata_file, 'r') as f:
-            data = json.load(f)
+        logger.info(f"Found {len(metadata_files)} metadata file(s), merging all files for multi-image processing")
         
-        cell_crops = data.get('cell_crops_paths', [])
-        cell_metadata = data.get('cell_metadata', [])
-        cell_crop_objects = data.get('cell_crop_objects', [])
+        for metadata_file in metadata_files:
+            try:
+                with open(metadata_file, 'r') as f:
+                    data = json.load(f)
+                
+                cell_crops = data.get('cell_crops_paths', [])
+                cell_metadata = data.get('cell_metadata', [])
+                cell_crop_objects = data.get('cell_crop_objects', [])
+                
+                # Normalize paths
+                cell_crops = [os.path.normpath(path) for path in cell_crops]
+                
+                # Append to merged lists
+                all_cell_crops.extend(cell_crops)
+                all_cell_metadata.extend(cell_metadata)
+                all_cell_crop_objects.extend(cell_crop_objects)
+                
+                logger.info(f"Loaded {len(cell_crops)} cells from {os.path.basename(metadata_file)}")
+            except Exception as e:
+                logger.warning(f"Error loading metadata file {metadata_file}: {e}, skipping")
+                continue
         
-        # Normalize paths
-        cell_crops = [os.path.normpath(path) for path in cell_crops]
+        logger.info(f"Total merged: {len(all_cell_crops)} cells from {len(metadata_files)} metadata file(s)")
+        
+        if not all_cell_crops:
+            raise ValueError(f"No cell crops found in any metadata files in {metadata_dir}")
         
         # If cell_crop_objects are available, extract group and image_name from them
         # Otherwise, try to extract from cell_metadata or cell_id
-        if cell_crop_objects and len(cell_crop_objects) == len(cell_crops):
+        if all_cell_crop_objects and len(all_cell_crop_objects) == len(all_cell_crops):
             # Extract group and image_name from cell_crop_objects
-            for i, crop_obj in enumerate(cell_crop_objects):
+            for i, crop_obj in enumerate(all_cell_crop_objects):
                 if isinstance(crop_obj, dict):
                     # Extract group and source_image_id (image_name) from cell_crop_objects
                     group = crop_obj.get('group', 'default')
@@ -527,17 +548,17 @@ class Cell_State_Analyzer_Tool(BaseTool):
                             image_name = parts[1]
                     
                     # Update cell_metadata to include group and image_name
-                    if i < len(cell_metadata):
-                        if isinstance(cell_metadata[i], dict):
-                            cell_metadata[i]['group'] = group
-                            cell_metadata[i]['image_name'] = image_name
-                            cell_metadata[i]['cell_id'] = cell_id
+                    if i < len(all_cell_metadata):
+                        if isinstance(all_cell_metadata[i], dict):
+                            all_cell_metadata[i]['group'] = group
+                            all_cell_metadata[i]['image_name'] = image_name
+                            all_cell_metadata[i]['cell_id'] = cell_id
                         else:
-                            cell_metadata[i] = {'group': group, 'image_name': image_name, 'cell_id': cell_id}
+                            all_cell_metadata[i] = {'group': group, 'image_name': image_name, 'cell_id': cell_id}
                     else:
-                        cell_metadata.append({'group': group, 'image_name': image_name, 'cell_id': cell_id})
+                        all_cell_metadata.append({'group': group, 'image_name': image_name, 'cell_id': cell_id})
         
-        return cell_crops, cell_metadata
+        return all_cell_crops, all_cell_metadata
     
     def execute(self, cell_crops=None, cell_metadata=None, max_epochs=25, early_stop_loss=0.5,
                 batch_size=16, learning_rate=3e-5, cluster_resolution=0.5, query_cache_dir=None):
