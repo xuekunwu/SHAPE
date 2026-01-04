@@ -346,10 +346,11 @@ Remember: Your <command> field MUST be valid Python code including any necessary
                 except Exception as parse_error:
                     logger.error(f"Error parsing string response: {parse_error}")
                     # Create a default ToolCommand object
+                    # Return error directly instead of trying to call tool.execute with error parameter
                     tool_command = ToolCommand(
                         analysis="Error parsing analysis",
                         explanation="Error parsing explanation",
-                        command="execution = tool.execute(error='Error parsing command')"
+                        command="execution = {'error': 'Error parsing command', 'status': 'failed'}"
                     )
             
             # Add usage information to the tool command for tracking
@@ -365,10 +366,11 @@ Remember: Your <command> field MUST be valid Python code including any necessary
             logger.error(f"Error in tool command generation: {e}")
             # Fallback: create a basic ToolCommand with error information
             error_msg = str(e).replace("'", "\\'")  # Escape single quotes
+            # Return error directly instead of trying to call tool.execute with error parameter
             return ToolCommand(
                 analysis=f"Error generating tool command: {str(e)}",
                 explanation="Failed to generate proper command due to response format parsing error",
-                command=f"execution = tool.execute(error='Command generation failed: {error_msg}')"
+                command=f"execution = {{'error': 'Command generation failed: {error_msg}', 'status': 'failed'}}"
             )
 
     def extract_explanation_and_command(self, response) -> tuple:
@@ -380,7 +382,7 @@ Remember: Your <command> field MUST be valid Python code including any necessary
             return analysis, explanation, command
         except Exception as e:
             logger.error(f"Error extracting explanation and command: {str(e)}")
-            return "Error extracting analysis", "Error extracting explanation", "execution = tool.execute(error='Error extracting command')"
+            return "Error extracting analysis", "Error extracting explanation", "execution = {'error': 'Error extracting command', 'status': 'failed'}"
 
     def execute_tool_command(self, tool_name: str, command: str) -> Any:
         # Check if tool_name contains error prefix (indicates normalization failed)
@@ -414,7 +416,13 @@ Remember: Your <command> field MUST be valid Python code including any necessary
                     output = f.read()
                 # Check if execution variable exists, otherwise check for error
                 if "execution" in local_context:
-                    return local_context["execution"]
+                    execution_result = local_context["execution"]
+                    # Handle cached artifact case - return the cached result directly
+                    if execution_result == 'cached_artifact':
+                        # This should not happen here - cached results should be handled in app.py
+                        # But if it does, return None to indicate it was cached
+                        return None
+                    return execution_result
                 elif "_execution_error" in local_context:
                     return f"Error executing tool command: {local_context['_execution_error']}"
                 else:
