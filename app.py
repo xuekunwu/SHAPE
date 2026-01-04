@@ -2215,18 +2215,155 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
 
 def main(args):
     #################### Gradio Interface ####################
-    with gr.Blocks() as demo:
-        # Theming https://www.gradio.app/guides/theming-guide
+    # Apple-inspired theme: clean, minimal, elegant
+    apple_theme = gr.themes.Soft(
+        primary_hue="blue",
+        secondary_hue="gray",
+        neutral_hue="slate",
+        font=("SF Pro Display", "-apple-system", "BlinkMacSystemFont", "Segoe UI", "Helvetica Neue", "Arial", "sans-serif"),
+        font_mono=("SF Mono", "Monaco", "Menlo", "Consolas", "monospace"),
+    ).set(
+        # Apple-style color palette
+        body_background_fill="#ffffff",
+        body_background_fill_dark="#000000",
+        body_text_color="#1d1d1f",
+        body_text_color_dark="#f5f5f7",
+        background_fill_secondary="#f5f5f7",
+        background_fill_secondary_dark="#1d1d1f",
+        border_color_accent="#d2d2d7",
+        border_color_accent_dark="#424245",
+        border_radius="12px",
+        border_width="1px",
+        button_primary_background_fill="#0071e3",
+        button_primary_background_fill_hover="#0077ed",
+        button_primary_text_color="#ffffff",
+        button_secondary_background_fill="#f5f5f7",
+        button_secondary_background_fill_hover="#e8e8ed",
+        button_secondary_text_color="#1d1d1f",
+        input_background_fill="#ffffff",
+        input_background_fill_dark="#1d1d1f",
+        input_border_color="#d2d2d7",
+        input_border_width="1px",
+        input_border_radius="8px",
+        shadow_drop="0 2px 8px rgba(0,0,0,0.08)",
+        shadow_drop_lg="0 4px 16px rgba(0,0,0,0.12)",
+    )
+    
+    with gr.Blocks(theme=apple_theme, title="SHAPE - Single-Cell Bioimage Analysis") as demo:
+        # Custom CSS for Apple-style refinements
+        demo.css = """
+        .gradio-container {
+            max-width: 1400px !important;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+        h1 {
+            font-size: 48px !important;
+            font-weight: 600 !important;
+            letter-spacing: -0.5px !important;
+            color: #1d1d1f !important;
+            margin-bottom: 8px !important;
+            line-height: 1.1 !important;
+        }
+        h2, h3 {
+            font-weight: 600 !important;
+            color: #1d1d1f !important;
+            letter-spacing: -0.3px !important;
+        }
+        .markdown p {
+            font-size: 17px !important;
+            line-height: 1.47059 !important;
+            color: #6e6e73 !important;
+            margin-bottom: 12px !important;
+        }
+        .button-primary {
+            border-radius: 12px !important;
+            font-weight: 500 !important;
+            font-size: 17px !important;
+            padding: 12px 24px !important;
+            transition: all 0.3s ease !important;
+        }
+        .button-primary:hover {
+            transform: translateY(-1px) !important;
+            box-shadow: 0 4px 12px rgba(0, 113, 227, 0.3) !important;
+        }
+        .input-text {
+            border-radius: 8px !important;
+            font-size: 17px !important;
+            padding: 12px 16px !important;
+        }
+        .chatbot {
+            border-radius: 12px !important;
+            border: 1px solid #d2d2d7 !important;
+            background: #ffffff !important;
+        }
+        .gallery {
+            border-radius: 12px !important;
+            border: 1px solid #d2d2d7 !important;
+        }
+        .section-header {
+            margin-bottom: 16px !important;
+        }
+        .config-card {
+            margin-bottom: 12px !important;
+        }
+        .status-text {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif !important;
+        }
+        .upload-area {
+            border-radius: 12px !important;
+        }
+        .group-table {
+            border-radius: 8px !important;
+        }
+        .query-input textarea {
+            font-size: 17px !important;
+            line-height: 1.47059 !important;
+            border-radius: 8px !important;
+        }
+        .chatbot-container {
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08) !important;
+        }
+        .gallery-container {
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08) !important;
+        }
+        .examples-header {
+            margin-bottom: 8px !important;
+        }
+        """
         
-        gr.Markdown("# Chat with SHAPE: A self-supervised morphology agent for cellular phenotype")  # Title
-        gr.Markdown("""
-        **SHPAE** is an open-source assistant for interpreting cell images, powered by large language models and tool-based reasoning.
-        """)
+        # Header with Apple-style typography
+        with gr.Column(elem_classes="header-section"):
+            gr.Markdown(
+                """
+                <div style="text-align: center; padding: 60px 0 40px 0;">
+                    <h1 style="font-size: 56px; font-weight: 600; letter-spacing: -1px; color: #1d1d1f; margin-bottom: 12px; line-height: 1.1;">
+                        SHAPE
+                    </h1>
+                    <p style="font-size: 21px; color: #6e6e73; font-weight: 400; margin: 0; line-height: 1.47059;">
+                        Self-supervised morphology agent for single-cell bioimage analysis
+                    </p>
+                    <p style="font-size: 17px; color: #86868b; margin-top: 12px; line-height: 1.47059;">
+                        Powered by large language models and tool-based reasoning
+                    </p>
+                </div>
+                """,
+                elem_classes="main-title"
+            )
         
-        # Model / tool configuration (top row, equal height)
+        # Model / tool configuration (top row, equal height) - Apple-style cards
         with gr.Row(equal_height=True):
-            with gr.Column(scale=1, min_width=250):
-                gr.Markdown("### ⚙️ LLM Configuration")
+            with gr.Column(scale=1, min_width=280):
+                gr.Markdown(
+                    """
+                    <div style="background: #f5f5f7; border-radius: 12px; padding: 24px; margin-bottom: 20px;">
+                        <h3 style="font-size: 19px; font-weight: 600; color: #1d1d1f; margin-bottom: 16px; letter-spacing: -0.2px;">
+                            LLM Configuration
+                        </h3>
+                    </div>
+                    """,
+                    elem_classes="config-card"
+                )
                 multimodal_models = [m for m in OPENAI_MODEL_CONFIGS.values()]
                 model_names = [m["model_id"] for m in multimodal_models]
                 # Prefer gpt-5-mini as default (latest cost-effective mini model)
@@ -2234,40 +2371,159 @@ def main(args):
                                    next((m["model_id"] for m in multimodal_models if m.get("model_id") == "gpt-4o-mini"),
                                        next((m["model_id"] for m in multimodal_models if m.get("model_type") == "openai"), 
                                            model_names[0] if model_names else None)))
-                language_model = gr.Dropdown(choices=model_names, value=default_model)
+                language_model = gr.Dropdown(
+                    choices=model_names, 
+                    value=default_model,
+                    label="",
+                    container=False,
+                    scale=1
+                )
             with gr.Column(scale=1):
-                gr.Markdown("### 🛠️ Available Tools")
-                with gr.Accordion("🛠️ Available Tools", open=False):
-                    gr.Markdown("\n".join([f"- {t}" for t in get_available_tools()]))
+                gr.Markdown(
+                    """
+                    <div style="background: #f5f5f7; border-radius: 12px; padding: 24px; margin-bottom: 20px;">
+                        <h3 style="font-size: 19px; font-weight: 600; color: #1d1d1f; margin-bottom: 16px; letter-spacing: -0.2px;">
+                            Available Tools
+                        </h3>
+                    </div>
+                    """,
+                    elem_classes="config-card"
+                )
+                with gr.Accordion("View Tools", open=False, elem_classes="tools-accordion"):
+                    gr.Markdown("\n".join([f"• {t}" for t in get_available_tools()]))
 
         # Main interaction row: left (uploads + question), right (conversation)
         with gr.Row():
             with gr.Column(scale=1):
-                gr.Markdown("### 📤 Image Groups")
-                user_image = gr.File(label="Upload Images", file_count="multiple", type="filepath")
-                group_table = gr.Dataframe(headers=["image_name", "group"], row_count=0, wrap=True, interactive=True, visible=True)
-                group_prompt = gr.Markdown("**Upload Status**: No uploads yet")
-                upload_btn = gr.Button("Add Group(s) to Image(s)", variant="primary")
-                gr.Markdown("### ❓ Ask Question")
-                user_query = gr.Textbox(label="Ask about your groups", placeholder="e.g., Compare cell counts between control and drugA", lines=5)
-                run_button = gr.Button("🚀 Ask Question", variant="primary", size="lg")
-                progress_md = gr.Markdown("**Progress**: Ready")
+                gr.Markdown(
+                    """
+                    <div style="background: #f5f5f7; border-radius: 12px; padding: 20px; margin-bottom: 20px;">
+                        <h3 style="font-size: 19px; font-weight: 600; color: #1d1d1f; margin-bottom: 0; letter-spacing: -0.2px;">
+                            Image Groups
+                        </h3>
+                    </div>
+                    """,
+                    elem_classes="section-header"
+                )
+                user_image = gr.File(
+                    label="Upload Images", 
+                    file_count="multiple", 
+                    type="filepath",
+                    elem_classes="upload-area"
+                )
+                group_table = gr.Dataframe(
+                    headers=["image_name", "group"], 
+                    row_count=0, 
+                    wrap=True, 
+                    interactive=True, 
+                    visible=True,
+                    elem_classes="group-table"
+                )
+                group_prompt = gr.Markdown(
+                    "<div style='color: #6e6e73; font-size: 15px; padding: 12px 0;'>Upload Status: No uploads yet</div>",
+                    elem_classes="status-text"
+                )
+                upload_btn = gr.Button(
+                    "Add Group(s) to Image(s)", 
+                    variant="primary",
+                    elem_classes="primary-button"
+                )
+                gr.Markdown(
+                    """
+                    <div style="background: #f5f5f7; border-radius: 12px; padding: 20px; margin: 24px 0 20px 0;">
+                        <h3 style="font-size: 19px; font-weight: 600; color: #1d1d1f; margin-bottom: 0; letter-spacing: -0.2px;">
+                            Ask Question
+                        </h3>
+                    </div>
+                    """,
+                    elem_classes="section-header"
+                )
+                user_query = gr.Textbox(
+                    label="", 
+                    placeholder="e.g., Compare cell counts between control and drugA", 
+                    lines=5,
+                    elem_classes="query-input"
+                )
+                run_button = gr.Button(
+                    "Ask Question", 
+                    variant="primary", 
+                    size="lg",
+                    elem_classes="primary-button-large"
+                )
+                progress_md = gr.Markdown(
+                    "<div style='color: #6e6e73; font-size: 15px; padding: 12px 0;'>Progress: Ready</div>",
+                    elem_classes="status-text"
+                )
                 conversation_state = gr.State(AgentState())
             with gr.Column(scale=1):
-                gr.Markdown("### 🗣️ Conversation")
+                gr.Markdown(
+                    """
+                    <div style="background: #f5f5f7; border-radius: 12px; padding: 20px; margin-bottom: 20px;">
+                        <h3 style="font-size: 19px; font-weight: 600; color: #1d1d1f; margin-bottom: 0; letter-spacing: -0.2px;">
+                            Conversation
+                        </h3>
+                    </div>
+                    """,
+                    elem_classes="section-header"
+                )
                 # Use type="messages" directly like original version
-                chatbot_output = gr.Chatbot(type="messages", height=700, show_label=False)
+                chatbot_output = gr.Chatbot(
+                    type="messages", 
+                    height=700, 
+                    show_label=False,
+                    elem_classes="chatbot-container"
+                )
 
         # Bottom full-width: summary and visual outputs
-        gr.Markdown("### 🧾 Summary")
-        text_output = gr.Markdown(value="")
-        gr.Markdown("### 🖼️ Visual Outputs")
-        gallery_output = gr.Gallery(label=None, show_label=False, height=350, columns=3, rows=2)
+        gr.Markdown(
+            """
+            <div style="background: #f5f5f7; border-radius: 12px; padding: 20px; margin: 32px 0 20px 0;">
+                <h3 style="font-size: 19px; font-weight: 600; color: #1d1d1f; margin-bottom: 0; letter-spacing: -0.2px;">
+                    Summary
+                </h3>
+            </div>
+            """,
+            elem_classes="section-header"
+        )
+        text_output = gr.Markdown(
+            value="",
+            elem_classes="summary-output"
+        )
+        gr.Markdown(
+            """
+            <div style="background: #f5f5f7; border-radius: 12px; padding: 20px; margin: 24px 0 20px 0;">
+                <h3 style="font-size: 19px; font-weight: 600; color: #1d1d1f; margin-bottom: 0; letter-spacing: -0.2px;">
+                    Visual Outputs
+                </h3>
+            </div>
+            """,
+            elem_classes="section-header"
+        )
+        gallery_output = gr.Gallery(
+            label=None, 
+            show_label=False, 
+            height=350, 
+            columns=3, 
+            rows=2,
+            elem_classes="gallery-container"
+        )
 
         # Examples row (optional, no nesting issues)
         with gr.Row():
             with gr.Column(scale=5):
-                gr.Markdown("## 💡 Try these examples with suggested tools.")
+                gr.Markdown(
+                    """
+                    <div style="text-align: center; padding: 40px 0 24px 0;">
+                        <h2 style="font-size: 32px; font-weight: 600; color: #1d1d1f; margin-bottom: 8px; letter-spacing: -0.5px;">
+                            Try these examples
+                        </h2>
+                        <p style="font-size: 17px; color: #6e6e73; margin: 0; line-height: 1.47059;">
+                            Explore the capabilities with suggested tools
+                        </p>
+                    </div>
+                    """,
+                    elem_classes="examples-header"
+                )
                 examples = [
                     ["Image Preprocessing", "examples/A5_01_1_1_Phase Contrast_001.png", "Normalize this phase contrast image.", "Image_Preprocessor_Tool", "Illumination-corrected and brightness-normalized phase contrast image."],
                     ["Cell Identification", "examples/A2_02_1_1_Phase Contrast_001.png", "How many cells are there in this image.", "Image_Preprocessor_Tool, Nuclei_Segmenter_Tool", "258 cells are identified and their nuclei are labeled."],
@@ -2282,7 +2538,16 @@ def main(args):
                     selected_tools = [tool.strip() for tool in tools_str.split(',')]
                     selected = [tool for tool in selected_tools if tool in get_available_tools()]
                     return img, q
-                gr.Markdown("#### 🧬 Analysis Examples")
+                gr.Markdown(
+                    """
+                    <div style="text-align: center; padding: 20px 0;">
+                        <h4 style="font-size: 17px; font-weight: 600; color: #1d1d1f; letter-spacing: -0.2px;">
+                            Analysis Examples
+                        </h4>
+                    </div>
+                    """,
+                    elem_classes="examples-subtitle"
+                )
                 gr.Examples(
                     examples=examples,
                     inputs=[gr.Textbox(label="Category", visible=False), user_image, user_query, gr.Textbox(label="Select Tools", visible=False), gr.Textbox(label="Reference Answer", visible=False)],
