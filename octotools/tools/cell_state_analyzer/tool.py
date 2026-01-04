@@ -22,7 +22,13 @@ from typing import List, Dict, Any, Optional, Tuple
 from uuid import uuid4
 import matplotlib.pyplot as plt
 import seaborn as sns
-# No need for hf_hub_download - using transformers.AutoModel instead
+# Import hf_hub_download for loading PyTorch model weights
+try:
+    from huggingface_hub import hf_hub_download
+    HF_HUB_AVAILABLE = True
+except ImportError:
+    HF_HUB_AVAILABLE = False
+    logger.warning("huggingface_hub not available. Model loading may fail.")
 import glob
 import pandas as pd
 from tqdm import tqdm
@@ -112,25 +118,86 @@ class DinoV3Projector(nn.Module):
             "dinov3_vit7b16": 4096,
         }
         
-        # Load DINOv3 backbone directly from Hugging Face Hub with fallback to DINOv2
+        # Load DINOv3 backbone from Hugging Face Hub (PyTorch weights file)
         custom_repo_id = "5xuekun/dinov3_vitb16"
+        model_filename = "dinov3_vitl16_pretrain_lvd1689m-8aa4cbdd.pth"
+        # Use dinov2-large as architecture base since the weights are for ViT-L/16
+        architecture_repo_id = "facebook/dinov2-large"
         fallback_repo_id = "facebook/dinov2-base"  # Official DINOv2 model as fallback
-        logger.info(f"Attempting to load DINOv3 backbone from Hugging Face Hub: {custom_repo_id}")
+        
+        logger.info(f"Attempting to load DINOv3 model weights from Hugging Face Hub: {custom_repo_id}/{model_filename}")
         
         self.backbone = None
         from transformers import AutoModel
+        hf_token = os.getenv("HUGGINGFACE_TOKEN")
         
-        # Try custom DINOv3 model first
+        # Try custom DINOv3 model first (download .pth weights and load into DINOv2 architecture)
         try:
-            hf_token = os.getenv("HUGGINGFACE_TOKEN")
-            self.backbone = AutoModel.from_pretrained(
-                custom_repo_id, 
+            if not HF_HUB_AVAILABLE:
+                raise ImportError("huggingface_hub not available")
+            
+            # Download DINOv3 weights file
+            logger.info(f"Downloading DINOv3 weights: {model_filename}")
+            weights_path = hf_hub_download(
+                repo_id=custom_repo_id,
+                filename=model_filename,
+                token=hf_token
+            )
+            logger.info(f"DINOv3 weights downloaded to: {weights_path}")
+            
+            # Load DINOv3 weights into DINOv2 architecture (same ViT architecture)
+            # Use dinov2-large architecture since the weights are for ViT-L/16
+            logger.info(f"Loading DINOv3 weights into {architecture_repo_id} architecture...")
+            base_model = AutoModel.from_pretrained(
+                architecture_repo_id,
                 token=hf_token,
                 trust_remote_code=True
             )
-            logger.info(f"✅ Loaded custom DINOv3 model from Hugging Face Hub: {custom_repo_id}")
+            
+            # Load DINOv3 state dict
+            logger.info("Loading PyTorch state dict from weights file...")
+            state_dict = torch.load(weights_path, map_location='cpu')
+            
+            # Handle different state dict formats (e.g., {"teacher": {...}} or direct state dict)
+            if isinstance(state_dict, dict) and "teacher" in state_dict:
+                logger.info("Found 'teacher' key in state dict, extracting teacher weights...")
+                state_dict = state_dict["teacher"]
+            elif isinstance(state_dict, dict) and "model" in state_dict:
+                logger.info("Found 'model' key in state dict, extracting model weights...")
+                state_dict = state_dict["model"]
+            
+            # Filter out keys that don't match (e.g., if DINOv3 has slightly different keys)
+            model_state_dict = base_model.state_dict()
+            filtered_state_dict = {}
+            skipped_keys = []
+            for k, v in state_dict.items():
+                if k in model_state_dict and v.shape == model_state_dict[k].shape:
+                    filtered_state_dict[k] = v
+                else:
+                    skipped_keys.append(k)
+            
+            if skipped_keys:
+                logger.debug(f"Skipped {len(skipped_keys)} keys that don't match model architecture")
+            
+            # Load filtered weights (missing keys will use default initialization)
+            missing_keys, unexpected_keys = base_model.load_state_dict(filtered_state_dict, strict=False)
+            if missing_keys:
+                logger.warning(f"Some model keys were not initialized from weights: {len(missing_keys)} keys")
+            if unexpected_keys:
+                logger.warning(f"Some weight keys were not used: {len(unexpected_keys)} keys")
+            
+            self.backbone = base_model
+            logger.info(f"✅ Successfully loaded DINOv3 model weights from {model_filename}")
+            
+            # Update feat_dim for DINOv3 ViT-L/16 (1024 dimensions based on filename)
+            if 'vitl16' in model_filename.lower():
+                feat_dim_map[backbone_name] = 1024
+                logger.info("Detected DINOv3 ViT-L/16 model (1024 dimensions)")
+            
         except Exception as e:
-            logger.warning(f"Failed to load custom DINOv3 model ({custom_repo_id}): {e}")
+            logger.warning(f"Failed to load custom DINOv3 model ({custom_repo_id}/{model_filename}): {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
             logger.info(f"Falling back to official DINOv2 model: {fallback_repo_id}")
             
             # Fallback to official DINOv2 model
@@ -147,7 +214,7 @@ class DinoV3Projector(nn.Module):
                 logger.error(f"Failed to load fallback DINOv2 model: {fallback_e}")
                 raise ValueError(
                     f"Model loading failed. Tried:\n"
-                    f"1. Custom DINOv3: {custom_repo_id} - {str(e)}\n"
+                    f"1. Custom DINOv3: {custom_repo_id}/{model_filename} - {str(e)}\n"
                     f"2. Official DINOv2: {fallback_repo_id} - {str(fallback_e)}\n"
                     f"Please check your internet connection and Hugging Face Hub access."
                 )
@@ -172,8 +239,25 @@ class DinoV3Projector(nn.Module):
         )
     
     def forward(self, x):
-        # Extract CLS token from backbone (direct call returns CLS token)
-        z = self.backbone(x)
+        # Extract CLS token from backbone
+        # DINOv2/DINOv3 models: forward() returns BaseModelOutputWithPooling
+        # We need to get the last_hidden_state and extract CLS token (first token)
+        output = self.backbone(x)
+        
+        # Handle different output formats
+        if hasattr(output, 'last_hidden_state'):
+            # Standard transformers output format
+            z = output.last_hidden_state[:, 0]  # CLS token (first token)
+        elif hasattr(output, 'pooler_output'):
+            # Pooler output (already pooled CLS token)
+            z = output.pooler_output
+        elif isinstance(output, torch.Tensor):
+            # Direct tensor output (already CLS token)
+            z = output
+        else:
+            # Fallback: try to get CLS token from first dimension
+            z = output[:, 0] if len(output.shape) > 1 else output
+        
         # Project and normalize
         z = self.projector(z)
         return F.normalize(z, dim=-1)
