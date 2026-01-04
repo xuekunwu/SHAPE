@@ -38,6 +38,10 @@ import pandas as pd
 
 _AVAILABLE_TOOLS_CACHE = None
 
+# All tools process all images uniformly (batch processing style)
+# Each image is processed independently with group+image_name labeling
+TOOLS_THAT_MERGE_ALL_IMAGES = []  # Empty: no special handling, all tools process all images
+
 def get_available_tools() -> List[str]:
     """Dynamically discover all available tools from octotools/tools directory."""
     global _AVAILABLE_TOOLS_CACHE
@@ -1183,46 +1187,24 @@ class Solver:
             explanation = ""
             command = ""
             
-            # Tools that merge all images should only execute once, not per-image
-            # These tools analyze all images together, so result is always a single merged result
-            tools_that_merge_all_images = ["Cell_State_Analyzer_Tool", "Analysis_Visualizer_Tool"]
-            should_execute_once = tool_name in tools_that_merge_all_images and len(image_items) > 1
-            
-            merged_result = None  # Store merged result for tools that combine all images
+            # Generate conversation_text once (same for all images in this step)
+            conversation_text = self._format_conversation_history()
             
             # Debug: Log image processing info
-            print(f"🔍 Processing {len(image_items)} image(s) with {tool_name}")
-            print(f"   should_execute_once: {should_execute_once}")
-            print(f"   tools_that_merge_all_images: {tools_that_merge_all_images}")
+            print(f"🔍 Processing {len(image_items)} image(s) with {tool_name} (batch processing mode)")
             
             for img_idx, img_item in enumerate(image_items):
                 print(f"   Processing image {img_idx + 1}/{len(image_items)}: {img_item.get('image_id', 'unknown')} (group: {img_item.get('group', 'unknown')})")
                 safe_path = img_item["image_path"].replace("\\", "\\\\") if img_item.get("image_path") else None
-                conversation_text = self._format_conversation_history()
                 artifact_key = make_artifact_key(tool_name, safe_path, context, sub_goal, image_id=img_item.get("image_id"))
                 
                 # Get image fingerprint for cross-session caching
                 image_fingerprint = img_item.get("fingerprint") or (image_context.fingerprint if image_context else None)
                 
-                # For tools that merge all images: only execute on first image, reuse result for others
-                if should_execute_once and img_idx > 0:
-                    # Reuse the merged result from first image
-                    if merged_result is not None:
-                        result = merged_result
-                        messages.append(ChatMessage(
-                            role="assistant",
-                            content=f"♻️ Reusing merged analysis result for image `{img_item.get('image_id')}` (all images analyzed together).",
-                            metadata={"title": f"### 🛠️ Step {step_count}: Merged Analysis ({tool_name})"}
-                        ))
-                        print(f"Reusing merged result for {tool_name} (image {img_item.get('image_id')}, index {img_idx})")
-                        results_per_image.append(result)
-                        continue  # Skip to next image
-                    else:
-                        # If no merged result yet, continue to execute (shouldn't happen, but safety check)
-                        pass
-                
                 # Check cache (both session and global cross-session)
                 cached_artifact = get_cached_artifact(self.agent_state, group_name, tool_name, artifact_key, image_fingerprint)
+                execution_failed = False
+                error_msg = None
 
                 if cached_artifact:
                     result = cached_artifact.get("result")
@@ -1246,10 +1228,6 @@ class Solver:
                         metadata={"title": f"### 🛠️ Step {step_count}: Cached Execution ({tool_name})"}
                     ))
                     print(f"Reused cached artifact for {tool_name} (key={artifact_key}, source={cache_source})")
-                    
-                    # Store merged result for tools that combine all images
-                    if should_execute_once and merged_result is None:
-                        merged_result = result
                 else:
                     # Pass image_id and image_name for consistent file naming
                     image_id = img_item.get("image_id")
@@ -1291,19 +1269,12 @@ class Solver:
                         # Track successful tool execution
                         if tool_name not in successful_tools:
                             successful_tools.add(tool_name)
-                        
-                        # Store merged result for tools that combine all images
-                        if should_execute_once and merged_result is None:
-                            merged_result = result
                     
                 results_per_image.append(result)
 
             # For downstream steps, if only one image use its result, else aggregate
-            # EXCEPTION: Tools that merge all images always return a single merged result (not per_image structure)
-            if should_execute_once and len(results_per_image) > 0:
-                # Use the merged result directly (from first execution, reused for all images)
-                result = results_per_image[0]
-            elif len(results_per_image) == 1:
+            # All tools return per_image structure for batch processing consistency
+            if len(results_per_image) == 1:
                 result = results_per_image[0]
             else:
                 result = {"per_image": results_per_image}
