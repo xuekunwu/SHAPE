@@ -106,18 +106,22 @@ class Executor:
         state_analyzer_tools = ["Cell_State_Analyzer_Tool"]
         if tool_name in state_analyzer_tools:
             tool_label = "Cell_State_Analyzer_Tool"
+            # Use dynamic paths from executor's cache directories
+            # Escape backslashes for Windows paths in Python string
+            metadata_dir_str = self.tool_cache_dir.replace("\\", "\\\\")
+            query_cache_dir_str = self.query_cache_dir.replace("\\", "\\\\")
             return ToolCommand(
                 analysis=f"Using dynamic metadata file discovery for {tool_label}",
                 explanation=f"Automatically finding the most recent metadata file and loading cell data with improved format handling for {tool_label}",
-                command="""import json
+                command=f"""import json
 import os
 import glob
 
 # Dynamically find the most recent metadata file
-metadata_dir = 'solver_cache/temp/tool_cache'
+metadata_dir = r'{self.tool_cache_dir}'
 metadata_files = glob.glob(os.path.join(metadata_dir, 'cell_crops_metadata_*.json'))
 if not metadata_files:
-    execution = {"error": "No metadata files found", "status": "failed"}
+    execution = {{"error": "No metadata files found", "status": "failed"}}
 else:
     # Use the most recent metadata file
     latest_metadata_file = max(metadata_files, key=os.path.getctime)
@@ -125,7 +129,7 @@ else:
     
     try:
         # Use the tool's improved metadata loading method
-        cell_crops, cell_metadata = tool._load_cell_data_from_metadata('solver_cache/temp/tool_cache')
+        cell_crops, cell_metadata = tool._load_cell_data_from_metadata(r'{self.tool_cache_dir}')
         
         if cell_crops and len(cell_crops) > 0:
             # Execute the tool with loaded data
@@ -137,14 +141,14 @@ else:
                 batch_size=16,
                 learning_rate=3e-5,
                 cluster_resolution=0.5,
-                query_cache_dir='solver_cache/temp'
+                query_cache_dir=r'{self.query_cache_dir}'
             )
         else:
-            execution = {"error": "No valid cell crops found in metadata", "status": "failed"}
+            execution = {{"error": "No valid cell crops found in metadata", "status": "failed"}}
         
     except Exception as e:
         logger.error("Error loading metadata: " + str(e))
-        execution = {"error": "Failed to load metadata: " + str(e), "status": "failed"}"""
+        execution = {{"error": "Failed to load metadata: " + str(e), "status": "failed"}}"""
             )
         
         # Special handling for segmentation tools (Nuclei_Segmenter_Tool, Cell_Segmenter_Tool, Organoid_Segmenter_Tool) 
