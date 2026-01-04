@@ -136,6 +136,15 @@ else:
 logger.info(f"Looking for metadata files in: {{tool_cache_dir_str}}")
 logger.info(f"Using query_cache_dir_parent: {{query_cache_dir_parent}}")
 
+# First, check if metadata files exist in tool_cache_dir directly
+direct_metadata_files = glob.glob(os.path.join(tool_cache_dir_str, 'cell_crops_metadata_*.json'))
+logger.info(f"Found {{len(direct_metadata_files)}} metadata file(s) directly in tool_cache_dir")
+
+# Also check the path that _load_cell_data_from_metadata will use
+expected_metadata_dir = os.path.join(query_cache_dir_parent, 'tool_cache')
+expected_metadata_files = glob.glob(os.path.join(expected_metadata_dir, 'cell_crops_metadata_*.json'))
+logger.info(f"Found {{len(expected_metadata_files)}} metadata file(s) in expected path: {{expected_metadata_dir}}")
+
 try:
     # Use the tool's improved metadata loading method (merges all metadata files)
     # Pass query_cache_dir (parent directory), the method will construct tool_cache path internally

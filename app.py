@@ -1274,16 +1274,17 @@ class Solver:
                             failed_tool_names.append(tool_name)
                         messages.append(ChatMessage(
                             role="assistant",
-                            content=f"⚠️ **Tool Execution Failed:** {error_msg}\n\n**Tool:** `{tool_name}`\n**Command:**\n```python\n{command}\n```",
-                            metadata={"title": f"### ❌ Step {step_count}: Tool Execution Failed ({tool_name})"}
+                            content=f"⚠️ **Tool Execution Failed for image {img_idx + 1}/{len(image_items)}:** {error_msg}\n\n**Tool:** `{tool_name}`\n**Image ID:** `{img_item.get('image_id')}`\n**Command:**\n```python\n{command}\n```",
+                            metadata={"title": f"### ❌ Step {step_count}: Tool Execution Failed ({tool_name}) - Image {img_idx + 1}"}
                         ))
                         
-                        # Simple progress message for execution failure
-                        progress_msg_failed = f"**Progress**: Step {step_count}/{self.max_steps} ❌"
+                        # Simple progress message for execution failure (but continue processing other images)
+                        progress_msg_failed = f"**Progress**: Step {step_count}/{self.max_steps} ❌ (Image {img_idx + 1}/{len(image_items)} failed, continuing...)"
                         yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, progress_msg_failed
                         # Store the error result
                         store_artifact(self.agent_state, group_name, tool_name, artifact_key, {"error": error_msg, "result": None}, image_fingerprint)
                         result = {"error": error_msg, "result": None}
+                        print(f"⚠️ Tool '{tool_name}' failed for image {img_idx + 1}/{len(image_items)} ({img_item.get('image_id')}), but continuing to next image...")
                     else:
                         store_artifact(self.agent_state, group_name, tool_name, artifact_key, result, image_fingerprint)
                         print(f"Tool '{tool_name}' result for image {img_item.get('image_id')}: {result}")

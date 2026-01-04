@@ -488,11 +488,28 @@ class Cell_State_Analyzer_Tool(BaseTool):
     
     def _load_cell_data_from_metadata(self, query_cache_dir):
         """Load cell crops and metadata from metadata files. Merges all metadata files for multi-image processing."""
-        metadata_dir = os.path.join(query_cache_dir, "tool_cache")
-        metadata_files = glob.glob(os.path.join(metadata_dir, 'cell_crops_metadata_*.json'))
+        # Try multiple possible paths
+        possible_dirs = [
+            os.path.join(query_cache_dir, "tool_cache"),  # Standard path
+            query_cache_dir if "tool_cache" in query_cache_dir else None,  # If already contains tool_cache
+        ]
+        possible_dirs = [d for d in possible_dirs if d is not None]
+        
+        metadata_files = []
+        for metadata_dir in possible_dirs:
+            if os.path.exists(metadata_dir):
+                found_files = glob.glob(os.path.join(metadata_dir, 'cell_crops_metadata_*.json'))
+                if found_files:
+                    metadata_files.extend(found_files)
+                    logger.info(f"Found {len(found_files)} metadata file(s) in {metadata_dir}")
+        
+        # Remove duplicates
+        metadata_files = list(set(metadata_files))
         
         if not metadata_files:
-            raise ValueError(f"No metadata files found in {metadata_dir}")
+            # Provide detailed error message with all searched paths
+            searched_paths = ", ".join(possible_dirs)
+            raise ValueError(f"No metadata files found. Searched in: {searched_paths}. Please ensure Single_Cell_Cropper_Tool has been executed successfully.")
         
         # Merge all metadata files (for multi-image processing)
         all_cell_crops = []
