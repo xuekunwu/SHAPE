@@ -528,5 +528,68 @@ def get_tool_artifacts(result: Any) -> Dict[str, Any]:
     """
     sanitized = sanitize_tool_output_for_llm(result)
     return sanitized['artifacts']
+
+
+def sanitize_paths_in_dict(obj: Any, depth: int = 0, max_depth: int = 10) -> Any:
+    """
+    Recursively remove file paths from dict/list structures.
+    This ensures LLM-safe data by removing any remaining file paths that might
+    have been missed in initial sanitization.
+    
+    Args:
+        obj: Object to sanitize (dict, list, str, or other)
+        depth: Current recursion depth
+        max_depth: Maximum recursion depth to prevent infinite loops
+        
+    Returns:
+        Sanitized object with file paths replaced with placeholders
+    """
+    if depth > max_depth:
+        return obj  # Prevent infinite recursion
+    
+    # Check if string looks like a file path
+    def is_file_path(value: str) -> bool:
+        """Check if a string appears to be a file path."""
+        if not isinstance(value, str) or len(value) < 3:
+            return False
+        # Check for file extensions or path separators
+        path_indicators = [
+            value.endswith(('.png', '.jpg', '.jpeg', '.tif', '.tiff', '.h5ad', '.json', '.csv', '.txt', '.pdf')),
+            os.path.sep in value,
+            '/' in value and len(value.split('/')) > 2,
+            '\\' in value and len(value.split('\\')) > 2,
+            value.startswith('/tmp/'),
+            value.startswith('solver_cache/'),
+            'output_visualizations' in value
+        ]
+        return any(path_indicators)
+    
+    if isinstance(obj, dict):
+        sanitized = {}
+        for key, value in obj.items():
+            if isinstance(value, str) and is_file_path(value):
+                # Replace file path with placeholder
+                sanitized[key] = f"[file_path: {os.path.basename(value)}]"
+            elif isinstance(value, dict):
+                sanitized[key] = sanitize_paths_in_dict(value, depth + 1, max_depth)
+            elif isinstance(value, list):
+                sanitized[key] = sanitize_paths_in_dict(value, depth + 1, max_depth)
+            else:
+                sanitized[key] = value
+        return sanitized
+    elif isinstance(obj, list):
+        sanitized = []
+        for item in obj:
+            if isinstance(item, str) and is_file_path(item):
+                sanitized.append(f"[file_path: {os.path.basename(item)}]")
+            elif isinstance(item, (dict, list)):
+                sanitized.append(sanitize_paths_in_dict(item, depth + 1, max_depth))
+            else:
+                sanitized.append(item)
+        return sanitized
+    elif isinstance(obj, str) and is_file_path(obj):
+        return f"[file_path: {os.path.basename(obj)}]"
+    else:
+        return obj
     
     

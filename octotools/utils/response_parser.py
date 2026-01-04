@@ -152,7 +152,8 @@ class ResponseParser:
         if not explanation:
             explanation = "No explanation provided"
         if not command:
-            command = "execution = tool.execute(error='No command provided')"
+            # Use unified error format: dictionary instead of tool.execute(error=...)
+            command = "execution = {'error': 'No command provided', 'status': 'failed'}"
         
         return analysis, explanation, command
     

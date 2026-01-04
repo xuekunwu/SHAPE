@@ -440,6 +440,36 @@ Example (do not copy, use only as reference):
             next_step = llm_response
             self.last_usage = {}
         
+        # CRITICAL: Code-level enforcement - verify LLM selection matches forced rules
+        # (This is a safety check in case the pre-LLM check was somehow bypassed)
+        if used_tools:
+            last_tool = used_tools[-1]
+            segmentation_tools = ["Cell_Segmenter_Tool", "Nuclei_Segmenter_Tool", "Organoid_Segmenter_Tool"]
+            if last_tool in segmentation_tools:
+                # Extract tool name from next_step
+                selected_tool = getattr(next_step, 'tool_name', '') if hasattr(next_step, 'tool_name') else ''
+                # Parse from string if needed
+                if not selected_tool and isinstance(next_step, str):
+                    from octotools.utils.response_parser import ResponseParser
+                    _, _, selected_tool = ResponseParser.parse_next_step(next_step, available_tools)
+                
+                # Enforce: If LLM didn't select the correct tool, override it
+                if selected_tool != 'Single_Cell_Cropper_Tool':
+                    logger.warning(f"⚠️ CODE ENFORCEMENT: LLM selected '{selected_tool}' after segmentation tool '{last_tool}', "
+                                 f"overriding to Single_Cell_Cropper_Tool")
+                    # Override: Create forced next step
+                    forced_context = self._format_memory_for_prompt(memory)
+                    forced_next_step = NextStep(
+                        justification=f"MANDATORY ENFORCEMENT: Previous tool '{last_tool}' was a segmentation tool. "
+                                    f"Single_Cell_Cropper_Tool MUST be called next according to the bioimage analysis chain. "
+                                    f"LLM selected '{selected_tool}' which was overridden by code-level enforcement.",
+                        context=forced_context,
+                        sub_goal="Generate single-cell crops from the segmentation mask produced in the previous step. "
+                               "Extract individual cell regions with appropriate margins for downstream analysis.",
+                        tool_name="Single_Cell_Cropper_Tool"
+                    )
+                    return forced_next_step
+        
         # Validate the selected tool
         if hasattr(next_step, 'tool_name') and next_step.tool_name:
             validation_result = self._validate_tool_selection(

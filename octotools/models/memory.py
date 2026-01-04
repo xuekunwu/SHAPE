@@ -1,6 +1,6 @@
 from typing import Dict, Any, List, Union, Optional
 import os
-from octotools.models.utils import sanitize_tool_output_for_llm, get_llm_safe_result
+from octotools.models.utils import sanitize_tool_output_for_llm, get_llm_safe_result, sanitize_paths_in_dict
 
 class Memory:
     # TODO Need to fix this to support multiple data sources (e.g. images, pdf, txt, etc.)
@@ -106,6 +106,9 @@ class Memory:
                     'command': action.get('command'),
                     'result': action.get('result_summary', action.get('result'))  # Use summary if available
                 }
+                # Recursively sanitize result to remove any remaining file paths
+                if safe_action['result']:
+                    safe_action['result'] = sanitize_paths_in_dict(safe_action['result'])
                 safe_actions.append(safe_action)
             return safe_actions
         return actions
