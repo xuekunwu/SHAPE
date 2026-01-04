@@ -170,7 +170,7 @@ class Initializer:
                     # For Planner, we need metadata. Load it on demand
                     # Store a placeholder that will be loaded when needed
                     self.toolbox_metadata[tool_class_name] = None  # Will be loaded on demand
-                    print(f"✓ Tool class {tool_class_name} loaded (not instantiated)")
+                    print(f"[OK] Tool class {tool_class_name} loaded (not instantiated)")
             except Exception as e:
                 print(f"Error loading tool {tool_class_name}: {str(e)}")
         
@@ -188,10 +188,10 @@ class Initializer:
                 tool_class = self._load_tool_class_only(tool_class_name)
                 if tool_class:
                     self.available_tools.append(tool_class_name)
-                    print(f"✓ Tool {tool_class_name} is available")
+                    print(f"[OK] Tool {tool_class_name} is available")
                 else:
                     failed_tools.append((tool_class_name, "Failed to load tool class (returned None)"))
-                    print(f"✗ Tool {tool_class_name} failed to load (returned None)")
+                    print(f"X Tool {tool_class_name} failed to load (returned None)")
             except Exception as e:
                 error_msg = f"Error checking availability of {tool_class_name}: {str(e)}"
                 failed_tools.append((tool_class_name, error_msg))
@@ -199,7 +199,7 @@ class Initializer:
                 print(traceback.format_exc())
         
         if failed_tools:
-            print(f"\n⚠️ {len(failed_tools)} tool(s) failed to load:")
+            print(f"\nWARNING: {len(failed_tools)} tool(s) failed to load:")
             for tool_name, error in failed_tools:
                 print(f"  - {tool_name}: {error}")
         
@@ -241,7 +241,7 @@ class Initializer:
         print(f"\nTotal number of available tools: {len(self.available_tools)}")
         print(f"Available tools: {self.available_tools}")
         print(f"Enabled tools: {self.enabled_tools}")
-        print("✓ Tools loaded (lazy loading - no instantiation at startup)")
+        print("[OK] Tools loaded (lazy loading - no instantiation at startup)")
     
     def get_toolbox_metadata(self) -> Dict[str, Any]:
         """Get toolbox metadata with lazy loading. Loads metadata on demand."""
