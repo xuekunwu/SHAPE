@@ -9,6 +9,7 @@ import argparse
 import time
 import io
 import uuid
+from tqdm import tqdm
 try:
     import torch
     TORCH_AVAILABLE = True
@@ -1053,14 +1054,59 @@ class Solver:
         failed_tool_names = []
         successful_steps = []  # Track successful steps: [{"step": N, "tool": "ToolName", "result": {...}}]
         successful_tools = set()  # Track successfully executed tools
+        
+        # Initialize progress tracking for tqdm-style display
+        total_steps_estimated = self.max_steps
+        progress_info = {
+            "current_step": 0,
+            "total_steps": total_steps_estimated,
+            "step_times": [],
+            "elapsed_time": 0.0,
+            "average_time_per_step": 0.0
+        }
+        
         while step_count < self.max_steps:  # Removed time limit check
             step_count += 1
             step_start = time.time()
             mem_before = process.memory_info().rss / 1024 / 1024  # MB
+            
+            # Update progress info
+            progress_info["current_step"] = step_count
+            elapsed_total = time.time() - self.start_time
+            progress_info["elapsed_time"] = elapsed_total
+            
+            # Calculate progress percentage
+            progress_percent = min(100, int((step_count / total_steps_estimated) * 100))
+            
+            # Calculate average time per step if we have previous steps
+            if len(progress_info["step_times"]) > 0:
+                avg_time = sum(progress_info["step_times"]) / len(progress_info["step_times"])
+                progress_info["average_time_per_step"] = avg_time
+                estimated_remaining = avg_time * (total_steps_estimated - step_count)
+                estimated_remaining_str = f" (ETA: {estimated_remaining:.1f}s)"
+            else:
+                estimated_remaining_str = ""
+            
+            # Format progress bar (tqdm-style)
+            bar_length = 20
+            filled = int(bar_length * progress_percent / 100)
+            bar = "█" * filled + "░" * (bar_length - filled)
+            
+            # Create detailed progress message
+            progress_msg = f"""**Progress**: Step {step_count}/{total_steps_estimated} ({progress_percent}%)
+```
+{bar} {progress_percent}%
+```
+⏱️ **Step {step_count}** - Elapsed: {elapsed_total:.1f}s{estimated_remaining_str}
+"""
+            if len(progress_info["step_times"]) > 0:
+                last_step_time = progress_info["step_times"][-1]
+                progress_msg += f"⏱️ Last step: {last_step_time:.2f}s | Avg: {progress_info['average_time_per_step']:.2f}s/step\n"
+            
             messages.append(ChatMessage(role="OctoTools", 
                                         content=f"Generating the {step_count}-th step...",
                                         metadata={"title": f"🔄 Step {step_count}"}))
-            yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count}"
+            yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, progress_msg
 
             conversation_text = self._format_conversation_history()
             next_step = self.planner.generate_next_step(user_query, analysis_img_ref, query_analysis, self.memory, step_count, self.max_steps, conversation_context=conversation_text)
@@ -1079,7 +1125,20 @@ class Solver:
                 role="assistant",
                 content=f"**Context:** {context}\n\n**Sub-goal:** {sub_goal}\n\n**Tool:** `{tool_name}`",
                 metadata={"title": f"### 🎯 Step {step_count}: Action Prediction ({tool_name})"}))
-            yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Action predicted"
+            
+            # Update progress for action prediction
+            elapsed_total = time.time() - self.start_time
+            progress_percent = min(100, int((step_count / total_steps_estimated) * 100))
+            bar_length = 20
+            filled = int(bar_length * progress_percent / 100)
+            bar = "█" * filled + "░" * (bar_length - filled)
+            progress_msg_predicted = f"""**Progress**: Step {step_count}/{total_steps_estimated} ({progress_percent}%)
+```
+{bar} {progress_percent}%
+```
+⏱️ **Step {step_count}** - Action predicted: {tool_name} | Elapsed: {elapsed_total:.1f}s
+"""
+            yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, progress_msg_predicted
 
             # Handle tool execution or errors
             # Check if tool_name contains error prefix (normalization failed)
@@ -1096,7 +1155,20 @@ class Solver:
                 messages.append(ChatMessage(
                     role="assistant", 
                     content=f"⚠️ **Tool Matching Error:** {error_msg}\n\nThis may indicate that the tool is not properly registered or loaded."))
-                yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Tool matching failed"
+                
+                # Update progress for error
+                elapsed_total = time.time() - self.start_time
+                progress_percent = min(100, int((step_count / total_steps_estimated) * 100))
+                bar_length = 20
+                filled = int(bar_length * progress_percent / 100)
+                bar = "█" * filled + "░" * (bar_length - filled)
+                progress_msg_error = f"""**Progress**: Step {step_count}/{total_steps_estimated} ({progress_percent}%) ⚠️
+```
+{bar} {progress_percent}%
+```
+❌ **Step {step_count}** - Tool matching failed | Elapsed: {elapsed_total:.1f}s
+"""
+                yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, progress_msg_error
                 continue
             
             if tool_name not in self.planner.available_tools:
@@ -1106,7 +1178,20 @@ class Solver:
                 messages.append(ChatMessage(
                     role="assistant", 
                     content=f"⚠️ Error: Tool '{tool_name}' is not available."))
-                yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Tool not available"
+                
+                # Update progress for tool not available
+                elapsed_total = time.time() - self.start_time
+                progress_percent = min(100, int((step_count / total_steps_estimated) * 100))
+                bar_length = 20
+                filled = int(bar_length * progress_percent / 100)
+                bar = "█" * filled + "░" * (bar_length - filled)
+                progress_msg_unavailable = f"""**Progress**: Step {step_count}/{total_steps_estimated} ({progress_percent}%) ⚠️
+```
+{bar} {progress_percent}%
+```
+❌ **Step {step_count}** - Tool not available: {tool_name} | Elapsed: {elapsed_total:.1f}s
+"""
+                yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, progress_msg_unavailable
                 continue
 
             results_per_image = []
@@ -1170,7 +1255,20 @@ class Solver:
                             content=f"⚠️ **Tool Execution Failed:** {error_msg}\n\n**Tool:** `{tool_name}`\n**Command:**\n```python\n{command}\n```",
                             metadata={"title": f"### ❌ Step {step_count}: Tool Execution Failed ({tool_name})"}
                         ))
-                        yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Tool execution failed"
+                        
+                        # Update progress for execution failure
+                        elapsed_total = time.time() - self.start_time
+                        progress_percent = min(100, int((step_count / total_steps_estimated) * 100))
+                        bar_length = 20
+                        filled = int(bar_length * progress_percent / 100)
+                        bar = "█" * filled + "░" * (bar_length - filled)
+                        progress_msg_failed = f"""**Progress**: Step {step_count}/{total_steps_estimated} ({progress_percent}%) ❌
+```
+{bar} {progress_percent}%
+```
+❌ **Step {step_count}** - Tool execution failed: {tool_name} | Elapsed: {elapsed_total:.1f}s
+"""
+                        yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, progress_msg_failed
                         # Store the error result
                         store_artifact(self.agent_state, group_name, tool_name, artifact_key, {"error": error_msg, "result": None}, image_fingerprint)
                         result = {"error": error_msg, "result": None}
@@ -1212,7 +1310,20 @@ class Solver:
                 role="assistant",
                 content=f"**Analysis:** {analysis}\n\n**Explanation:** {explanation}\n\n**Command:**\n```python\n{command}\n```",
                 metadata={"title": f"### 📝 Step {step_count}: Command Generation ({tool_name})"}))
-            yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Command generated"
+            
+            # Update progress for command generation
+            elapsed_total = time.time() - self.start_time
+            progress_percent = min(100, int((step_count / total_steps_estimated) * 100))
+            bar_length = 20
+            filled = int(bar_length * progress_percent / 100)
+            bar = "█" * filled + "░" * (bar_length - filled)
+            progress_msg_command = f"""**Progress**: Step {step_count}/{total_steps_estimated} ({progress_percent}%)
+```
+{bar} {progress_percent}%
+```
+📝 **Step {step_count}** - Command generated for {tool_name} | Elapsed: {elapsed_total:.1f}s
+"""
+            yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, progress_msg_command
 
             # Save the command generation data
             command_generation_data = {
@@ -1228,7 +1339,20 @@ class Solver:
                 role="assistant",
                 content=f"**Result:**\n```json\n{json.dumps(make_json_serializable(result), indent=4)}\n```",
                 metadata={"title": f"### 🛠️ Step {step_count}: Command Execution ({tool_name})"}))
-            yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Command executed"
+            
+            # Update progress for command execution
+            elapsed_total = time.time() - self.start_time
+            progress_percent = min(100, int((step_count / total_steps_estimated) * 100))
+            bar_length = 20
+            filled = int(bar_length * progress_percent / 100)
+            bar = "█" * filled + "░" * (bar_length - filled)
+            progress_msg_executed = f"""**Progress**: Step {step_count}/{total_steps_estimated} ({progress_percent}%)
+```
+{bar} {progress_percent}%
+```
+🛠️ **Step {step_count}** - Command executed: {tool_name} | Elapsed: {elapsed_total:.1f}s
+"""
+            yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, progress_msg_executed
 
             # Save the command execution data
             command_execution_data = {
@@ -1268,7 +1392,20 @@ class Solver:
                     content=f"⚠️ **Stopping execution:** Tool '{tool_name}' has failed {same_tool_failures} times consecutively. Stopping to avoid infinite loop.\n\n**Possible reasons:**\n- Tool parameters may be incorrect\n- Required dependencies may be missing\n- Image format may not be supported\n- Tool may have internal errors",
                     metadata={"title": f"### 🛑 Step {step_count}: Stopping due to repeated failures"}
                 ))
-                yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Stopping due to repeated tool failures"
+                
+                # Update progress for stopping
+                elapsed_total = time.time() - self.start_time
+                progress_percent = min(100, int((step_count / total_steps_estimated) * 100))
+                bar_length = 20
+                filled = int(bar_length * progress_percent / 100)
+                bar = "█" * filled + "░" * (bar_length - filled)
+                progress_msg_stop = f"""**Progress**: Step {step_count}/{total_steps_estimated} ({progress_percent}%) 🛑
+```
+{bar} {progress_percent}%
+```
+🛑 **Execution stopped** - Tool '{tool_name}' failed {same_tool_failures} times | Elapsed: {elapsed_total:.1f}s
+"""
+                yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, progress_msg_stop
                 execution_successful = False
                 break
             
@@ -1290,7 +1427,29 @@ class Solver:
                 role="assistant", 
                 content=f"**Analysis:**\n{context_verification}\n\n**Conclusion:** `{conclusion}` {conclusion_emoji}",
                 metadata={"title": f"### 🤖 Step {step_count}: Context Verification"}))
-            yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, f"**Progress**: Step {step_count} - Context verified"
+            
+            # Update progress message after context verification
+            elapsed_total = time.time() - self.start_time
+            progress_percent = min(100, int((step_count / total_steps_estimated) * 100))
+            bar_length = 20
+            filled = int(bar_length * progress_percent / 100)
+            bar = "█" * filled + "░" * (bar_length - filled)
+            
+            if len(progress_info["step_times"]) > 0:
+                avg_time = progress_info["average_time_per_step"]
+                estimated_remaining = avg_time * (total_steps_estimated - step_count) if step_count < total_steps_estimated else 0
+                estimated_remaining_str = f" (ETA: {estimated_remaining:.1f}s)" if estimated_remaining > 0 else ""
+            else:
+                estimated_remaining_str = ""
+            
+            progress_msg_verified = f"""**Progress**: Step {step_count}/{total_steps_estimated} ({progress_percent}%) ✓
+```
+{bar} {progress_percent}%
+```
+⏱️ **Step {step_count} verified** - Duration: {step_duration:.2f}s | Total: {elapsed_total:.1f}s{estimated_remaining_str}
+📊 Avg: {progress_info['average_time_per_step']:.2f}s/step | Tool: {tool_name} | Status: {conclusion_emoji} {conclusion}
+"""
+            yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, progress_msg_verified
 
             # After tool execution, estimate tokens and cost
             planner_usage = self.planner.last_usage if hasattr(self.planner, 'last_usage') else None
@@ -1307,7 +1466,42 @@ class Solver:
             if mem_after > self.max_memory:
                 self.max_memory = mem_after
             step_end = time.time()
-            self.step_times.append(step_end - step_start)
+            step_duration = step_end - step_start
+            self.step_times.append(step_duration)
+            progress_info["step_times"].append(step_duration)
+            
+            # Update progress after step completion
+            elapsed_total = time.time() - self.start_time
+            progress_info["elapsed_time"] = elapsed_total
+            if len(progress_info["step_times"]) > 0:
+                progress_info["average_time_per_step"] = sum(progress_info["step_times"]) / len(progress_info["step_times"])
+            
+            # Calculate progress percentage
+            progress_percent = min(100, int((step_count / total_steps_estimated) * 100))
+            
+            # Format progress bar
+            bar_length = 20
+            filled = int(bar_length * progress_percent / 100)
+            bar = "█" * filled + "░" * (bar_length - filled)
+            
+            # Update progress message after step completion
+            if len(progress_info["step_times"]) > 0:
+                avg_time = progress_info["average_time_per_step"]
+                estimated_remaining = avg_time * (total_steps_estimated - step_count) if step_count < total_steps_estimated else 0
+                estimated_remaining_str = f" (ETA: {estimated_remaining:.1f}s)" if estimated_remaining > 0 else ""
+            else:
+                estimated_remaining_str = ""
+            
+            progress_msg_after = f"""**Progress**: Step {step_count}/{total_steps_estimated} ({progress_percent}%) ✓
+```
+{bar} {progress_percent}%
+```
+⏱️ **Step {step_count} completed** - Duration: {step_duration:.2f}s | Total: {elapsed_total:.1f}s{estimated_remaining_str}
+📊 Avg: {progress_info['average_time_per_step']:.2f}s/step | Tool: {tool_name}
+"""
+            
+            # Update the last yield with completed step info (before context verification)
+            # We'll update it again after context verification
 
             # Record step information for tool execution
             context_text = context or self.agent_state.last_context or ""
@@ -2178,7 +2372,7 @@ def main(args):
                     ["Cell Identification", "examples/A2_02_1_1_Phase Contrast_001.png", "How many cells are there in this image.", "Image_Preprocessor_Tool, Nuclei_Segmenter_Tool", "258 cells are identified and their nuclei are labeled."],
                     ["Single-Cell Cropping", "examples/A3_02_1_1_Phase Contrast_001.png", "Crop single cells from the segmented nuclei in this image.", "Image_Preprocessor_Tool, Nuclei_Segmenter_Tool, Single_Cell_Cropper_Tool", "Individual cell crops extracted from the image."],
                     ["Cell State Analysis", "examples/A4_02_1_1_Phase Contrast_001.png", "Analyze the cell states in this image.", "Image_Preprocessor_Tool, Nuclei_Segmenter_Tool, Single_Cell_Cropper_Tool, Cell_State_Analyzer_Tool", "540 cells identified and segmented successfully. Comprehensive analysis of cell states have been performed with visualizations."],
-                    ["Fibroblast Activation Scoring", "examples/A5_02_1_1_Phase Contrast_001.png", "Quantify the activation score of each fibroblast in this image.", "Image_Preprocessor_Tool, Nuclei_Segmenter_Tool, Single_Cell_Cropper_Tool, Cell_State_Analyzer_Tool, Fibroblast_Activation_Scorer_Tool", "Activation scores for all fibroblasts have been computed and normalized based on the reference map."],
+                    ["Cell State Analysis", "examples/A5_02_1_1_Phase Contrast_001.png", "Analyze and visualize cell states in this image.", "Image_Preprocessor_Tool, Nuclei_Segmenter_Tool, Single_Cell_Cropper_Tool, Cell_State_Analyzer_Tool", "Cell states have been analyzed and visualized with clustering results."],
                     ["Pathology Diagnosis", "examples/pathology.jpg", "What are the cell types in this image?", "Generalist_Solution_Generator_Tool, Image_Captioner_Tool, Relevant_Patch_Zoomer_Tool", "Need expert insights."],
                     ["Visual Reasoning", "examples/rotting_kiwi.png", "You are given a 3 x 3 grid in which each cell can contain either no kiwi, one fresh kiwi, or one rotten kiwi. Every minute, any fresh kiwi that is 4-directionally adjacent to a rotten kiwi also becomes rotten. What is the minimum number of minutes that must elapse until no cell has a fresh kiwi?", "Image_Captioner_Tool", "4 minutes"],
                     ["Scientific Research", None, "What are the research trends in tool agents with large language models for scientific discovery? Please consider the latest literature from ArXiv, PubMed, Nature, and news sources.", "ArXiv_Paper_Searcher_Tool, Pubmed_Search_Tool, Nature_News_Fetcher_Tool", "Open-ended question. No reference answer."]

@@ -184,7 +184,7 @@ Please present your analysis in a clear, structured format.
         bioimage_tools = [
             'Nuclei_Segmenter_Tool', 'Cell_Segmenter_Tool', 'Organoid_Segmenter_Tool',
             'Single_Cell_Cropper_Tool',
-            'Cell_State_Analyzer_Tool', 'Fibroblast_Activation_Scorer_Tool',
+            'Cell_State_Analyzer_Tool',
             'Image_Preprocessor_Tool'
         ]
         actions = memory.get_actions()
@@ -295,7 +295,7 @@ Instructions:
    - HIGH Priority: Use these tools FIRST if they are relevant to the query
      * Core tools for bioimage analysis and specialized analysis tools
      * Examples: Image_Preprocessor_Tool, Nuclei_Segmenter_Tool, Cell_Segmenter_Tool, Organoid_Segmenter_Tool,
-                Single_Cell_Cropper_Tool, Cell_State_Analyzer_Tool, Fibroblast_Activation_Scorer_Tool, Analysis_Visualizer_Tool
+                Single_Cell_Cropper_Tool, Cell_State_Analyzer_Tool, Analysis_Visualizer_Tool
    
    - MEDIUM Priority: General-purpose tools (rarely used for bioimage tasks)
    
@@ -329,7 +329,6 @@ Instructions:
    Some tools require other tools to run first:
    - Single_Cell_Cropper_Tool requires Nuclei_Segmenter_Tool, Cell_Segmenter_Tool, or Organoid_Segmenter_Tool
    - Cell_State_Analyzer_Tool requires Single_Cell_Cropper_Tool
-   - Fibroblast_Activation_Scorer_Tool requires Cell_State_Analyzer_Tool (uses h5ad output)
    
    Ensure all dependencies are satisfied before selecting a tool.
 
@@ -475,18 +474,6 @@ Example (do not copy, use only as reference):
         
         # Special case: If this is a fibroblast analysis and cell state analyzer just finished,
         # but activation scorer hasn't run yet, we should continue
-        if (is_fibroblast_query and 
-            "Cell_State_Analyzer_Tool" in finished_tools and 
-            "Fibroblast_Activation_Scorer_Tool" not in finished_tools and
-            "Fibroblast_Activation_Scorer_Tool" in self.available_tools):
-            
-            logger.debug("Fibroblast analysis detected - cell state analyzer finished but activation scorer not run yet")
-            logger.debug("Continuing to activation scorer for complete fibroblast analysis")
-            
-            return MemoryVerification(
-                analysis="Cell state analysis completed successfully. However, the complete fibroblast analysis pipeline requires activation scoring to provide quantitative activation scores. The Fibroblast_Activation_Scorer_Tool is available and should be run to complete the analysis.",
-                stop_signal=False
-            )
 
         prompt_memory_verification = f"""
 Task: Thoroughly evaluate the completeness and accuracy of the memory for fulfilling the given query, considering the potential need for additional tool usage.

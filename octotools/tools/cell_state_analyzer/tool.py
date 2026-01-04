@@ -106,7 +106,7 @@ class CellCropDataset(Dataset):
 
 class DinoV3Projector(nn.Module):
     """DINOv3 model with projection head for contrastive learning."""
-    def __init__(self, backbone_name="dinov3_vitb16", proj_dim=256):
+    def __init__(self, backbone_name="dinov3_vits16", proj_dim=256):
         super().__init__()
         
         feat_dim_map = {
@@ -119,11 +119,12 @@ class DinoV3Projector(nn.Module):
         }
         
         # Load DINOv3 backbone from Hugging Face Hub (PyTorch weights file)
-        custom_repo_id = "5xuekun/dinov3_vitb16"
-        model_filename = "dinov3_vitl16_pretrain_lvd1689m-8aa4cbdd.pth"
-        # Use dinov2-large as architecture base since the weights are for ViT-L/16
-        architecture_repo_id = "facebook/dinov2-large"
-        fallback_repo_id = "facebook/dinov2-base"  # Official DINOv2 model as fallback
+        # Using smaller vits16 model (384 dims) to reduce GPU memory usage
+        custom_repo_id = "5xuekun/dinov3_vits16"
+        model_filename = "dinov3_vitb16_pretrain_lvd1689m-73cec8be.pth"
+        # Use dinov2-small as architecture base since the weights are for ViT-S/16 (384 dimensions)
+        architecture_repo_id = "facebook/dinov2-small"
+        fallback_repo_id = "facebook/dinov2-small"  # Official DINOv2-small model as fallback
         
         logger.info(f"Attempting to load DINOv3 model weights from Hugging Face Hub: {custom_repo_id}/{model_filename}")
         
@@ -189,8 +190,12 @@ class DinoV3Projector(nn.Module):
             self.backbone = base_model
             logger.info(f"✅ Successfully loaded DINOv3 model weights from {model_filename}")
             
-            # Update feat_dim for DINOv3 ViT-L/16 (1024 dimensions based on filename)
-            if 'vitl16' in model_filename.lower():
+            # Update feat_dim for DINOv3 ViT-S/16 (384 dimensions)
+            # Note: model filename may say vitb16 but it's actually vits16 based on repo
+            if 'vits16' in backbone_name.lower() or custom_repo_id.endswith('dinov3_vits16'):
+                feat_dim_map[backbone_name] = 384
+                logger.info("Detected DINOv3 ViT-S/16 model (384 dimensions) - using for reduced GPU memory")
+            elif 'vitl16' in model_filename.lower() or custom_repo_id.endswith('dinov3_vitl16'):
                 feat_dim_map[backbone_name] = 1024
                 logger.info("Detected DINOv3 ViT-L/16 model (1024 dimensions)")
             
@@ -208,8 +213,8 @@ class DinoV3Projector(nn.Module):
                     trust_remote_code=True
                 )
                 logger.info(f"✅ Loaded DINOv2 model from Hugging Face Hub: {fallback_repo_id}")
-                # Update feat_dim for DINOv2-base (768 dimensions)
-                feat_dim_map[backbone_name] = 768
+                # Update feat_dim for DINOv2-small (384 dimensions)
+                feat_dim_map[backbone_name] = 384
             except Exception as fallback_e:
                 logger.error(f"Failed to load fallback DINOv2 model: {fallback_e}")
                 raise ValueError(
@@ -220,7 +225,8 @@ class DinoV3Projector(nn.Module):
                 )
         
         # Get feature dimension - use map value as default, will be adjusted if needed
-        feat_dim = feat_dim_map.get(backbone_name, 768)
+        # Default to 384 for vits16 to reduce GPU memory usage
+        feat_dim = feat_dim_map.get(backbone_name, 384)
         
         # Try to infer actual feat_dim from loaded model if available
         if self.backbone is not None:
@@ -562,7 +568,7 @@ class Cell_State_Analyzer_Tool(BaseTool):
         logger.info(f"✅ Loaded {len(train_dataset)} images")
         
         # Initialize model
-        model = DinoV3Projector(backbone_name="dinov3_vitb16", proj_dim=256).to(self.device)
+        model = DinoV3Projector(backbone_name="dinov3_vits16", proj_dim=256).to(self.device)
         
         # Train model
         logger.info("🎯 Starting training...")

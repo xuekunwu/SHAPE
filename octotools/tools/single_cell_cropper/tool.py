@@ -22,9 +22,9 @@ class Single_Cell_Cropper_Tool(BaseTool):
                 "nuclei_mask": "str - Path to the segmentation mask image. Accepts nuclei_mask, cell_mask, or organoid_mask from segmentation tools.",
                 "source_image_id": "str - Optional source image ID for cell tracking (default: extracted from image path).",
                 "group": "str - Optional group/condition label for multi-group analysis (default: 'default').",
-                "min_area": "int - Minimum area threshold for valid objects (default: 50 pixels).",
-                "margin": "int - Margin around each object for cropping (default: 25 pixels).",
-                "output_format": "str - Output format for crops ('tif', 'png', 'jpg', default: 'tif')."
+                "min_area": "int - Minimum area threshold for valid objects (auto-detected from mask type: cell_mask=100, nuclei_mask=50, organoid_mask=200).",
+                "margin": "int - Margin around each object for cropping (auto-detected from mask type: cell_mask=5, nuclei_mask=25, organoid_mask=50).",
+                "output_format": "str - Output format for crops ('tif', 'png', 'jpg', default: 'png')."
             },
             output_type="dict - Contains cropped cell images, metadata, and visualization paths.",
             demo_commands=[
@@ -47,7 +47,7 @@ class Single_Cell_Cropper_Tool(BaseTool):
             }
         )
 
-    def execute(self, original_image, nuclei_mask, source_image_id=None, group="default", min_area=50, margin=25, output_format='png', query_cache_dir=None):
+    def execute(self, original_image, nuclei_mask, source_image_id=None, group="default", min_area=None, margin=None, output_format='png', query_cache_dir=None):
         """
         Execute single-cell/object cropping from segmentation masks.
         
@@ -60,8 +60,8 @@ class Single_Cell_Cropper_Tool(BaseTool):
             nuclei_mask: Path to segmentation mask (accepts nuclei_mask, cell_mask, or organoid_mask)
             source_image_id: Optional source image ID for tracking (default: extracted from path)
             group: Optional group/condition label (default: 'default')
-            min_area: Minimum area threshold for valid objects (default: 50 pixels)
-            margin: Margin around each object for cropping (default: 25 pixels)
+            min_area: Minimum area threshold for valid objects (default: auto-detected based on mask type)
+            margin: Margin around each object for cropping (default: auto-detected based on mask type)
             output_format: Output image format ('png', 'tif', 'jpg')
             query_cache_dir: Directory for caching results
             
@@ -69,6 +69,41 @@ class Single_Cell_Cropper_Tool(BaseTool):
             dict: Cropping results with cell/object crops, CellCrop objects, and metadata
         """
         try:
+            # Auto-detect mask type from filename and set default parameters if not provided
+            mask_filename_lower = os.path.basename(nuclei_mask).lower()
+            auto_detected = False
+            
+            if min_area is None or margin is None:
+                if "cell_mask" in mask_filename_lower:
+                    # Cell mask: min_area=100, margin=5
+                    auto_min_area = 100
+                    auto_margin = 5
+                    auto_detected = True
+                    print(f"Auto-detected cell_mask - using min_area={auto_min_area}, margin={auto_margin}")
+                elif "organoid_mask" in mask_filename_lower:
+                    # Organoid mask: min_area=200, margin=50
+                    auto_min_area = 200
+                    auto_margin = 50
+                    auto_detected = True
+                    print(f"Auto-detected organoid_mask - using min_area={auto_min_area}, margin={auto_margin}")
+                elif "nuclei_mask" in mask_filename_lower:
+                    # Nuclei mask: min_area=50, margin=25
+                    auto_min_area = 50
+                    auto_margin = 25
+                    auto_detected = True
+                    print(f"Auto-detected nuclei_mask - using min_area={auto_min_area}, margin={auto_margin}")
+                else:
+                    # Default to nuclei_mask parameters if cannot detect
+                    auto_min_area = 50
+                    auto_margin = 25
+                    print(f"Could not detect mask type from filename, using default (nuclei_mask) parameters: min_area={auto_min_area}, margin={auto_margin}")
+                
+                # Use auto-detected values if user didn't specify
+                if min_area is None:
+                    min_area = auto_min_area
+                if margin is None:
+                    margin = auto_margin
+            
             # Check if we should use processed image instead of original
             if query_cache_dir and os.path.exists(os.path.join(query_cache_dir, "tool_cache", "query_image_processed.png")):
                 processed_image_path = os.path.join(query_cache_dir, "tool_cache", "query_image_processed.png")
