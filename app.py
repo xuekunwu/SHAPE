@@ -1076,9 +1076,9 @@ class Solver:
             step_data = {"step_count": step_count, "context": context, "sub_goal": sub_goal, "tool_name": tool_name, "time": round(time.time() - self.start_time, 5)}
             save_module_data(QUERY_ID, f"step_{step_count}_action_prediction", step_data)
 
-            # Always normalize tool_name before use
-            if hasattr(self.planner, 'available_tools'):
-                tool_name = normalize_tool_name(tool_name, self.planner.available_tools)
+            # Tool name normalization is already done in Planner.extract_context_subgoal_and_tool()
+            # which calls ResponseParser.parse_next_step() that normalizes the tool name
+            # No need for additional normalization here
 
             # Display the step information
             messages.append(ChatMessage(

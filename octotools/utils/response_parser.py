@@ -199,24 +199,7 @@ class ResponseParser:
     
     @staticmethod
     def _normalize_tool_name(tool_name: str, available_tools: list) -> str:
-        """Normalize tool name to match available tools."""
-        # Strip any error prefix if present
-        clean_name = tool_name
-        if "No matched tool given: " in tool_name:
-            while "No matched tool given: " in clean_name:
-                clean_name = clean_name.split("No matched tool given: ")[-1].strip()
-        
-        # First try exact match (case-insensitive)
-        for tool in available_tools:
-            if tool.lower() == clean_name.lower():
-                return tool
-        
-        # Then try partial match
-        for tool in available_tools:
-            if tool.lower() in clean_name.lower() or clean_name.lower() in tool.lower():
-                return tool
-        
-        # If still no match, return error
-        if 'logger' in globals():
-            logger.warning(f"No match found for '{tool_name}' (cleaned: '{clean_name}')")
-        return "No matched tool given: " + clean_name
+        """Normalize tool name to match available tools. Uses centralized normalize_tool_name function."""
+        # Import centralized normalization function to avoid code duplication
+        from octotools.models.utils import normalize_tool_name
+        return normalize_tool_name(tool_name, available_tools)

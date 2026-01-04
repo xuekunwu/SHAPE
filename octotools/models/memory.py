@@ -1,5 +1,6 @@
 from typing import Dict, Any, List, Union, Optional
 import os
+import uuid
 from octotools.models.utils import sanitize_tool_output_for_llm, get_llm_safe_result, sanitize_paths_in_dict
 
 class Memory:
@@ -8,7 +9,8 @@ class Memory:
     def __init__(self):
         self.query: Optional[str] = None
         self.files: List[Dict[str, str]] = []
-        self.actions: Dict[str, Dict[str, Any]] = {}
+        # Use list instead of dict to avoid key collisions when step_count resets
+        self.actions: List[Dict[str, Any]] = []
         self._init_file_types()
 
     def set_query(self, query: str) -> None:
@@ -68,6 +70,9 @@ class Memory:
         # Sanitize result to separate summary (LLM-safe) from artifacts (file paths)
         sanitized = sanitize_tool_output_for_llm(result)
         action = {
+            'step_count': step_count,  # Store step_count in action for reference
+            'step_name': f"Action Step {step_count}",  # Keep for backward compatibility if needed
+            'step_id': f"step_{step_count}_{uuid.uuid4().hex[:8]}",  # Unique identifier
             'tool_name': tool_name,
             'sub_goal': sub_goal,
             'command': command,
@@ -75,8 +80,8 @@ class Memory:
             'result_summary': sanitized['summary'],  # LLM-safe summary only
             'artifacts': sanitized['artifacts']  # File paths for executor/cache
         }
-        step_name = f"Action Step {step_count}"
-        self.actions[step_name] = action
+        # Append to list to avoid key collisions
+        self.actions.append(action)
 
     def get_query(self) -> Optional[str]:
         return self.query
@@ -95,7 +100,8 @@ class Memory:
         Returns:
             List of action dictionaries
         """
-        actions = list(self.actions.values())
+        # Actions are now stored in a list, no need to convert from dict
+        actions = self.actions
         if llm_safe:
             # Return LLM-safe version with only summaries, no file paths
             safe_actions = []

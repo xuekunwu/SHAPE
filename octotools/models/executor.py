@@ -162,8 +162,13 @@ else:
         
         # Special handling for Analysis_Visualizer_Tool to use Cell_State_Analyzer_Tool results
         if tool_name == "Analysis_Visualizer_Tool" and previous_outputs:
-            # Check if we have Cell_State_Analyzer_Tool output
-            if 'adata_path' in previous_outputs or 'analysis_type' in previous_outputs:
+            # Robust check: verify we have cell state analysis output
+            has_adata_path = 'adata_path' in previous_outputs and previous_outputs.get('adata_path')
+            has_analysis_type = previous_outputs.get('analysis_type') == 'cell_state_analysis'
+            has_cluster_key = 'cluster_key' in previous_outputs
+            
+            # Only proceed if we have the required fields
+            if has_adata_path or (has_analysis_type and has_cluster_key):
                 adata_path = previous_outputs.get('adata_path', '')
                 cluster_key = previous_outputs.get('cluster_key', 'leiden_0.5')
                 cluster_resolution = previous_outputs.get('cluster_resolution', 0.5)
@@ -201,9 +206,15 @@ execution = tool.execute(
     group_column='{group_col}',
     output_dir='output_visualizations/cell_state_analysis',
     figure_size=(10, 6),
-    dpi=300
+                    dpi=300
 )"""
                 )
+            else:
+                # Fallback: Let LLM generate command if fields are missing
+                logger.warning(f"Analysis_Visualizer_Tool special handling skipped: missing required fields. "
+                             f"Has adata_path: {has_adata_path}, has analysis_type: {has_analysis_type}, "
+                             f"has cluster_key: {has_cluster_key}. Falling back to standard command generation.")
+                # Continue to standard command generation below
         
         # Special handling for Single_Cell_Cropper_Tool to use mask from segmentation tools
         # Supports masks from Nuclei_Segmenter_Tool, Cell_Segmenter_Tool, and Organoid_Segmenter_Tool
