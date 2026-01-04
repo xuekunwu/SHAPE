@@ -119,12 +119,12 @@ class DinoV3Projector(nn.Module):
         }
         
         # Load DINOv3 backbone from Hugging Face Hub (PyTorch weights file)
-        # Model filename indicates vitb16 (ViT-B/16, 768 dimensions)
+        # Using dinov3-small (ViT-S/16, 384 dimensions)
         custom_repo_id = "5xuekun/dinov3_vits16"
         model_filename = "dinov3_vitb16_pretrain_lvd1689m-73cec8be.pth"
-        # Use dinov2-base architecture since the weights are for ViT-B/16 (768 dimensions)
-        architecture_repo_id = "facebook/dinov2-base"
-        fallback_repo_id = "facebook/dinov2-base"  # Official DINOv2-base model as fallback
+        # Use dinov2-small architecture for dinov3-small (ViT-S/16, 384 dimensions)
+        architecture_repo_id = "facebook/dinov2-small"
+        fallback_repo_id = "facebook/dinov2-small"  # Official DINOv2-small model as fallback
         
         logger.info(f"Attempting to load DINOv3 model weights from Hugging Face Hub: {custom_repo_id}/{model_filename}")
         
@@ -147,7 +147,7 @@ class DinoV3Projector(nn.Module):
             logger.info(f"DINOv3 weights downloaded to: {weights_path}")
             
             # Load DINOv3 weights into DINOv2 architecture (same ViT architecture)
-            # Use dinov2-base architecture since the weights are for ViT-B/16 (768 dimensions)
+            # Use dinov2-small architecture for dinov3-small (ViT-S/16, 384 dimensions)
             logger.info(f"Loading DINOv3 weights into {architecture_repo_id} architecture...")
             base_model = AutoModel.from_pretrained(
                 architecture_repo_id,
@@ -198,13 +198,13 @@ class DinoV3Projector(nn.Module):
             logger.info(f"✅ Successfully loaded DINOv3 model weights from {model_filename}")
             
             # Update feat_dim based on model architecture
-            # Model filename indicates vitb16 (ViT-B/16, 768 dimensions)
-            if 'vitb16' in model_filename.lower():
-                feat_dim_map[backbone_name] = 768
-                logger.info("Detected DINOv3 ViT-B/16 model (768 dimensions) - weights loaded into dinov2-base architecture")
-            elif 'vits16' in backbone_name.lower() or custom_repo_id.endswith('dinov3_vits16'):
+            # Using dinov3-small (ViT-S/16, 384 dimensions) as specified
+            if 'vits16' in backbone_name.lower() or custom_repo_id.endswith('dinov3_vits16'):
                 feat_dim_map[backbone_name] = 384
-                logger.info("Detected DINOv3 ViT-S/16 model (384 dimensions)")
+                logger.info("Detected DINOv3 ViT-S/16 model (384 dimensions) - dinov3-small loaded into dinov2-small architecture")
+            elif 'vitb16' in model_filename.lower():
+                feat_dim_map[backbone_name] = 768
+                logger.info("Detected DINOv3 ViT-B/16 model (768 dimensions)")
             elif 'vitl16' in model_filename.lower() or custom_repo_id.endswith('dinov3_vitl16'):
                 feat_dim_map[backbone_name] = 1024
                 logger.info("Detected DINOv3 ViT-L/16 model (1024 dimensions)")
@@ -223,8 +223,8 @@ class DinoV3Projector(nn.Module):
                     trust_remote_code=True
                 )
                 logger.info(f"✅ Loaded DINOv2 model from Hugging Face Hub: {fallback_repo_id}")
-                # Update feat_dim for DINOv2-base (768 dimensions)
-                feat_dim_map[backbone_name] = 768
+                # Update feat_dim for DINOv2-small (384 dimensions)
+                feat_dim_map[backbone_name] = 384
             except Exception as fallback_e:
                 logger.error(f"Failed to load fallback DINOv2 model: {fallback_e}")
                 raise ValueError(
