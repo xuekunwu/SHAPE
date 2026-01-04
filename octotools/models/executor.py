@@ -318,6 +318,8 @@ execution = tool.execute(
                 pass
         
         # For other tools, use the standard prompt
+        # Include query_cache_dir in context for tools that need it
+        query_cache_dir_str = self.query_cache_dir.replace("\\", "\\\\")
         prompt_generate_tool_command = f"""
 Task: Generate a precise command to execute the selected tool based on the given information.
 
@@ -332,6 +334,7 @@ Sub-Goal: {sub_goal}
 Selected Tool: {tool_name}
 Tool Metadata: {tool_metadata}
 Previous Tool Outputs (summary only, file paths available for tool chaining): {previous_outputs_for_llm}
+Query Cache Directory: {query_cache_dir_str} (use this for query_cache_dir parameter if the tool accepts it)
 
 IMPORTANT: When the tool requires an image parameter, you MUST use the exact image path provided above: "{safe_path}"
 {"IMPORTANT: Nuclei_Segmenter_Tool, Cell_Segmenter_Tool, Organoid_Segmenter_Tool, and Image_Preprocessor_Tool accept the image_id parameter for consistent file naming and tracking. Include image_id parameter when available for these tools." if image_id else ""}
