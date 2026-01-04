@@ -843,17 +843,20 @@ class Solver:
             if "per_image" in result:
                 per_image = result["per_image"]
                 if isinstance(per_image, list) and len(per_image) > 0:
-                    image_summaries = []
-                    for i, img_result in enumerate(per_image):
+                    # For multi-image processing, simplify summary: just show total cell counts
+                    total_cells = 0
+                    error_count = 0
+                    for img_result in per_image:
                         if isinstance(img_result, dict):
-                            if "summary" in img_result:
-                                image_summaries.append(f"Image {i+1}: {img_result['summary']}")
-                            elif "cell_count" in img_result:
-                                cell_count = img_result['cell_count']
-                                image_summaries.append(f"Image {i+1}: {cell_count} cells")
+                            if "cell_count" in img_result:
+                                total_cells += img_result['cell_count']
                             elif "error" in img_result:
-                                image_summaries.append(f"Image {i+1}: Error")
-                    if image_summaries:
+                                error_count += 1
+                    if total_cells > 0:
+                        summary_parts.append(f"Processed {len(per_image)} image(s): {total_cells} total cells")
+                    elif error_count > 0:
+                        summary_parts.append(f"Processed {len(per_image)} image(s): {error_count} error(s)")
+                    else:
                         summary_parts.append(f"Processed {len(per_image)} image(s)")
             return "; ".join(summary_parts) if summary_parts else "Tool executed successfully"
         else:

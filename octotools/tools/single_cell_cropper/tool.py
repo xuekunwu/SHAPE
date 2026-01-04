@@ -504,12 +504,13 @@ class Single_Cell_Cropper_Tool(BaseTool):
             ax1_container = fig.add_subplot(gs[0, 0])
             ax2 = fig.add_subplot(gs[0, 1])
             
-            # 1. Sample Crops Grid (using a robust sub-gridspec)
-            ax1_container.set_title("Exemplary Cell Crops", fontsize=32, fontweight='bold', pad=20)
+            # 1. Sample Crops Grid (show 5 random crops)
+            ax1_container.set_title("Sample Cell Crops (5 random)", fontsize=32, fontweight='bold', pad=20)
             ax1_container.axis('off')
             if cell_crops:
-                gs_crops = ax1_container.get_subplotspec().subgridspec(4, 4, wspace=0.05, hspace=0.05)
-                sample_indices = np.random.choice(len(cell_crops), size=min(16, len(cell_crops)), replace=False)
+                num_samples = min(5, len(cell_crops))
+                gs_crops = ax1_container.get_subplotspec().subgridspec(1, num_samples, wspace=0.05, hspace=0.05)
+                sample_indices = np.random.choice(len(cell_crops), size=num_samples, replace=False)
                 for i, idx in enumerate(sample_indices):
                     ax_grid = fig.add_subplot(gs_crops[i])
                     try:
