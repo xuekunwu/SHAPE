@@ -2215,17 +2215,33 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
 
 def main(args):
     #################### Gradio Interface ####################
-    # Gradient color theme: soft cyan-blue to pink gradient inspired colors
-    # Primary color: soft purple-blue (#9B87F5) from the gradient
-    gradient_theme = gr.themes.Soft(
-        primary_hue="purple",
-    ).set(
-        button_primary_background_fill="#9B87F5",
-        button_primary_background_fill_hover="#8B77E5",
-        button_primary_text_color="#ffffff",
-    )
-    
-    with gr.Blocks(theme=gradient_theme, title="SHAPE - Single-Cell Bioimage Analysis") as demo:
+    with gr.Blocks(title="SHAPE - Single-Cell Bioimage Analysis") as demo:
+        # Custom CSS for gradient buttons and background colors
+        demo.css = """
+        /* Gradient buttons: only for Add Group and Ask Question buttons using elem_classes */
+        .gradient-button-primary button,
+        .gradient-button-primary button:not(:hover) {
+            background: linear-gradient(135deg, #00BFFF 0%, #9B87F5 50%, #FFB6C1 100%) !important;
+            border: none !important;
+            color: #ffffff !important;
+        }
+        .gradient-button-primary button:hover {
+            background: linear-gradient(135deg, #0099CC 0%, #8B77E5 50%, #FFA0B0 100%) !important;
+            border: none !important;
+            color: #ffffff !important;
+        }
+        /* Background colors for Conversation, Visual Outputs, and Available Tools */
+        .chatbot {
+            background-color: #f5f5f5 !important;
+        }
+        .gallery {
+            background-color: #f5f5f5 !important;
+        }
+        .accordion {
+            background-color: #f5f5f5 !important;
+        }
+        """
+        
         # Theming https://www.gradio.app/guides/theming-guide
         
         gr.Markdown("# Chat with SHAPE: A self-supervised morphology agent for cellular phenotype")  # Title
@@ -2257,10 +2273,10 @@ def main(args):
                 user_image = gr.File(label="Upload Images", file_count="multiple", type="filepath")
                 group_table = gr.Dataframe(headers=["image_name", "group"], row_count=0, wrap=True, interactive=True, visible=True)
                 group_prompt = gr.Markdown("**Upload Status**: No uploads yet")
-                upload_btn = gr.Button("Add Group(s) to Image(s)", variant="primary")
+                upload_btn = gr.Button("Add Group(s) to Image(s)", variant="primary", elem_classes="gradient-button-primary")
                 gr.Markdown("### ❓ Ask Question")
                 user_query = gr.Textbox(label="Ask about your groups", placeholder="e.g., Compare cell counts between control and drugA", lines=5)
-                run_button = gr.Button("🚀 Ask Question", variant="primary", size="lg")
+                run_button = gr.Button("🚀 Ask Question", variant="primary", size="lg", elem_classes="gradient-button-primary")
                 progress_md = gr.Markdown("**Progress**: Ready")
                 conversation_state = gr.State(AgentState())
             with gr.Column(scale=1):
@@ -2292,13 +2308,13 @@ def main(args):
                     selected_tools = [tool.strip() for tool in tools_str.split(',')]
                     selected = [tool for tool in selected_tools if tool in get_available_tools()]
                     return img, q
-                gr.Markdown("#### 🧬 Analysis Examples")
                 gr.Examples(
                     examples=examples,
                     inputs=[gr.Textbox(label="Category", visible=False), user_image, user_query, gr.Textbox(label="Select Tools", visible=False), gr.Textbox(label="Reference Answer", visible=False)],
                     outputs=[user_image, user_query],
                     fn=distribute_tools,
-                    cache_examples=False
+                    cache_examples=False,
+                    label=""
                 )
         # Button click event
         user_image.change(
