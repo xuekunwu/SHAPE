@@ -2232,8 +2232,6 @@ def main(args):
         background_fill_secondary_dark="#1d1d1f",
         border_color_accent="#d2d2d7",
         border_color_accent_dark="#424245",
-        border_radius="12px",
-        border_width="1px",
         button_primary_background_fill="#0071e3",
         button_primary_background_fill_hover="#0077ed",
         button_primary_text_color="#ffffff",
@@ -2243,8 +2241,6 @@ def main(args):
         input_background_fill="#ffffff",
         input_background_fill_dark="#1d1d1f",
         input_border_color="#d2d2d7",
-        input_border_width="1px",
-        input_border_radius="8px",
         shadow_drop="0 2px 8px rgba(0,0,0,0.08)",
         shadow_drop_lg="0 4px 16px rgba(0,0,0,0.12)",
     )
