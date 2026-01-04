@@ -305,10 +305,12 @@ execution = tool.execute(
                     source_tool = "Cell_Segmenter_Tool"
                 elif 'organoid_mask' in mask_path:
                     source_tool = "Organoid_Segmenter_Tool"
+                # Include query_cache_dir to ensure metadata files are saved in the correct location
+                query_cache_dir_str = self.query_cache_dir.replace("\\", "\\\\")
                 return ToolCommand(
                     analysis=f"Using the mask from {source_tool} for single cell cropping",
                     explanation=f"Using the mask path '{mask_path}' from the previous {source_tool} step",
-                    command=f"""execution = tool.execute(original_image="{actual_image_path}", nuclei_mask="{mask_path}", min_area=50, margin=25)"""
+                    command=f"""execution = tool.execute(original_image="{actual_image_path}", nuclei_mask="{mask_path}", min_area=50, margin=25, query_cache_dir=r'{query_cache_dir_str}')"""
                 )
             else:
                 logger.debug(f"No mask found in previous outputs: {previous_outputs['visual_outputs']}")
