@@ -335,12 +335,31 @@ execution = tool.execute(
         
         # Special handling for Single_Cell_Cropper_Tool to use mask from segmentation tools
         # Supports masks from Nuclei_Segmenter_Tool, Cell_Segmenter_Tool, and Organoid_Segmenter_Tool
-        if tool_name == "Single_Cell_Cropper_Tool" and previous_outputs and 'visual_outputs' in previous_outputs:
-            # Find mask file from previous outputs (support nuclei_mask, cell_mask, organoid_mask)
+        if tool_name == "Single_Cell_Cropper_Tool" and previous_outputs:
+            # Handle per_image structure: find the mask for the current image by image_id
             mask_path = None
-            mask_type = None
-            logger.debug(f"Looking for mask in previous outputs: {previous_outputs['visual_outputs']}")
-            for output_path in previous_outputs['visual_outputs']:
+            visual_outputs_list = []
+            
+            # Extract visual_outputs from previous_outputs (handle per_image structure)
+            if 'per_image' in previous_outputs:
+                # If previous_outputs has per_image structure, find the matching image by image_id
+                per_image_list = previous_outputs['per_image']
+                for img_result in per_image_list:
+                    if isinstance(img_result, dict) and 'visual_outputs' in img_result:
+                        # Direct match by image_id if provided
+                        if image_id and img_result.get('image_id') == image_id:
+                            visual_outputs_list = img_result['visual_outputs']
+                            break
+                # If no match found and image_id not provided, use first result as fallback
+                if not visual_outputs_list and per_image_list:
+                    visual_outputs_list = per_image_list[0].get('visual_outputs', [])
+            elif 'visual_outputs' in previous_outputs:
+                # Direct visual_outputs (single image case)
+                visual_outputs_list = previous_outputs['visual_outputs']
+            
+            # Find mask file from visual_outputs
+            logger.debug(f"Looking for mask in visual_outputs: {visual_outputs_list}")
+            for output_path in visual_outputs_list:
                 logger.debug(f"Checking output path: {output_path}")
                 # Check for various mask types (support .png, .tif, .tiff formats)
                 # Exclude visualization files (those with 'viz' in the name)
@@ -355,36 +374,43 @@ execution = tool.execute(
                 if is_mask_file:
                     if 'nuclei_mask' in output_path_lower:
                         mask_path = output_path
-                        mask_type = "nuclei_mask"
                         logger.debug(f"Found nuclei mask path: {mask_path}")
                         break
                     elif 'cell_mask' in output_path_lower:
                         mask_path = output_path
-                        mask_type = "nuclei_mask"  # Use same parameter name for compatibility
                         logger.debug(f"Found cell mask path: {mask_path}")
                         break
                     elif 'organoid_mask' in output_path_lower:
                         mask_path = output_path
-                        mask_type = "nuclei_mask"  # Use same parameter name for compatibility
                         logger.debug(f"Found organoid mask path: {mask_path}")
                         break
             
             if mask_path:
                 source_tool = "segmentation tool"
-                if 'nuclei_mask' in mask_path:
+                if 'nuclei_mask' in mask_path.lower():
                     source_tool = "Nuclei_Segmenter_Tool"
-                elif 'cell_mask' in mask_path:
+                elif 'cell_mask' in mask_path.lower():
                     source_tool = "Cell_Segmenter_Tool"
-                elif 'organoid_mask' in mask_path:
+                elif 'organoid_mask' in mask_path.lower():
                     source_tool = "Organoid_Segmenter_Tool"
-                # Include query_cache_dir to ensure metadata files are saved in the correct location
+                
+                # Include query_cache_dir, source_image_id, and group to ensure metadata files are saved correctly
                 # query_cache_dir should be the parent directory (without 'tool_cache')
                 query_cache_dir_str = self.query_cache_dir.replace("\\", "\\\\")
-                logger.info(f"Single_Cell_Cropper_Tool: Using query_cache_dir={self.query_cache_dir} (normalized from executor)")
+                # Extract group from image_id if available (e.g., "Control_7dd4a783..." -> "Control")
+                group = "default"
+                if image_id and '_' in image_id:
+                    group = image_id.split('_')[0]
+                
+                # Use image_id as source_image_id for tracking
+                source_image_id_param = f', source_image_id="{image_id}"' if image_id else ''
+                group_param = f', group="{group}"'
+                
+                logger.info(f"Single_Cell_Cropper_Tool: Using query_cache_dir={self.query_cache_dir}, source_image_id={image_id}, group={group}")
                 return ToolCommand(
                     analysis=f"Using the mask from {source_tool} for single cell cropping",
-                    explanation=f"Using the mask path '{mask_path}' from the previous {source_tool} step",
-                    command=f"""execution = tool.execute(original_image="{actual_image_path}", nuclei_mask="{mask_path}", min_area=50, margin=25, query_cache_dir=r'{query_cache_dir_str}')"""
+                    explanation=f"Using the mask path '{mask_path}' from the previous {source_tool} step (image: {image_id}, group: {group})",
+                    command=f"""execution = tool.execute(original_image="{actual_image_path}", nuclei_mask="{mask_path}", min_area=50, margin=25, query_cache_dir=r'{query_cache_dir_str}'{source_image_id_param}{group_param})"""
                 )
             else:
                 logger.debug(f"No mask found in previous outputs: {previous_outputs['visual_outputs']}")

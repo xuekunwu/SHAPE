@@ -10,6 +10,8 @@ class InputModel(BaseModel):
     margin: int | None = None
     output_format: str | None = None
     query_cache_dir: str | None = None
+    source_image_id: str | None = None
+    group: str | None = None
 
 
 class Adapter(ToolAdapter):
@@ -24,4 +26,6 @@ class Adapter(ToolAdapter):
             margin=args.margin or 25,
             output_format=args.output_format or "png",
             query_cache_dir=args.query_cache_dir,
+            source_image_id=args.source_image_id,
+            group=args.group or "default",
         )

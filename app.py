@@ -1205,14 +1205,14 @@ class Solver:
                 # Use the first image's path and ID for command generation (tool will merge all data internally)
                 first_img_item = image_items[0] if image_items else {}
                 safe_path = first_img_item.get("image_path", "").replace("\\", "\\\\") if first_img_item.get("image_path") else ""
-                image_id = first_img_item.get("image_name") or first_img_item.get("image_id")
-                identifier_for_naming = image_id if image_id else None
+                # Always use image_id (UUID) for consistent tracking
+                image_id = first_img_item.get("image_id")
                 
                 # Generate tool command (tool will automatically merge all metadata from all images)
                 tool_command = self.executor.generate_tool_command(
                     user_query, safe_path, context, sub_goal, tool_name,
                     self.planner.toolbox_metadata[tool_name], self.memory, 
-                    conversation_context=conversation_text, image_id=identifier_for_naming,
+                    conversation_context=conversation_text, image_id=image_id,  # Always use image_id (UUID)
                     current_image_path=first_img_item.get("image_path")
                 )
                 analysis, explanation, command = self.executor.extract_explanation_and_command(tool_command)
@@ -1287,16 +1287,16 @@ class Solver:
                         ))
                         print(f"Reused cached artifact for {tool_name} (key={artifact_key}, source={cache_source})")
                     else:
-                        # Pass image_id and image_name for consistent file naming
+                        # Always use image_id for consistent tracking throughout the pipeline
+                        # image_id is the unique identifier (UUID) generated at upload time
+                        # This ensures consistent matching across all tools
                         image_id = img_item.get("image_id")
-                        image_name = img_item.get("image_name")  # Use original image name if available
-                        # Prefer image_name over image_id for file naming (more readable)
-                        identifier_for_naming = image_name if image_name else image_id
+                        image_name = img_item.get("image_name")  # Keep for reference, but don't use for tool execution
                         tool_command = self.executor.generate_tool_command(
                             user_query, safe_path, context, sub_goal, tool_name,
                             self.planner.toolbox_metadata[tool_name], self.memory, 
-                            conversation_context=conversation_text, image_id=identifier_for_naming,
-                            current_image_path=img_item.get("image_path")  # Pass current image path for matching
+                            conversation_context=conversation_text, image_id=image_id,  # Always use image_id (UUID)
+                            current_image_path=img_item.get("image_path")  # Pass current image path for reference
                         )
                         analysis, explanation, command = self.executor.extract_explanation_and_command(tool_command)
                         result = self.executor.execute_tool_command(tool_name, command)

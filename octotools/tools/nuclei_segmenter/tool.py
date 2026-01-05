@@ -210,6 +210,7 @@ class Nuclei_Segmenter_Tool(BaseTool):
                 "summary": f"{n_nuclei} cells identified and segmented successfully.",
                 "cell_count": n_nuclei,
                 "visual_outputs": [output_path, mask_path],
+                "image_id": image_identifier,  # Add image_id for matching in downstream tools
                 "model_used": f"CellposeModel ({self.model.pretrained_model})",
                 "parameters": {
                     "diameter": diameter,

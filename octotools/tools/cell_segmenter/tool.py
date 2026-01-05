@@ -257,6 +257,7 @@ class Cell_Segmenter_Tool(BaseTool):
                 "summary": f"{n_cells} cells identified and segmented successfully.",
                 "cell_count": n_cells,
                 "visual_outputs": [output_path, mask_path],
+                "image_id": image_identifier,  # Add image_id for matching in downstream tools
                 "model_used": f"CellposeModel ({self.model_type})",
                 "parameters": {
                     "diameter": diameter,
