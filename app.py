@@ -40,7 +40,12 @@ _AVAILABLE_TOOLS_CACHE = None
 
 # All tools process all images uniformly (batch processing style)
 # Each image is processed independently with group+image_name labeling
-TOOLS_THAT_MERGE_ALL_IMAGES = []  # Empty: no special handling, all tools process all images
+# Tools that merge all images should NOT be executed in per_image loop
+# These tools should execute once, merging all images' data together
+TOOLS_THAT_MERGE_ALL_IMAGES = [
+    "Cell_State_Analyzer_Tool",  # Merges all cells from all images for unified analysis
+    "Analysis_Visualizer_Tool",  # Visualizes results from Cell_State_Analyzer_Tool (merged data)
+]
 
 def get_available_tools() -> List[str]:
     """Dynamically discover all available tools from octotools/tools directory."""
@@ -1190,94 +1195,148 @@ class Solver:
             # Generate conversation_text once (same for all images in this step)
             conversation_text = self._format_conversation_history()
             
-            # Debug: Log image processing info
-            print(f"🔍 Processing {len(image_items)} image(s) with {tool_name} (batch processing mode)")
+            # Check if this tool should merge all images (execute once, not per image)
+            should_merge_all_images = tool_name in TOOLS_THAT_MERGE_ALL_IMAGES
             
-            for img_idx, img_item in enumerate(image_items):
-                print(f"   Processing image {img_idx + 1}/{len(image_items)}: {img_item.get('image_id', 'unknown')} (group: {img_item.get('group', 'unknown')})")
-                safe_path = img_item["image_path"].replace("\\", "\\\\") if img_item.get("image_path") else None
-                artifact_key = make_artifact_key(tool_name, safe_path, context, sub_goal, image_id=img_item.get("image_id"))
+            if should_merge_all_images:
+                # For tools that merge all images, execute once outside the loop
+                print(f"🔍 Processing {len(image_items)} image(s) with {tool_name} (merge-all mode - single execution)")
                 
-                # Get image fingerprint for cross-session caching
-                image_fingerprint = img_item.get("fingerprint") or (image_context.fingerprint if image_context else None)
+                # Use the first image's path and ID for command generation (tool will merge all data internally)
+                first_img_item = image_items[0] if image_items else {}
+                safe_path = first_img_item.get("image_path", "").replace("\\", "\\\\") if first_img_item.get("image_path") else ""
+                image_id = first_img_item.get("image_name") or first_img_item.get("image_id")
+                identifier_for_naming = image_id if image_id else None
                 
-                # Check cache (both session and global cross-session)
-                cached_artifact = get_cached_artifact(self.agent_state, group_name, tool_name, artifact_key, image_fingerprint)
-                execution_failed = False
-                error_msg = None
-
-                if cached_artifact:
-                    result = cached_artifact.get("result")
-                    analysis = "Cached result reused"
-                    explanation = "Found matching artifact in session or previous conversation; skipping execution."
-                    command = "execution = 'cached_artifact'"
-                    cache_source = "previous conversation" if image_fingerprint and cached_artifact.get("fingerprint_key") else "current session"
-                    
-                    # Create a ToolCommand object for memory consistency
-                    from octotools.models.formatters import ToolCommand
-                    if tool_command is None:  # Only create once if multiple images
-                        tool_command = ToolCommand(
-                            analysis=analysis,
-                            explanation=explanation,
-                            command=command
-                        )
-                    
+                # Generate tool command (tool will automatically merge all metadata from all images)
+                tool_command = self.executor.generate_tool_command(
+                    user_query, safe_path, context, sub_goal, tool_name,
+                    self.planner.toolbox_metadata[tool_name], self.memory, 
+                    conversation_context=conversation_text, image_id=identifier_for_naming,
+                    current_image_path=first_img_item.get("image_path")
+                )
+                analysis, explanation, command = self.executor.extract_explanation_and_command(tool_command)
+                
+                # Execute once (tool will merge all images' data internally)
+                result = self.executor.execute_tool_command(tool_name, command)
+                result = make_json_serializable(result)
+                
+                # Check if tool execution failed
+                execution_failed, error_msg = _check_tool_execution_error(result, tool_name)
+                
+                if execution_failed:
+                    tool_execution_failed = True
+                    if tool_name not in failed_tool_names:
+                        failed_tool_names.append(tool_name)
                     messages.append(ChatMessage(
                         role="assistant",
-                        content=f"♻️ Reusing cached {tool_name} result for image `{img_item.get('image_id')}` (from {cache_source}).",
-                        metadata={"title": f"### 🛠️ Step {step_count}: Cached Execution ({tool_name})"}
+                        content=f"⚠️ **Tool Execution Failed:** {error_msg}\n\n**Tool:** `{tool_name}`\n**Command:**\n```python\n{command}\n```",
+                        metadata={"title": f"### ❌ Step {step_count}: Tool Execution Failed ({tool_name})"}
                     ))
-                    print(f"Reused cached artifact for {tool_name} (key={artifact_key}, source={cache_source})")
+                    progress_msg_failed = f"**Progress**: Step {step_count}/{self.max_steps} ❌ (Execution failed)"
+                    yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, progress_msg_failed
+                    result = {"error": error_msg, "result": None}
+                    print(f"⚠️ Tool '{tool_name}' failed (merge-all mode)")
                 else:
-                    # Pass image_id and image_name for consistent file naming
-                    image_id = img_item.get("image_id")
-                    image_name = img_item.get("image_name")  # Use original image name if available
-                    # Prefer image_name over image_id for file naming (more readable)
-                    identifier_for_naming = image_name if image_name else image_id
-                    tool_command = self.executor.generate_tool_command(
-                        user_query, safe_path, context, sub_goal, tool_name,
-                        self.planner.toolbox_metadata[tool_name], self.memory, 
-                        conversation_context=conversation_text, image_id=identifier_for_naming
-                    )
-                    analysis, explanation, command = self.executor.extract_explanation_and_command(tool_command)
-                    result = self.executor.execute_tool_command(tool_name, command)
-                    result = make_json_serializable(result)
+                    print(f"Tool '{tool_name}' executed successfully (merge-all mode, merged {len(image_items)} images)")
+                    # Track successful tool execution
+                    if tool_name not in successful_tools:
+                        successful_tools.add(tool_name)
+                
+                # For merge-all tools, result is already the merged result (not per_image structure)
+                # No need to wrap in per_image
+                
+            else:
+                # For tools that process each image separately, execute in loop
+                # Debug: Log image processing info
+                print(f"🔍 Processing {len(image_items)} image(s) with {tool_name} (batch processing mode)")
+                
+                for img_idx, img_item in enumerate(image_items):
+                    print(f"   Processing image {img_idx + 1}/{len(image_items)}: {img_item.get('image_id', 'unknown')} (group: {img_item.get('group', 'unknown')})")
+                    safe_path = img_item["image_path"].replace("\\", "\\\\") if img_item.get("image_path") else None
+                    artifact_key = make_artifact_key(tool_name, safe_path, context, sub_goal, image_id=img_item.get("image_id"))
                     
-                    # Check if tool execution failed
-                    execution_failed, error_msg = _check_tool_execution_error(result, tool_name)
+                    # Get image fingerprint for cross-session caching
+                    image_fingerprint = img_item.get("fingerprint") or (image_context.fingerprint if image_context else None)
                     
-                    if execution_failed:
-                        tool_execution_failed = True
-                        if tool_name not in failed_tool_names:
-                            failed_tool_names.append(tool_name)
+                    # Check cache (both session and global cross-session)
+                    cached_artifact = get_cached_artifact(self.agent_state, group_name, tool_name, artifact_key, image_fingerprint)
+                    execution_failed = False
+                    error_msg = None
+
+                    if cached_artifact:
+                        result = cached_artifact.get("result")
+                        analysis = "Cached result reused"
+                        explanation = "Found matching artifact in session or previous conversation; skipping execution."
+                        command = "execution = 'cached_artifact'"
+                        cache_source = "previous conversation" if image_fingerprint and cached_artifact.get("fingerprint_key") else "current session"
+                        
+                        # Create a ToolCommand object for memory consistency
+                        from octotools.models.formatters import ToolCommand
+                        if tool_command is None:  # Only create once if multiple images
+                            tool_command = ToolCommand(
+                                analysis=analysis,
+                                explanation=explanation,
+                                command=command
+                            )
+                        
                         messages.append(ChatMessage(
                             role="assistant",
-                            content=f"⚠️ **Tool Execution Failed for image {img_idx + 1}/{len(image_items)}:** {error_msg}\n\n**Tool:** `{tool_name}`\n**Image ID:** `{img_item.get('image_id')}`\n**Command:**\n```python\n{command}\n```",
-                            metadata={"title": f"### ❌ Step {step_count}: Tool Execution Failed ({tool_name}) - Image {img_idx + 1}"}
+                            content=f"♻️ Reusing cached {tool_name} result for image `{img_item.get('image_id')}` (from {cache_source}).",
+                            metadata={"title": f"### 🛠️ Step {step_count}: Cached Execution ({tool_name})"}
                         ))
-                        
-                        # Simple progress message for execution failure (but continue processing other images)
-                        progress_msg_failed = f"**Progress**: Step {step_count}/{self.max_steps} ❌ (Image {img_idx + 1}/{len(image_items)} failed, continuing...)"
-                        yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, progress_msg_failed
-                        # Store the error result
-                        store_artifact(self.agent_state, group_name, tool_name, artifact_key, {"error": error_msg, "result": None}, image_fingerprint)
-                        result = {"error": error_msg, "result": None}
-                        print(f"⚠️ Tool '{tool_name}' failed for image {img_idx + 1}/{len(image_items)} ({img_item.get('image_id')}), but continuing to next image...")
+                        print(f"Reused cached artifact for {tool_name} (key={artifact_key}, source={cache_source})")
                     else:
-                        store_artifact(self.agent_state, group_name, tool_name, artifact_key, result, image_fingerprint)
-                        print(f"Tool '{tool_name}' result for image {img_item.get('image_id')}: {result}")
-                        # Track successful tool execution
-                        if tool_name not in successful_tools:
-                            successful_tools.add(tool_name)
+                        # Pass image_id and image_name for consistent file naming
+                        image_id = img_item.get("image_id")
+                        image_name = img_item.get("image_name")  # Use original image name if available
+                        # Prefer image_name over image_id for file naming (more readable)
+                        identifier_for_naming = image_name if image_name else image_id
+                        tool_command = self.executor.generate_tool_command(
+                            user_query, safe_path, context, sub_goal, tool_name,
+                            self.planner.toolbox_metadata[tool_name], self.memory, 
+                            conversation_context=conversation_text, image_id=identifier_for_naming,
+                            current_image_path=img_item.get("image_path")  # Pass current image path for matching
+                        )
+                        analysis, explanation, command = self.executor.extract_explanation_and_command(tool_command)
+                        result = self.executor.execute_tool_command(tool_name, command)
+                        result = make_json_serializable(result)
+                        
+                        # Check if tool execution failed
+                        execution_failed, error_msg = _check_tool_execution_error(result, tool_name)
+                        
+                        if execution_failed:
+                            tool_execution_failed = True
+                            if tool_name not in failed_tool_names:
+                                failed_tool_names.append(tool_name)
+                            messages.append(ChatMessage(
+                                role="assistant",
+                                content=f"⚠️ **Tool Execution Failed for image {img_idx + 1}/{len(image_items)}:** {error_msg}\n\n**Tool:** `{tool_name}`\n**Image ID:** `{img_item.get('image_id')}`\n**Command:**\n```python\n{command}\n```",
+                                metadata={"title": f"### ❌ Step {step_count}: Tool Execution Failed ({tool_name}) - Image {img_idx + 1}"}
+                            ))
+                            
+                            # Simple progress message for execution failure (but continue processing other images)
+                            progress_msg_failed = f"**Progress**: Step {step_count}/{self.max_steps} ❌ (Image {img_idx + 1}/{len(image_items)} failed, continuing...)"
+                            yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, progress_msg_failed
+                            # Store the error result
+                            store_artifact(self.agent_state, group_name, tool_name, artifact_key, {"error": error_msg, "result": None}, image_fingerprint)
+                            result = {"error": error_msg, "result": None}
+                            print(f"⚠️ Tool '{tool_name}' failed for image {img_idx + 1}/{len(image_items)} ({img_item.get('image_id')}), but continuing to next image...")
+                        else:
+                            store_artifact(self.agent_state, group_name, tool_name, artifact_key, result, image_fingerprint)
+                            print(f"Tool '{tool_name}' result for image {img_item.get('image_id')}: {result}")
+                            # Track successful tool execution
+                            if tool_name not in successful_tools:
+                                successful_tools.add(tool_name)
                     
-                results_per_image.append(result)
+                    results_per_image.append(result)
 
-            # For downstream steps, if only one image use its result, else aggregate
-            # All tools return per_image structure for batch processing consistency
-            if len(results_per_image) == 1:
-                result = results_per_image[0]
-            else:
-                result = {"per_image": results_per_image}
+                # For downstream steps, if only one image use its result, else aggregate
+                # All tools return per_image structure for batch processing consistency
+                if len(results_per_image) == 1:
+                    result = results_per_image[0]
+                else:
+                    result = {"per_image": results_per_image}
             
             # Generate dynamic visual description based on tool and results
             visual_description = self.generate_visual_description(tool_name, result, self.visual_outputs_for_gradio)

@@ -7,6 +7,8 @@ class InputModel(BaseModel):
     image: str = Field(..., description="Path to input image")
     diameter: float | None = None
     flow_threshold: float | None = None
+    query_cache_dir: str | None = None
+    image_id: str | None = None
 
 
 class Adapter(ToolAdapter):
@@ -18,4 +20,6 @@ class Adapter(ToolAdapter):
             image=args.image,
             diameter=args.diameter if args.diameter is not None else 30,
             flow_threshold=args.flow_threshold if args.flow_threshold is not None else 0.4,
+            query_cache_dir=args.query_cache_dir,
+            image_id=args.image_id,
         )

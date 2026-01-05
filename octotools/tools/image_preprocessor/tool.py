@@ -284,17 +284,18 @@ class Image_Preprocessor_Tool(BaseTool):
                 "visual_outputs": [
                     p for p in [comparison_plot, final_output_path if output_format in ("png", "jpg", "jpeg") else None] if p is not None
                 ],
+                "image_id": image_identifier,  # Add image_id for matching in downstream tools
+                "image_identifier": image_identifier,  # Alias for compatibility
             }
             all_results.append(result)
         
-        # Return single result if only one image, otherwise return first result (for backward compatibility)
-        # Note: Multiple images support can be added later if needed
+        # Return single result if only one image, otherwise return per_image structure
+        # This ensures each image has its own processed_image_path for downstream tools
         if len(all_results) == 1:
             return all_results[0]
         else:
-            # For multiple images, return the first one (maintain backward compatibility)
-            # Future: could return aggregated result
-            return all_results[0]
+            # For multiple images, return per_image structure for proper tracking
+            return {"per_image": all_results}
 
     def get_metadata(self):
         """Return tool metadata."""

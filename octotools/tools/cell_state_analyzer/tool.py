@@ -570,11 +570,50 @@ class Cell_State_Analyzer_Tool(BaseTool):
         
         logger.info(f"Found {len(metadata_files)} metadata file(s), merging all files for multi-image processing")
         
+        # Deduplicate metadata files by source_image_id: keep only the most recent file for each image
+        # This prevents duplicate processing when Single_Cell_Cropper_Tool is called multiple times for the same image
+        metadata_by_image = {}  # {source_image_id: (file_path, mtime, data)}
         for metadata_file in metadata_files:
             try:
                 with open(metadata_file, 'r') as f:
                     data = json.load(f)
                 
+                source_image_id = data.get('source_image_id')
+                if not source_image_id:
+                    # Fallback: try to extract from cell_crop_objects if available
+                    cell_crop_objects = data.get('cell_crop_objects', [])
+                    if cell_crop_objects and len(cell_crop_objects) > 0:
+                        first_crop = cell_crop_objects[0]
+                        if isinstance(first_crop, dict):
+                            source_image_id = first_crop.get('source_image_id')
+                
+                # Use file modification time to determine which is most recent
+                mtime = os.path.getmtime(metadata_file)
+                
+                if source_image_id:
+                    # If we already have a metadata file for this image, keep the most recent one
+                    if source_image_id in metadata_by_image:
+                        existing_mtime = metadata_by_image[source_image_id][1]
+                        if mtime > existing_mtime:
+                            logger.info(f"Replacing older metadata for image {source_image_id} with newer file: {os.path.basename(metadata_file)}")
+                            metadata_by_image[source_image_id] = (metadata_file, mtime, data)
+                        else:
+                            logger.info(f"Skipping duplicate metadata for image {source_image_id}: {os.path.basename(metadata_file)} (older than existing)")
+                    else:
+                        metadata_by_image[source_image_id] = (metadata_file, mtime, data)
+                else:
+                    # If no source_image_id, include it anyway (backward compatibility)
+                    logger.warning(f"Metadata file {os.path.basename(metadata_file)} has no source_image_id, including anyway")
+                    metadata_by_image[f"unknown_{len(metadata_by_image)}"] = (metadata_file, mtime, data)
+            except Exception as e:
+                logger.warning(f"Error reading metadata file {metadata_file}: {e}, skipping")
+                continue
+        
+        logger.info(f"After deduplication: {len(metadata_by_image)} unique image(s) from {len(metadata_files)} metadata file(s)")
+        
+        # Process deduplicated metadata files
+        for source_image_id, (metadata_file, mtime, data) in metadata_by_image.items():
+            try:
                 execution_status = data.get('execution_status', 'unknown')
                 execution_statuses.append(execution_status)
                 
@@ -595,7 +634,7 @@ class Cell_State_Analyzer_Tool(BaseTool):
                 all_cell_metadata.extend(cell_metadata)
                 all_cell_crop_objects.extend(cell_crop_objects)
                 
-                logger.info(f"Loaded {len(cell_crops)} cells from {os.path.basename(metadata_file)} (status: {execution_status})")
+                logger.info(f"Loaded {len(cell_crops)} cells from {os.path.basename(metadata_file)} (image: {source_image_id}, status: {execution_status})")
             except Exception as e:
                 logger.warning(f"Error loading metadata file {metadata_file}: {e}, skipping")
                 continue

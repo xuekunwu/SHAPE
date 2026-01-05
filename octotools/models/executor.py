@@ -58,7 +58,7 @@ class Executor:
         logger.debug(f"Executor: Updated query_cache_dir to {self.query_cache_dir}")
         logger.debug(f"Executor: Updated tool_cache_dir to {self.tool_cache_dir}")
     
-    def generate_tool_command(self, question: str, image: str, context: str, sub_goal: str, tool_name: str, tool_metadata: Dict[str, Any], memory=None, bytes_mode:bool = False, conversation_context: str = "", image_id: str = None, **kwargs) -> ToolCommand:
+    def generate_tool_command(self, question: str, image: str, context: str, sub_goal: str, tool_name: str, tool_metadata: Dict[str, Any], memory=None, bytes_mode:bool = False, conversation_context: str = "", image_id: str = None, current_image_path: str = None, **kwargs) -> ToolCommand:
         """
         Generate a tool command based on the given information.
         
@@ -89,17 +89,13 @@ class Executor:
                 last_action = actions[-1]
                 if 'result' in last_action:
                     raw_result = last_action['result']
-                    # Handle per_image structure: extract the actual result from per_image if present
-                    # Note: Cell_State_Analyzer_Tool and Analysis_Visualizer_Tool merge all images,
-                    # so they should not have per_image structure, but we handle it for safety
+                    # Handle per_image structure: keep the full structure for matching
+                    # We need to match the correct image from per_image based on current_image_path or image_id
+                    # Don't extract a single result here - let the tool-specific handlers do the matching
                     if isinstance(raw_result, dict) and 'per_image' in raw_result:
-                        per_image_list = raw_result['per_image']
-                        # Use the first image's result if available, or the last one
-                        if per_image_list and len(per_image_list) > 0:
-                            previous_outputs = per_image_list[-1]  # Use last image's result
-                            logger.debug(f"Extracted previous outputs from per_image structure (using last image)")
-                        else:
-                            previous_outputs = raw_result
+                        # Keep the full per_image structure for matching
+                        previous_outputs = raw_result
+                        logger.debug(f"Keeping per_image structure for matching (contains {len(raw_result['per_image'])} images)")
                     else:
                         previous_outputs = raw_result
                     # Create LLM-safe version (summary only, no file paths)
@@ -185,28 +181,85 @@ except Exception as e:
         # Special handling for segmentation tools (Nuclei_Segmenter_Tool, Cell_Segmenter_Tool, Organoid_Segmenter_Tool) 
         # to use processed image from Image_Preprocessor_Tool
         segmentation_tools = ["Nuclei_Segmenter_Tool", "Cell_Segmenter_Tool", "Organoid_Segmenter_Tool"]
-        if tool_name in segmentation_tools and previous_outputs and 'processed_image_path' in previous_outputs:
-            processed_image_path = previous_outputs['processed_image_path']
-            # Normalize path for cross-platform compatibility
-            import os
-            processed_image_path = os.path.normpath(processed_image_path) if isinstance(processed_image_path, str) else str(processed_image_path)
-            # Verify file exists before using it
-            if not os.path.exists(processed_image_path):
-                logger.warning(f"processed_image_path does not exist: {processed_image_path}")
-                # Fall through to standard command generation
-            else:
-                # Escape backslashes for Python string in command
-                safe_processed_path = processed_image_path.replace("\\", "\\\\")
-                # Include image_id if available for consistent naming
-                image_id_param = f', image_id="{image_id}"' if image_id else ''
-                tool_label = "nuclei segmentation" if tool_name == "Nuclei_Segmenter_Tool" else \
-                             "cell segmentation" if tool_name == "Cell_Segmenter_Tool" else \
-                             "organoid segmentation"
-                return ToolCommand(
-                    analysis=f"Using the processed image from Image_Preprocessor_Tool for {tool_label}",
-                    explanation=f"Using the processed image path '{processed_image_path}' from the previous Image_Preprocessor_Tool step",
-                    command=f"""execution = tool.execute(image="{safe_processed_path}"{image_id_param})"""
-                )
+        if tool_name in segmentation_tools and previous_outputs:
+            # Handle per_image structure: find the processed_image_path for the current image
+            processed_image_path = None
+            if 'per_image' in previous_outputs:
+                # If previous_outputs has per_image structure, find the matching image
+                per_image_list = previous_outputs['per_image']
+                # Try to match by image_id or image path
+                for img_result in per_image_list:
+                    if isinstance(img_result, dict):
+                        # Check if this result matches the current image
+                        # Match by checking if the processed_image_path contains the image_id or image name
+                        if 'processed_image_path' in img_result:
+                            candidate_path = img_result['processed_image_path']
+                            # Try to match by image_id, image_path, or image name
+                            matched = False
+                            
+                            # Method 1: Match by image_id if provided
+                            if image_id and not matched:
+                                # Extract image identifier from processed_image_path (filename without extension)
+                                path_basename = os.path.basename(candidate_path)
+                                path_identifier = os.path.splitext(path_basename)[0]
+                                # Check if image_id matches (could be full name or part of it)
+                                # Handle cases like "A2_02_1_1_Phase Contrast_001" matching "A2_02_1_1_Phase Contrast_001_default_processed"
+                                if image_id in path_identifier or path_identifier.startswith(image_id) or image_id.split('_')[0] in path_identifier.split('_')[0]:
+                                    processed_image_path = candidate_path
+                                    matched = True
+                                    logger.info(f"Matched processed_image_path for image_id '{image_id}': {processed_image_path}")
+                            
+                            # Method 2: Match by current_image_path if provided
+                            if current_image_path and not matched:
+                                # Extract original image name from current_image_path
+                                current_image_name = os.path.splitext(os.path.basename(current_image_path))[0]
+                                # Check if original_image_path in result matches
+                                if 'original_image_path' in img_result:
+                                    original_path = img_result['original_image_path']
+                                    original_name = os.path.splitext(os.path.basename(original_path))[0]
+                                    if current_image_name == original_name or current_image_path == original_path:
+                                        processed_image_path = candidate_path
+                                        matched = True
+                                        logger.info(f"Matched processed_image_path for current_image_path '{current_image_path}': {processed_image_path}")
+                            
+                            # Method 3: Match by checking if image name appears in processed_image_path
+                            if current_image_path and not matched:
+                                current_image_name = os.path.splitext(os.path.basename(current_image_path))[0]
+                                path_basename = os.path.basename(candidate_path)
+                                if current_image_name in path_basename:
+                                    processed_image_path = candidate_path
+                                    matched = True
+                                    logger.info(f"Matched processed_image_path by image name '{current_image_name}': {processed_image_path}")
+                            
+                            if matched:
+                                break
+            elif 'processed_image_path' in previous_outputs:
+                # Direct processed_image_path (single image case)
+                processed_image_path = previous_outputs['processed_image_path']
+            
+            if processed_image_path:
+                # Normalize path for cross-platform compatibility
+                import os
+                processed_image_path = os.path.normpath(processed_image_path) if isinstance(processed_image_path, str) else str(processed_image_path)
+                # Verify file exists before using it
+                if not os.path.exists(processed_image_path):
+                    logger.warning(f"processed_image_path does not exist: {processed_image_path}")
+                    # Fall through to standard command generation
+                else:
+                    # Escape backslashes for Python string in command
+                    safe_processed_path = processed_image_path.replace("\\", "\\\\")
+                    # Include image_id and query_cache_dir if available for consistent naming
+                    query_cache_dir_str = self.query_cache_dir.replace("\\", "\\\\")
+                    image_id_param = f', image_id="{image_id}"' if image_id else ''
+                    query_cache_dir_param = f', query_cache_dir=r"{query_cache_dir_str}"' if query_cache_dir_str else ''
+                    tool_label = "nuclei segmentation" if tool_name == "Nuclei_Segmenter_Tool" else \
+                                 "cell segmentation" if tool_name == "Cell_Segmenter_Tool" else \
+                                 "organoid segmentation"
+                    return ToolCommand(
+                        analysis=f"Using the processed image from Image_Preprocessor_Tool for {tool_label}",
+                        explanation=f"Using the processed image path '{processed_image_path}' from the previous Image_Preprocessor_Tool step (matched for image_id: {image_id})",
+                        command=f"""execution = tool.execute(image="{safe_processed_path}"{image_id_param}{query_cache_dir_param})"""
+                    )
         
         # Special handling for Analysis_Visualizer_Tool to use Cell_State_Analyzer_Tool results
         if tool_name == "Analysis_Visualizer_Tool" and previous_outputs:

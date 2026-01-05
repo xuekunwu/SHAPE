@@ -124,6 +124,11 @@ class Single_Cell_Cropper_Tool(BaseTool):
             def save_error_metadata(error_type, error_message):
                 """Save metadata file even when errors occur."""
                 try:
+                    # Extract source_image_id if available (may not be set yet for early errors)
+                    current_source_image_id = source_image_id if 'source_image_id' in locals() else None
+                    if not current_source_image_id and 'original_image' in locals():
+                        current_source_image_id = Path(original_image).stem
+                    
                     error_metadata = {
                         'cell_count': 0,
                         'cell_crops_paths': [],
@@ -136,7 +141,10 @@ class Single_Cell_Cropper_Tool(BaseTool):
                         },
                         "execution_status": "error",
                         "error_type": error_type,
-                        "error_message": error_message
+                        "error_message": error_message,
+                        "source_image_id": current_source_image_id,  # Add source_image_id for deduplication
+                        "group": group if 'group' in locals() else "default",
+                        "original_image": original_image if 'original_image' in locals() else None
                     }
                     metadata_path = os.path.join(tool_cache_dir, f"cell_crops_metadata_error_{uuid4().hex[:8]}.json")
                     print(f"Single_Cell_Cropper_Tool: Saving error metadata to: {metadata_path}")
@@ -215,7 +223,10 @@ class Single_Cell_Cropper_Tool(BaseTool):
                     "min_area": min_area,
                     "margin": margin
                 },
-                "execution_status": "success" if cell_crops else "no_crops_generated"
+                "execution_status": "success" if cell_crops else "no_crops_generated",
+                "source_image_id": source_image_id,  # Add source_image_id to identify which image this metadata belongs to
+                "group": group,  # Add group to identify which group this metadata belongs to
+                "original_image": original_image  # Add original_image path for reference
             }
             metadata_path = os.path.join(tool_cache_dir, f"cell_crops_metadata_{uuid4().hex[:8]}.json")
             print(f"Single_Cell_Cropper_Tool: Saving metadata to: {metadata_path}")
@@ -304,6 +315,11 @@ class Single_Cell_Cropper_Tool(BaseTool):
                 tool_cache_dir = os.path.join(query_cache_dir, "tool_cache")
                 os.makedirs(tool_cache_dir, exist_ok=True)
                 
+                # Extract source_image_id if available
+                current_source_image_id = source_image_id if 'source_image_id' in locals() else None
+                if not current_source_image_id and 'original_image' in locals():
+                    current_source_image_id = Path(original_image).stem
+                
                 error_metadata = {
                     'cell_count': 0,
                     'cell_crops_paths': [],
@@ -311,11 +327,14 @@ class Single_Cell_Cropper_Tool(BaseTool):
                     'cell_crop_objects': [],
                     'statistics': {},
                     "parameters": {
-                        "min_area": min_area,
-                        "margin": margin
+                        "min_area": min_area if 'min_area' in locals() else None,
+                        "margin": margin if 'margin' in locals() else None
                     },
                     "execution_status": "error",
-                    "error_message": str(e)
+                    "error_message": str(e),
+                    "source_image_id": current_source_image_id,  # Add source_image_id for deduplication
+                    "group": group if 'group' in locals() else "default",
+                    "original_image": original_image if 'original_image' in locals() else None
                 }
                 metadata_path = os.path.join(tool_cache_dir, f"cell_crops_metadata_error_{uuid4().hex[:8]}.json")
                 print(f"Single_Cell_Cropper_Tool: Saving error metadata to: {metadata_path}")
