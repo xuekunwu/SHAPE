@@ -2061,7 +2061,7 @@ def solve_problem_gradio(user_query, llm_model_engine=None, conversation_history
         user_msg = ChatMessage(role="user", content=str(user_query))
         messages.append(user_msg)
         # Immediately yield to show user message in conversation
-        yield messages, "", [], "**Progress**: Processing your question...", state
+        yield messages, "", [], "**Progress**: Processing your question...", [], state
 
     # Short-circuit if we already answered this question successfully
     cached_qr = get_question_result(state, user_query) if user_query else None
@@ -2070,7 +2070,7 @@ def solve_problem_gradio(user_query, llm_model_engine=None, conversation_history
         answer_msg = cached_qr.final_answer or "Stored result (no answer text)."
         new_history = messages + [ChatMessage(role="assistant", content=reuse_msg), ChatMessage(role="assistant", content=answer_msg)]
         state.conversation = new_history
-        yield new_history, cached_qr.final_answer, [], "**Progress**: Reused prior answer", state
+        yield new_history, cached_qr.final_answer, [], "**Progress**: Reused prior answer", [], state
         return
     
     # Find the model config by model_id
@@ -2110,7 +2110,7 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
 """
         new_history = messages + [ChatMessage(role="assistant", content=api_key_error_msg)]
         state.conversation = new_history
-        yield new_history, "", [], "**Progress**: API Key Required", state
+        yield new_history, "", [], "**Progress**: API Key Required", [], state
         return
     
     # Get available tools dynamically
@@ -2178,7 +2178,7 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
         traceback.print_exc()
         new_history = messages + [ChatMessage(role="assistant", content=f"⚠️ Error: Failed to initialize components. {str(e)}")]
         state.conversation = new_history
-        yield new_history, "", [], "**Progress**: Error occurred", state
+        yield new_history, "", [], "**Progress**: Error occurred", [], state
         return
 
     # Collect all images from all groups for analysis (let planner decide which to use)
@@ -2186,7 +2186,7 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
         prompt_msg = "⚠️ Please upload an image into a group before asking a question."
         new_history = messages + [ChatMessage(role="assistant", content=prompt_msg)]
         state.conversation = new_history
-        yield new_history, "", [], "**Progress**: Waiting for image upload", state
+        yield new_history, "", [], "**Progress**: Waiting for image upload", [], state
         return
     
     # Collect all images from all groups with group metadata
@@ -2201,7 +2201,7 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
         prompt_msg = "⚠️ No images found in any group."
         new_history = messages + [ChatMessage(role="assistant", content=prompt_msg)]
         state.conversation = new_history
-        yield new_history, "", [], "**Progress**: Waiting for image upload", state
+        yield new_history, "", [], "**Progress**: Waiting for image upload", [], state
         return
     
     # Use first image as representative for context
@@ -2243,7 +2243,7 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
     if solver is None:
         new_history = messages + [ChatMessage(role="assistant", content="⚠️ Error: Failed to initialize solver.")]
         state.conversation = new_history
-        yield new_history, "", [], "**Progress**: Error occurred", state
+        yield new_history, "", [], "**Progress**: Error occurred", [], state
         return
 
     try:
