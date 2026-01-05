@@ -362,32 +362,33 @@ class Cell_State_Analyzer_Tool(BaseTool):
         with torch.no_grad():
             for v1, _, names, grps in tqdm(dataloader, desc="Extracting features"):
                 v1 = v1.to(device)
-                # DINOv3 backbone directly returns CLS token (matching training script pattern)
+                # Backbone may return tensor directly or transformers output object
                 out = model.backbone(v1)
                 
-                # Handle tensor output (DINOv3 returns tensor directly)
+                # Handle different output formats
                 if isinstance(out, torch.Tensor):
-                    # If shape is [B, N, D], take first token (CLS)
+                    # Direct tensor output: if shape is [B, N, D], take first token (CLS)
                     # Otherwise it's already CLS token [B, D]
                     if out.dim() > 2:
                         out = out[:, 0, :]
-                else:
-                    # Fallback for other output formats (shouldn't happen with DINOv3)
-                    logger.warning(f"Unexpected output type from backbone: {type(out)}, trying to extract CLS token...")
-                    if hasattr(out, 'last_hidden_state'):
-                        out = out.last_hidden_state[:, 0]
-                    elif hasattr(out, 'pooler_output'):
-                        out = out.pooler_output
-                    elif isinstance(out, dict):
-                        # Try common keys
-                        if 'x_norm_clstoken' in out:
-                            out = out['x_norm_clstoken']
-                        elif 'last_hidden_state' in out:
-                            out = out['last_hidden_state'][:, 0]
-                        else:
-                            raise ValueError(f"Could not extract features from output dict. Available keys: {list(out.keys())}")
+                elif hasattr(out, 'last_hidden_state'):
+                    # Transformers BaseModelOutput or similar: extract CLS token from last_hidden_state
+                    out = out.last_hidden_state[:, 0]
+                elif hasattr(out, 'pooler_output'):
+                    # Some models return pooler_output directly
+                    out = out.pooler_output
+                elif isinstance(out, dict):
+                    # Dictionary output: try common keys
+                    if 'x_norm_clstoken' in out:
+                        out = out['x_norm_clstoken']
+                    elif 'last_hidden_state' in out:
+                        out = out['last_hidden_state'][:, 0]
                     else:
-                        raise ValueError(f"Unexpected output type from backbone: {type(out)}")
+                        raise ValueError(f"Could not extract features from output dict. Available keys: {list(out.keys())}")
+                else:
+                    # Truly unexpected output type
+                    logger.warning(f"Unexpected output type from backbone: {type(out)}, trying to extract CLS token...")
+                    raise ValueError(f"Unexpected output type from backbone: {type(out)}")
                 
                 feats.append(out.cpu())
                 img_names.extend(names)
@@ -497,32 +498,38 @@ class Cell_State_Analyzer_Tool(BaseTool):
         # Standard tool_cache directory
         tool_cache_dir = os.path.join(query_cache_dir, "tool_cache")
         
-        # Try multiple possible paths:
-        # 1. Directly in tool_cache_dir (where Single_Cell_Cropper_Tool saves metadata)
-        # 2. In group subdirectories (e.g., tool_cache_dir/default/, tool_cache_dir/control/, etc.)
-        possible_dirs = [
-            tool_cache_dir,  # Standard path - metadata should be here
-        ]
+        # Try multiple possible paths in priority order:
+        # 1. Directly in tool_cache_dir (where Single_Cell_Cropper_Tool saves metadata) - HIGHEST PRIORITY
+        # 2. In group subdirectories (e.g., tool_cache_dir/default/, tool_cache_dir/control/, etc.) - FALLBACK
+        # Use dict.fromkeys() to remove duplicates while preserving insertion order (Python 3.7+)
+        possible_dirs = []
         
-        # Also check group subdirectories if they exist
+        # Priority 1: Root tool_cache_dir (where metadata files are actually saved)
+        if tool_cache_dir:
+            possible_dirs.append(tool_cache_dir)
+        
+        # Priority 2: Check if query_cache_dir already contains tool_cache (edge case)
+        if "tool_cache" in query_cache_dir and query_cache_dir not in possible_dirs:
+            possible_dirs.append(query_cache_dir)
+        
+        # Priority 3: Group subdirectories (for backward compatibility, but metadata should be in root)
         if os.path.exists(tool_cache_dir):
             try:
                 subdirs = [d for d in os.listdir(tool_cache_dir) 
                           if os.path.isdir(os.path.join(tool_cache_dir, d))]
-                for subdir in subdirs:
-                    possible_dirs.append(os.path.join(tool_cache_dir, subdir))
-                logger.info(f"Cell_State_Analyzer_Tool: Found subdirectories in tool_cache: {subdirs}")
+                if subdirs:
+                    logger.info(f"Cell_State_Analyzer_Tool: Found subdirectories in tool_cache: {subdirs}")
+                    for subdir in subdirs:
+                        subdir_path = os.path.join(tool_cache_dir, subdir)
+                        if subdir_path not in possible_dirs:
+                            possible_dirs.append(subdir_path)
             except Exception as e:
                 logger.warning(f"Cell_State_Analyzer_Tool: Error listing subdirectories: {e}")
         
-        # Also check if query_cache_dir already contains tool_cache
-        if "tool_cache" in query_cache_dir:
-            possible_dirs.append(query_cache_dir)
+        # Remove None values and duplicates while preserving order
+        possible_dirs = [d for d in dict.fromkeys(possible_dirs) if d is not None]
         
-        # Remove duplicates and None values
-        possible_dirs = list(set([d for d in possible_dirs if d is not None]))
-        
-        logger.info(f"Cell_State_Analyzer_Tool: Searching in possible directories: {possible_dirs}")
+        logger.info(f"Cell_State_Analyzer_Tool: Searching in possible directories (priority order): {possible_dirs}")
         
         metadata_files = []
         for metadata_dir in possible_dirs:
