@@ -239,7 +239,7 @@ except Exception as e:
             
             if processed_image_path:
                 # Normalize path for cross-platform compatibility
-                import os
+                # os is already imported at the top of the file
                 processed_image_path = os.path.normpath(processed_image_path) if isinstance(processed_image_path, str) else str(processed_image_path)
                 # Verify file exists before using it
                 if not os.path.exists(processed_image_path):
