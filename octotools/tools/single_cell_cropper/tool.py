@@ -114,10 +114,47 @@ class Single_Cell_Cropper_Tool(BaseTool):
                 # Load original image
                 original_img = cv2.imread(original_image, cv2.IMREAD_GRAYSCALE)
             
+            # Setup output directory early, so we can save metadata even on errors
+            if query_cache_dir is None:
+                query_cache_dir = "solver_cache/temp"
+            tool_cache_dir = os.path.join(query_cache_dir, "tool_cache")
+            os.makedirs(tool_cache_dir, exist_ok=True)
+            
+            # Helper function to save error metadata
+            def save_error_metadata(error_type, error_message):
+                """Save metadata file even when errors occur."""
+                try:
+                    error_metadata = {
+                        'cell_count': 0,
+                        'cell_crops_paths': [],
+                        'cell_metadata': [],
+                        'cell_crop_objects': [],
+                        'statistics': {},
+                        "parameters": {
+                            "min_area": min_area,
+                            "margin": margin
+                        },
+                        "execution_status": "error",
+                        "error_type": error_type,
+                        "error_message": error_message
+                    }
+                    metadata_path = os.path.join(tool_cache_dir, f"cell_crops_metadata_error_{uuid4().hex[:8]}.json")
+                    print(f"Single_Cell_Cropper_Tool: Saving error metadata to: {metadata_path}")
+                    with open(metadata_path, 'w') as f:
+                        json.dump(error_metadata, f, indent=2)
+                    print(f"Single_Cell_Cropper_Tool: ✅ Error metadata file saved: {metadata_path}")
+                    return metadata_path
+                except Exception as save_error:
+                    print(f"Single_Cell_Cropper_Tool: ❌ Failed to save error metadata: {save_error}")
+                    return None
+            
             if original_img is None:
+                metadata_path = save_error_metadata("image_load_failed", f"Failed to load original image: {original_image}")
                 return {
                     "error": f"Failed to load original image: {original_image}",
-                    "summary": "Image loading failed"
+                    "summary": "Image loading failed",
+                    "execution_status": "error",
+                    "cell_crops_metadata_path": metadata_path
                 }
             
             # Load segmentation mask (supports nuclei_mask, cell_mask, or organoid_mask)
@@ -148,16 +185,13 @@ class Single_Cell_Cropper_Tool(BaseTool):
                     mask = mask.astype(np.uint16)  # Convert to uint16 to handle any labels up to 65535
             
             if mask is None:
+                metadata_path = save_error_metadata("mask_load_failed", f"Failed to load segmentation mask: {nuclei_mask}")
                 return {
                     "error": f"Failed to load segmentation mask: {nuclei_mask}",
-                    "summary": "Mask loading failed. Please provide a valid mask from Nuclei_Segmenter_Tool, Cell_Segmenter_Tool, or Organoid_Segmenter_Tool."
+                    "summary": "Mask loading failed. Please provide a valid mask from Nuclei_Segmenter_Tool, Cell_Segmenter_Tool, or Organoid_Segmenter_Tool.",
+                    "execution_status": "error",
+                    "cell_crops_metadata_path": metadata_path
                 }
-            
-            # Setup output directory
-            if query_cache_dir is None:
-                query_cache_dir = "solver_cache/temp"
-            tool_cache_dir = os.path.join(query_cache_dir, "tool_cache")
-            os.makedirs(tool_cache_dir, exist_ok=True)
             
             # Extract source_image_id from path if not provided
             if source_image_id is None:
@@ -168,37 +202,25 @@ class Single_Cell_Cropper_Tool(BaseTool):
                 original_img, mask, original_image, source_image_id, group, min_area, margin, tool_cache_dir, output_format
             )
             
-            if not cell_crops:
-                return {
-                    "summary": "No valid cell crops generated.",
-                    "cell_count": 0,
-                    "cell_crops": [],
-                    "cell_metadata": [],
-                    "cell_crop_objects": [],  # Empty list of CellCrop objects
-                    "visual_outputs": [],
-                    "parameters": {
-                        "min_area": min_area,
-                        "margin": margin,
-                        "output_format": output_format
-                    },
-                    "statistics": stats
-                }
-            
+            # Always save metadata file, even if no crops were generated
+            # This ensures Cell_State_Analyzer_Tool knows Single_Cell_Cropper_Tool has executed
             # Combine paths and metadata for JSON output (backward compatibility)
             output_data = {
-                'cell_count': stats['final_cell_count'],
-                'cell_crops_paths': cell_crops,
-                'cell_metadata': cell_metadata,
-                'cell_crop_objects': [cell.to_dict() for cell in cell_crop_objects],  # Serialize CellCrop objects
-                'statistics': stats,
+                'cell_count': stats.get('final_cell_count', 0) if cell_crops else 0,
+                'cell_crops_paths': cell_crops if cell_crops else [],
+                'cell_metadata': cell_metadata if cell_crops else [],
+                'cell_crop_objects': [cell.to_dict() for cell in cell_crop_objects] if cell_crop_objects else [],  # Serialize CellCrop objects
+                'statistics': stats if cell_crops else {},
                 "parameters": {
                     "min_area": min_area,
                     "margin": margin
-                }
+                },
+                "execution_status": "success" if cell_crops else "no_crops_generated"
             }
             metadata_path = os.path.join(tool_cache_dir, f"cell_crops_metadata_{uuid4().hex[:8]}.json")
             print(f"Single_Cell_Cropper_Tool: Saving metadata to: {metadata_path}")
             print(f"Single_Cell_Cropper_Tool: query_cache_dir={query_cache_dir}, tool_cache_dir={tool_cache_dir}")
+            print(f"Single_Cell_Cropper_Tool: cell_count={output_data['cell_count']}, execution_status={output_data['execution_status']}")
             with open(metadata_path, 'w') as f:
                 json.dump(output_data, f, indent=2)
             # Verify file was saved
@@ -206,6 +228,24 @@ class Single_Cell_Cropper_Tool(BaseTool):
                 print(f"Single_Cell_Cropper_Tool: ✅ Metadata file saved successfully: {metadata_path}")
             else:
                 print(f"Single_Cell_Cropper_Tool: ❌ ERROR: Metadata file was not saved: {metadata_path}")
+            
+            if not cell_crops:
+                return {
+                    "summary": "No valid cell crops generated. Metadata file saved for tracking.",
+                    "cell_count": 0,
+                    "cell_crops": [],
+                    "cell_metadata": [],
+                    "cell_crop_objects": [],  # Empty list of CellCrop objects
+                    "visual_outputs": [],
+                    "cell_crops_metadata_path": metadata_path,  # Include metadata path even when no crops
+                    "parameters": {
+                        "min_area": min_area,
+                        "margin": margin,
+                        "output_format": output_format
+                    },
+                    "statistics": stats,
+                    "execution_status": "no_crops_generated"
+                }
 
             # Create a summary visualization
             summary_viz_path = self._create_summary_visualization(
@@ -254,9 +294,41 @@ class Single_Cell_Cropper_Tool(BaseTool):
             
         except Exception as e:
             print(f"Single_Cell_Cropper_Tool: Error in single-cell cropping: {e}")
+            import traceback
+            traceback.print_exc()
+            
+            # Try to save metadata file even on error, so Cell_State_Analyzer_Tool knows the tool executed
+            try:
+                if query_cache_dir is None:
+                    query_cache_dir = "solver_cache/temp"
+                tool_cache_dir = os.path.join(query_cache_dir, "tool_cache")
+                os.makedirs(tool_cache_dir, exist_ok=True)
+                
+                error_metadata = {
+                    'cell_count': 0,
+                    'cell_crops_paths': [],
+                    'cell_metadata': [],
+                    'cell_crop_objects': [],
+                    'statistics': {},
+                    "parameters": {
+                        "min_area": min_area,
+                        "margin": margin
+                    },
+                    "execution_status": "error",
+                    "error_message": str(e)
+                }
+                metadata_path = os.path.join(tool_cache_dir, f"cell_crops_metadata_error_{uuid4().hex[:8]}.json")
+                print(f"Single_Cell_Cropper_Tool: Saving error metadata to: {metadata_path}")
+                with open(metadata_path, 'w') as f:
+                    json.dump(error_metadata, f, indent=2)
+                print(f"Single_Cell_Cropper_Tool: ✅ Error metadata file saved: {metadata_path}")
+            except Exception as save_error:
+                print(f"Single_Cell_Cropper_Tool: ❌ Failed to save error metadata: {save_error}")
+            
             return {
                 "error": f"Error during single-cell cropping: {str(e)}",
-                "summary": "Failed to process image"
+                "summary": "Failed to process image",
+                "execution_status": "error"
             }
 
     def _generate_cell_crops(self, original_img, mask, original_image_path, source_image_id, group, min_area, margin, output_dir, output_format):
