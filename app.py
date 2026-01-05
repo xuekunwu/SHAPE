@@ -2283,7 +2283,10 @@ def main(args):
                 def distribute_tools(category, img, q, tools_str, ans):
                     selected_tools = [tool.strip() for tool in tools_str.split(',')]
                     selected = [tool for tool in selected_tools if tool in get_available_tools()]
-                    return img, q
+                    # Wrap single image path in a list for file_count="multiple" File component
+                    # This ensures Examples passes a list to the File component
+                    img_list = [img] if img else []
+                    return img_list, q
                 gr.Examples(
                     examples=examples,
                     inputs=[gr.Textbox(label="Category", visible=False), user_image, user_query, gr.Textbox(label="Select Tools", visible=False), gr.Textbox(label="Reference Answer", visible=False)],
