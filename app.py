@@ -992,14 +992,14 @@ class Solver:
                 messages.append(ChatMessage(role="assistant", content=f"### 📝 Received Query:\n{user_query}\n### 🖼️ Using session image `{img_id}`{group_label}"))
         else:
             messages.append(ChatMessage(role="assistant", content=f"### 📝 Received Query:\n{user_query}"))
-        yield messages, "", [], visual_description, "**Progress**: 正在处理输入..."
+        yield messages, "", [], visual_description, "**Progress**: Processing input..."
 
         step_count = 0
         json_data = {"query": user_query, "image_id": img_id}
 
         messages.append(ChatMessage(role="assistant", content="<br>"))
         messages.append(ChatMessage(role="assistant", content="### 🐙 Deep Thinking:"))
-        yield messages, "", [], visual_description, "**Progress**: 正在分析问题..."
+        yield messages, "", [], visual_description, "**Progress**: Analyzing query..."
         query_analysis_start = time.time()
         try:
             conversation_text = self._format_conversation_history()
@@ -1068,7 +1068,7 @@ class Solver:
             messages.append(ChatMessage(role="assistant", 
                                         content=f"{concise_summary}",
                                         metadata={"title": "### 🔍 Step 0: Query Analysis"}))
-            yield messages, concise_summary, self.visual_outputs_for_gradio, visual_description, "**Progress**: 正在生成步骤..."
+            yield messages, concise_summary, self.visual_outputs_for_gradio, visual_description, "**Progress**: Generating steps..."
 
             # Save the query analysis data
             query_analysis_data = {"query_analysis": query_analysis, "time": round(time.time() - self.start_time, 5)}
@@ -1079,7 +1079,7 @@ class Solver:
             messages.append(ChatMessage(role="assistant", 
                                         content=error_msg,
                                         metadata={"title": "### 🔍 Step 0: Query Analysis (Error)"}))
-            yield messages, error_msg, [], visual_description, "**Progress**: ⚠️ 查询分析出错"
+            yield messages, error_msg, [], visual_description, "**Progress**: ⚠️ Query analysis error"
             return
 
         if image_items and len(image_items) > 0:
@@ -1156,7 +1156,7 @@ class Solver:
             mem_before = process.memory_info().rss / 1024 / 1024  # MB
             
             # Simple progress message without progress bar
-            progress_msg = f"**Progress**: 正在生成步骤 {step_count}..."
+            progress_msg = f"**Progress**: Generating step {step_count}..."
             
             messages.append(ChatMessage(role="OctoTools", 
                                         content=f"Generating the {step_count}-th step...",
@@ -1182,7 +1182,7 @@ class Solver:
                 metadata={"title": f"### 🎯 Step {step_count}: Action Prediction ({tool_name})"}))
             
             # Simple progress message - show current tool name
-            progress_msg_predicted = f"**Progress**: 正在执行: {tool_name}"
+            progress_msg_predicted = f"**Progress**: Executing: {tool_name}"
             yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, progress_msg_predicted
 
             # Handle tool execution or errors
@@ -1202,7 +1202,7 @@ class Solver:
                     content=f"⚠️ **Tool Matching Error:** {error_msg}\n\nThis may indicate that the tool is not properly registered or loaded."))
                 
                 # Simple progress message for error
-                progress_msg_error = f"**Progress**: 执行 {tool_name} 时出错 ⚠️"
+                progress_msg_error = f"**Progress**: Error executing {tool_name} ⚠️"
                 yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, progress_msg_error
                 continue
             
@@ -1215,7 +1215,7 @@ class Solver:
                     content=f"⚠️ Error: Tool '{tool_name}' is not available."))
                 
                 # Simple progress message for tool not available
-                progress_msg_unavailable = f"**Progress**: 工具 {tool_name} 不可用 ⚠️"
+                progress_msg_unavailable = f"**Progress**: Tool {tool_name} unavailable ⚠️"
                 yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, progress_msg_unavailable
                 continue
 
@@ -1266,7 +1266,7 @@ class Solver:
                         content=f"⚠️ **Tool Execution Failed:** {error_msg}\n\n**Tool:** `{tool_name}`\n**Command:**\n```python\n{command}\n```",
                         metadata={"title": f"### ❌ Step {step_count}: Tool Execution Failed ({tool_name})"}
                     ))
-                    progress_msg_failed = f"**Progress**: 执行 {tool_name} 失败 ❌"
+                    progress_msg_failed = f"**Progress**: Execution of {tool_name} failed ❌"
                     yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, progress_msg_failed
                     result = {"error": error_msg, "result": None}
                     print(f"⚠️ Tool '{tool_name}' failed (merge-all mode)")
@@ -1349,7 +1349,7 @@ class Solver:
                             ))
                             
                             # Simple progress message for execution failure (but continue processing other images)
-                            progress_msg_failed = f"**Progress**: 执行 {tool_name} 失败 (图像 {img_idx + 1}/{len(image_items)}，继续处理...) ❌"
+                            progress_msg_failed = f"**Progress**: Execution of {tool_name} failed (Image {img_idx + 1}/{len(image_items)}, continuing...) ❌"
                             yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, progress_msg_failed
                             # Store the error result
                             store_artifact(self.agent_state, group_name, tool_name, artifact_key, {"error": error_msg, "result": None}, image_fingerprint)
@@ -1399,7 +1399,7 @@ class Solver:
                 metadata={"title": f"### 📝 Step {step_count}: Command Generation ({tool_name})"}))
             
             # Simple progress message for command generation
-            progress_msg_command = f"**Progress**: 正在执行: {tool_name}"
+            progress_msg_command = f"**Progress**: Executing: {tool_name}"
             yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, progress_msg_command
 
             # Save the command generation data
@@ -1431,7 +1431,7 @@ class Solver:
                 metadata={"title": f"### 🛠️ Step {step_count}: Command Execution ({tool_name})"}))
             
             # Simple progress message for command execution
-            progress_msg_executed = f"**Progress**: 正在执行: {tool_name}"
+            progress_msg_executed = f"**Progress**: Executing: {tool_name}"
             yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, progress_msg_executed
 
             # Save the command execution data
@@ -1474,7 +1474,7 @@ class Solver:
                 ))
                 
                 # Simple progress message for stopping
-                progress_msg_stop = f"**Progress**: 已停止 (工具 {tool_name} 重复失败) 🛑"
+                progress_msg_stop = f"**Progress**: Stopped (Tool {tool_name} failed repeatedly) 🛑"
                 yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, progress_msg_stop
                 execution_successful = False
                 break
@@ -1503,7 +1503,7 @@ class Solver:
                 metadata={"title": f"### 🤖 Step {step_count}: Context Verification"}))
             
             # Simple progress message after context verification
-            progress_msg_verified = f"**Progress**: 正在执行: {tool_name}"
+            progress_msg_verified = f"**Progress**: Executing: {tool_name}"
             yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, progress_msg_verified
 
             # After tool execution, estimate tokens and cost
@@ -1614,7 +1614,7 @@ class Solver:
             if isinstance(direct_output, str):
                 conclusion_text = direct_output.strip()
             elif isinstance(direct_output, dict):
-                # 你可以自定义错误信息或提取dict中的message
+                # You can customize error message or extract message from dict
                 conclusion_text = str(direct_output)
             else:
                 conclusion_text = str(direct_output)
@@ -1675,7 +1675,7 @@ class Solver:
                 conclusion += f"  • Pricing Source: OpenAI Official Pricing (2024)\n"
             
             final_answer = f"{conclusion}"
-            yield messages, final_answer, self.visual_outputs_for_gradio, visual_description, "**Progress**: ✅ 已完成，可以问新的问题或者新的对话"
+            yield messages, final_answer, self.visual_outputs_for_gradio, visual_description, "**Progress**: ✅ Completed! You can ask a new question or start a new conversation."
 
             # Save the direct output data
             direct_output_data = {
@@ -1742,7 +1742,7 @@ class Solver:
             messages.append(ChatMessage(role="assistant", content="### ✅ Query Solved!"))
             # Use the final answer if available, otherwise use a default message
             completion_text = final_answer if final_answer else "Analysis completed successfully"
-            yield messages, completion_text, self.visual_outputs_for_gradio, visual_description, "**Progress**: ✅ 已完成，可以问新的问题或者新的对话"
+            yield messages, completion_text, self.visual_outputs_for_gradio, visual_description, "**Progress**: ✅ Completed! You can ask a new question or start a new conversation."
         else:
             # Execution failed - provide comprehensive summary including successful parts
             error_message = "### ⚠️ Partial Execution Summary\n\n"
@@ -1791,7 +1791,7 @@ class Solver:
             # Record failure for this question if not already recorded
             if not get_question_result(self.agent_state, user_query):
                 record_question_result(self.agent_state, user_query, status="FAILED", final_answer=error_message)
-            yield messages, error_message, self.visual_outputs_for_gradio, visual_description, f"**Progress**: ⚠️ 部分执行完成 ({len(successful_steps)} 步)，可以问新的问题或者新的对话"
+            yield messages, error_message, self.visual_outputs_for_gradio, visual_description, f"**Progress**: ⚠️ Partial execution completed ({len(successful_steps)} step(s)). You can ask a new question or start a new conversation."
 
     def generate_visual_description(self, tool_name: str, result: dict, visual_outputs: list) -> str:
         """
@@ -2363,7 +2363,7 @@ def main(args):
                 gr.Markdown("### ❓ Ask Question")
                 user_query = gr.Textbox(label="Ask about your groups", placeholder="e.g., Compare cell counts between control and drugA", lines=5)
                 run_button = gr.Button("🚀 Ask Question", variant="primary", size="lg", elem_classes="gradient-button-primary")
-                progress_md = gr.Markdown("**Progress**: 等待输入问题...")
+                progress_md = gr.Markdown("**Progress**: Waiting for input...")
                 conversation_state = gr.State(AgentState())
             with gr.Column(scale=1):
                 gr.Markdown("### 🗣️ Conversation")
