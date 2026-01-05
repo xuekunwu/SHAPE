@@ -38,10 +38,11 @@ import pandas as pd
 
 _AVAILABLE_TOOLS_CACHE = None
 
-# All tools process all images uniformly (batch processing style)
+# Multi-image processing configuration
+# All tools process images uniformly (batch processing style)
 # Each image is processed independently with group+image_name labeling
 # Tools that merge all images should NOT be executed in per_image loop
-# These tools should execute once, merging all images' data together
+# These tools execute once, merging all images' data together
 TOOLS_THAT_MERGE_ALL_IMAGES = [
     "Cell_State_Analyzer_Tool",  # Merges all cells from all images for unified analysis
     "Analysis_Visualizer_Tool",  # Visualizes results from Cell_State_Analyzer_Tool (merged data)
@@ -1320,7 +1321,6 @@ class Solver:
                         # image_id is the unique identifier (UUID) generated at upload time
                         # This ensures consistent matching across all tools
                         image_id = img_item.get("image_id")
-                        image_name = img_item.get("image_name")  # Keep for reference, but don't use for tool execution
                         tool_command = self.executor.generate_tool_command(
                             user_query, safe_path, context, sub_goal, tool_name,
                             self.planner.toolbox_metadata[tool_name], self.memory, 
@@ -1606,71 +1606,68 @@ class Solver:
             }
             self.step_info.append(final_step_info)
             
-            # Extract conclusion from the final answer
+            # Extract only the direct answer to the query (remove all performance statistics)
             if isinstance(direct_output, str):
                 conclusion_text = direct_output.strip()
             elif isinstance(direct_output, dict):
-                # You can customize error message or extract message from dict
-                conclusion_text = str(direct_output)
+                # Extract summary or answer from dict if available
+                conclusion_text = direct_output.get('summary', direct_output.get('answer', str(direct_output)))
             else:
                 conclusion_text = str(direct_output)
             
-            conclusion = f"🐙 **Conclusion:**\n{conclusion_text}\n\n---\n"
-            conclusion += f"**📊 Detailed Performance Statistics**\n\n"
-            conclusion += f"**Step-by-Step Analysis:**\n"
-            for i, step in enumerate(self.step_info):
-                conclusion += f"**Step {step['step_number']}: {step['step_type']}**\n"
-                conclusion += f"  • Tool: {step['tool_name']}\n"
-                conclusion += f"  • Description: {step['description']}\n"
-                conclusion += f"  • Time: {step['time']:.2f}s\n"
-                conclusion += f"  • Tokens: {step['tokens']} (Input: {step['input_tokens']}, Output: {step['output_tokens']})\n"
-                conclusion += f"  • Cost: ${step['cost']:.6f}\n"
-                conclusion += f"  • Memory: {step['memory']:.2f} MB\n"
+            # Extract the core answer - look for "Answer to the Query" or "Conclusion" section
+            final_answer = ""
+            sections = conclusion_text.split('\n\n')
+            answer_found = False
+            
+            # First, try to find "Answer to the Query" or "Conclusion" section
+            for i, section in enumerate(sections):
+                section_lower = section.lower()
+                if 'answer to the query' in section_lower or ('conclusion' in section_lower and 'answer' in section_lower):
+                    # Extract content after the section header
+                    lines = section.split('\n')
+                    content_started = False
+                    answer_lines = []
+                    for line in lines:
+                        line_lower = line.lower()
+                        # Skip the section header itself
+                        if 'answer to the query' in line_lower or ('conclusion' in line_lower and len(line) < 50):
+                            content_started = True
+                            continue
+                        # Skip performance-related content
+                        if any(skip in line_lower for skip in ['time:', 'tokens:', 'cost:', 'memory:', 'statistics', 'step', 'performance']):
+                            continue
+                        if content_started or (line.strip() and not line.strip().startswith('#')):
+                            answer_lines.append(line)
+                    if answer_lines:
+                        final_answer = '\n'.join(answer_lines).strip()
+                        answer_found = True
+                        break
+            
+            # If no specific answer section found, extract first meaningful paragraphs (skip statistics)
+            if not answer_found:
+                answer_paragraphs = []
+                for section in sections:
+                    section_clean = section.strip()
+                    # Skip empty or very short sections
+                    if len(section_clean) < 30:
+                        continue
+                    # Skip performance/statistics sections
+                    if any(skip in section_clean.lower() for skip in ['time:', 'tokens:', 'cost:', 'memory:', 'statistics', 'step-by-step', 'performance', 'raw data', 'model configuration']):
+                        continue
+                    # Skip markdown-only headers
+                    if section_clean.startswith('#') and len(section_clean) < 100:
+                        continue
+                    answer_paragraphs.append(section_clean)
+                    # Stop after getting 2-3 meaningful paragraphs
+                    if len(answer_paragraphs) >= 3:
+                        break
                 
-                # Add context and sub-goal for tool execution steps
-                if step['step_type'] == "Tool Execution" and 'context' in step:
-                    conclusion += f"  • Context: {step['context']}\n"
-                    if 'sub_goal' in step and step['sub_goal'] != "":
-                        conclusion += f"  • Sub-goal: {step['sub_goal']}\n"
-                
-                conclusion += "\n"
-            
-            # Summary statistics
-            total_tokens_used = sum(self.step_tokens)
-            conclusion += f"**📈 Summary Statistics:**\n"
-            conclusion += f"  • Total Steps: {len(self.step_times)}\n"
-            conclusion += f"  • Total Time: {self.end_time - self.start_time:.2f}s\n"
-            conclusion += f"  • Total Tokens: {total_tokens_used}\n"
-            conclusion += f"  • Total Cost: ${self.total_cost:.6f}\n"
-            conclusion += f"  • Peak Memory: {self.max_memory:.2f} MB\n"
-            avg_time_per_step = (self.end_time - self.start_time) / len(self.step_times) if self.step_times else 0
-            conclusion += f"  • Average Time per Step: {avg_time_per_step:.2f}s\n"
-            if total_tokens_used > 0:
-                conclusion += f"  • Average Tokens per Step: {total_tokens_used / len(self.step_tokens):.1f}\n"
-                conclusion += f"  • Cost per Token: ${self.total_cost / total_tokens_used:.8f}\n"
-            
-            # Raw data for reference
-            conclusion += f"\n**📋 Raw Data (for reference):**\n"
-            conclusion += f"  • Step Times: {[f'{t:.2f}s' for t in self.step_times]}\n"
-            conclusion += f"  • Step Tokens: {self.step_tokens}\n"
-            conclusion += f"  • Step Costs: {[f'${c:.6f}' for c in self.step_costs]}\n"
-            conclusion += f"  • Step Memory: {[f'{m:.2f}MB' for m in self.step_memory]}\n"
-            
-            # Add model-specific pricing information
-            model_config = None
-            for config in OPENAI_MODEL_CONFIGS.values():
-                if config.get("model_id") == self.planner.llm_engine_name:
-                    model_config = config
-                    break
-            
-            if model_config and 'input_cost_per_1k_tokens' in model_config:
-                conclusion += f"\n**🔧 Model Configuration:**\n"
-                conclusion += f"  • Model: {self.planner.llm_engine_name}\n"
-                conclusion += f"  • Input Cost: ${model_config['input_cost_per_1k_tokens']:.6f} per 1K tokens\n"
-                conclusion += f"  • Output Cost: ${model_config['output_cost_per_1k_tokens']:.6f} per 1K tokens\n"
-                conclusion += f"  • Pricing Source: OpenAI Official Pricing (2024)\n"
-            
-            final_answer = f"{conclusion}"
+                if answer_paragraphs:
+                    final_answer = '\n\n'.join(answer_paragraphs).strip()
+                else:
+                    # Last resort: take first 500 chars of non-statistics content
+                    final_answer = conclusion_text[:500].strip()
             yield messages, final_answer, self.visual_outputs_for_gradio, visual_description, "**Progress**: ✅ Completed! You can ask a new question or start a new conversation."
 
             # Save the direct output data
@@ -2368,13 +2365,16 @@ def main(args):
                 # Use type="messages" directly like original version
                 chatbot_output = gr.Chatbot(type="messages", height=700, show_label=False)
 
-        # Bottom full-width: summary and visual outputs
-        gr.Markdown("### 🧾 Summary")
-        text_output = gr.Markdown(value="")
-        gr.Markdown("### 🖼️ Visual Outputs")
-        gallery_output = gr.Gallery(label=None, show_label=False, height=350, columns=3, rows=2)
-        gr.Markdown("### 📥 Downloadable Files")
-        downloadable_files_output = gr.File(label="Download Analysis Data Files (e.g., AnnData .h5ad)", file_count="multiple", visible=True)
+        # Bottom: summary (left) and visual outputs + downloadable files (right)
+        with gr.Row():
+            with gr.Column(scale=1):
+                gr.Markdown("### 🧾 Summary")
+                text_output = gr.Markdown(value="")
+            with gr.Column(scale=1):
+                gr.Markdown("### 🖼️ Visual Outputs")
+                gallery_output = gr.Gallery(label=None, show_label=False, height=350, columns=3, rows=2)
+                gr.Markdown("### 📥 Downloadable Files")
+                downloadable_files_output = gr.File(label="Download Analysis Data Files (e.g., AnnData .h5ad)", file_count="multiple", visible=True)
 
         # Examples row (optional, no nesting issues)
         with gr.Row():

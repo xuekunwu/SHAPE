@@ -670,8 +670,9 @@ class Analysis_Visualizer_Tool(BaseTool):
             if umap_group_path:
                 visual_outputs.append(umap_group_path)
         
-        # 3. Create cluster composition plot by group (if multiple groups)
-        if 'group' in adata.obs and adata.obs['group'].nunique() > 1:
+        # 3. Create cluster composition plot by group (if group column exists)
+        # Always generate if group column exists, even with single group (for consistency)
+        if 'group' in adata.obs:
             composition_path = self._create_publication_cluster_composition(
                 adata, cluster_key, output_dir, figure_size, dpi
             )
@@ -816,6 +817,11 @@ class Analysis_Visualizer_Tool(BaseTool):
                                                output_dir: str, figure_size: tuple, dpi: int) -> Optional[str]:
         """Create publication-quality cluster composition plot by group with grouped bar chart and statistical testing."""
         if 'group' not in adata.obs or cluster_key not in adata.obs:
+            return None
+        
+        # Check if we have at least one group
+        unique_groups = adata.obs['group'].nunique()
+        if unique_groups == 0:
             return None
         
         # Calculate composition (proportions)
