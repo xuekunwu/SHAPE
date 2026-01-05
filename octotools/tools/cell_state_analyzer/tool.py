@@ -399,14 +399,19 @@ class Cell_State_Analyzer_Tool(BaseTool):
         logger.info(f"✅ Extracted CLS features: {feats_all.shape}")
         return feats_all, img_names, groups
     
-    def _train_model(self, model, train_loader, max_epochs, early_stop_loss, learning_rate, output_dir, training_logs=None):
-        """Train the model with contrastive learning."""
+    def _train_model(self, model, train_loader, max_epochs, early_stop_loss, learning_rate, output_dir, training_logs=None, patience=5):
+        """Train the model with contrastive learning.
+        
+        Args:
+            patience: Number of epochs without improvement before stopping (default: 5)
+        """
         optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=1e-4)
         scaler = GradScaler()
         
         history = []
         best_loss = float("inf")
         best_model_path = os.path.join(output_dir, "best_model.pth")
+        epochs_without_improvement = 0
         
         # Initialize training logs list if not provided
         if training_logs is None:
@@ -440,19 +445,29 @@ class Cell_State_Analyzer_Tool(BaseTool):
             logger.info(epoch_log)
             training_logs.append(epoch_log)
             
-            # Save best model
+            # Save best model and reset patience counter
             if avg_loss < best_loss:
                 best_loss = avg_loss
                 torch.save(model.state_dict(), best_model_path)
                 best_model_log = f"🔥 New best model saved (Loss = {best_loss:.4f})"
                 logger.info(best_model_log)
                 training_logs.append(best_model_log)
+                epochs_without_improvement = 0
+            else:
+                epochs_without_improvement += 1
             
-            # Early stopping
+            # Early stopping: loss threshold
             if avg_loss <= early_stop_loss:
                 early_stop_log = f"✅ Early stopping triggered: Loss = {avg_loss:.4f} <= {early_stop_loss}"
                 logger.info(early_stop_log)
                 training_logs.append(early_stop_log)
+                break
+            
+            # Early stopping: patience (no improvement for >patience epochs)
+            if epochs_without_improvement >= patience:
+                patience_stop_log = f"✅ Early stopping triggered: No improvement for {patience} epochs (best loss: {best_loss:.4f})"
+                logger.info(patience_stop_log)
+                training_logs.append(patience_stop_log)
                 break
         
         return history, best_model_path, training_logs
@@ -801,7 +816,7 @@ class Cell_State_Analyzer_Tool(BaseTool):
         logger.info("🎯 Starting training...")
         training_logs = []  # Collect training progress logs
         history, best_model_path, training_logs = self._train_model(
-            model, train_loader, max_epochs, early_stop_loss, learning_rate, output_dir, training_logs
+            model, train_loader, max_epochs, early_stop_loss, learning_rate, output_dir, training_logs, patience=5
         )
         
         # Load best model
@@ -851,8 +866,8 @@ class Cell_State_Analyzer_Tool(BaseTool):
         adata.write(adata_path)
         logger.info(f"✅ AnnData saved to {adata_path}")
         
-        # Prepare output - visualization will be handled by Analysis_Visualizer_Tool
-        visual_outputs = [loss_curve_path]
+        # Prepare deliverables - includes visualizations and data files
+        deliverables = [loss_curve_path, adata_path]  # Include both loss curve and AnnData file
         
         # Format training logs for display
         training_logs_text = "\n".join(training_logs) if training_logs else ""
@@ -869,7 +884,8 @@ class Cell_State_Analyzer_Tool(BaseTool):
             "best_loss": min(history),
             "loss_curve": loss_curve_path,
             "adata_path": adata_path,  # AnnData file path for Analysis_Visualizer_Tool
-            "visual_outputs": visual_outputs,
+            "deliverables": deliverables,  # Renamed from visual_outputs to deliverables
+            "visual_outputs": deliverables,  # Keep for backward compatibility
             "training_history": history,
             "training_logs": training_logs_text,  # Include training logs for display
             "cluster_key": cluster_key,  # Cluster column name (e.g., "leiden_0.5")

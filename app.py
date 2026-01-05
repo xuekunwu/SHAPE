@@ -693,8 +693,11 @@ def _collect_visual_outputs(result, visual_outputs_list):
         if "per_image" in result:
             for img_result in result["per_image"]:
                 if isinstance(img_result, dict):
-                    # Collect from visual_outputs list
-                    if "visual_outputs" in img_result:
+                    # Collect from deliverables (preferred) or visual_outputs list
+                    if "deliverables" in img_result:
+                        for path in img_result["deliverables"]:
+                            add_path(path)
+                    elif "visual_outputs" in img_result:
                         for path in img_result["visual_outputs"]:
                             add_path(path)
                     # Collect from individual keys
@@ -703,7 +706,11 @@ def _collect_visual_outputs(result, visual_outputs_list):
                             add_path(img_result[key])
         else:
             # Single image result: collect from top level
-            if "visual_outputs" in result:
+            # Check deliverables first (preferred), then visual_outputs for backward compatibility
+            if "deliverables" in result:
+                for path in result["deliverables"]:
+                    add_path(path)
+            elif "visual_outputs" in result:
                 for path in result["visual_outputs"]:
                     add_path(path)
             # Also check individual keys for single results
@@ -721,21 +728,43 @@ def _collect_visual_outputs(result, visual_outputs_list):
                 # Skip preprocessing comparison plots (we already show processed images)
                 continue
                 
-            if not file_path.lower().endswith(('.png', '.jpg', '.jpeg', '.tif', '.tiff')):
+            # Support image files and data files (h5ad for AnnData)
+            if not file_path.lower().endswith(('.png', '.jpg', '.jpeg', '.tif', '.tiff', '.h5ad')):
                 continue
             if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
                 continue
+            
+            # Handle .h5ad files separately (cannot be displayed as images)
+            if file_path.lower().endswith('.h5ad'):
+                # Create a placeholder image for .h5ad files to indicate downloadable data
+                from PIL import ImageDraw, ImageFont
+                placeholder = Image.new('RGB', (400, 200), color='white')
+                draw = ImageDraw.Draw(placeholder)
+                try:
+                    # Try to use a default font
+                    font = ImageFont.truetype("arial.ttf", 20) if os.path.exists("arial.ttf") else ImageFont.load_default()
+                except:
+                    font = ImageFont.load_default()
+                text = f"AnnData File\n{os.path.basename(file_path)}\n(Download available)"
+                # Center text
+                bbox = draw.textbbox((0, 0), text, font=font)
+                text_width = bbox[2] - bbox[0]
+                text_height = bbox[3] - bbox[1]
+                position = ((400 - text_width) // 2, (200 - text_height) // 2)
+                draw.text(position, text, fill='black', font=font)
+                image = placeholder
+            else:
+                # Handle image files normally
+                image = Image.open(file_path)
+                if image.size[0] == 0 or image.size[1] == 0:
+                    continue
                 
-            image = Image.open(file_path)
-            if image.size[0] == 0 or image.size[1] == 0:
-                continue
-            
-            if image.mode not in ['RGB', 'L', 'RGBA']:
-                image = image.convert('RGB')
-            
-            img_array = np.array(image)
-            if img_array.size == 0 or np.isnan(img_array).any():
-                continue
+                if image.mode not in ['RGB', 'L', 'RGBA']:
+                    image = image.convert('RGB')
+                
+                img_array = np.array(image)
+                if img_array.size == 0 or np.isnan(img_array).any():
+                    continue
             
             filename = os.path.basename(file_path)
             filename_lower = filename.lower()
@@ -758,7 +787,9 @@ def _collect_visual_outputs(result, visual_outputs_list):
             image_id_display = f" ({image_id[:8]}...)" if image_id and len(image_id) > 8 else (f" ({image_id})" if image_id else "")
             
             # Generate descriptive label
-            if "overlay" in filename_lower:
+            if file_path.lower().endswith('.h5ad'):
+                label = f"AnnData File: {filename} (Downloadable)"
+            elif "overlay" in filename_lower:
                 label = f"Segmentation Overlay{image_id_display}"
             elif "mask" in filename_lower and "viz" not in filename_lower:
                 label = f"Segmentation Mask{image_id_display}"
@@ -766,6 +797,8 @@ def _collect_visual_outputs(result, visual_outputs_list):
                 label = f"Processed Image{image_id_display}"
             elif "comparison" in filename_lower or "bar" in filename_lower:
                 label = f"Comparison Chart: {filename}"
+            elif "loss_curve" in filename_lower or "loss" in filename_lower:
+                label = f"Training Loss Curve: {filename}"
             else:
                 label = f"Analysis Result{image_id_display}" if image_id_display else f"Analysis Result: {filename}"
             
