@@ -316,7 +316,9 @@ execution = tool.execute(
                 elif 'organoid_mask' in mask_path:
                     source_tool = "Organoid_Segmenter_Tool"
                 # Include query_cache_dir to ensure metadata files are saved in the correct location
+                # query_cache_dir should be the parent directory (without 'tool_cache')
                 query_cache_dir_str = self.query_cache_dir.replace("\\", "\\\\")
+                logger.info(f"Single_Cell_Cropper_Tool: Using query_cache_dir={self.query_cache_dir} (normalized from executor)")
                 return ToolCommand(
                     analysis=f"Using the mask from {source_tool} for single cell cropping",
                     explanation=f"Using the mask path '{mask_path}' from the previous {source_tool} step",

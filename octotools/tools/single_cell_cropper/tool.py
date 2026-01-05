@@ -197,8 +197,15 @@ class Single_Cell_Cropper_Tool(BaseTool):
                 }
             }
             metadata_path = os.path.join(tool_cache_dir, f"cell_crops_metadata_{uuid4().hex[:8]}.json")
+            print(f"Single_Cell_Cropper_Tool: Saving metadata to: {metadata_path}")
+            print(f"Single_Cell_Cropper_Tool: query_cache_dir={query_cache_dir}, tool_cache_dir={tool_cache_dir}")
             with open(metadata_path, 'w') as f:
                 json.dump(output_data, f, indent=2)
+            # Verify file was saved
+            if os.path.exists(metadata_path):
+                print(f"Single_Cell_Cropper_Tool: ✅ Metadata file saved successfully: {metadata_path}")
+            else:
+                print(f"Single_Cell_Cropper_Tool: ❌ ERROR: Metadata file was not saved: {metadata_path}")
 
             # Create a summary visualization
             summary_viz_path = self._create_summary_visualization(

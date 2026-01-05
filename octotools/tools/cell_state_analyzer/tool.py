@@ -488,6 +488,8 @@ class Cell_State_Analyzer_Tool(BaseTool):
     
     def _load_cell_data_from_metadata(self, query_cache_dir):
         """Load cell crops and metadata from metadata files. Merges all metadata files for multi-image processing."""
+        logger.info(f"Cell_State_Analyzer_Tool: Loading metadata from query_cache_dir: {query_cache_dir}")
+        
         # Try multiple possible paths
         possible_dirs = [
             os.path.join(query_cache_dir, "tool_cache"),  # Standard path
@@ -495,13 +497,23 @@ class Cell_State_Analyzer_Tool(BaseTool):
         ]
         possible_dirs = [d for d in possible_dirs if d is not None]
         
+        logger.info(f"Cell_State_Analyzer_Tool: Searching in possible directories: {possible_dirs}")
+        
         metadata_files = []
         for metadata_dir in possible_dirs:
+            logger.info(f"Cell_State_Analyzer_Tool: Checking directory: {metadata_dir}, exists={os.path.exists(metadata_dir)}")
             if os.path.exists(metadata_dir):
-                found_files = glob.glob(os.path.join(metadata_dir, 'cell_crops_metadata_*.json'))
+                search_pattern = os.path.join(metadata_dir, 'cell_crops_metadata_*.json')
+                logger.info(f"Cell_State_Analyzer_Tool: Searching for pattern: {search_pattern}")
+                found_files = glob.glob(search_pattern)
+                logger.info(f"Cell_State_Analyzer_Tool: Found {len(found_files)} file(s) matching pattern")
                 if found_files:
                     metadata_files.extend(found_files)
                     logger.info(f"Found {len(found_files)} metadata file(s) in {metadata_dir}")
+                    for f in found_files:
+                        logger.info(f"  - {f}")
+            else:
+                logger.warning(f"Cell_State_Analyzer_Tool: Directory does not exist: {metadata_dir}")
         
         # Remove duplicates
         metadata_files = list(set(metadata_files))
@@ -509,7 +521,18 @@ class Cell_State_Analyzer_Tool(BaseTool):
         if not metadata_files:
             # Provide detailed error message with all searched paths
             searched_paths = ", ".join(possible_dirs)
-            raise ValueError(f"No metadata files found. Searched in: {searched_paths}. Please ensure Single_Cell_Cropper_Tool has been executed successfully.")
+            # Also list all files in the directories for debugging
+            debug_info = []
+            for metadata_dir in possible_dirs:
+                if os.path.exists(metadata_dir):
+                    all_files = os.listdir(metadata_dir)
+                    debug_info.append(f"Directory {metadata_dir} contains: {all_files}")
+                else:
+                    debug_info.append(f"Directory {metadata_dir} does not exist")
+            error_msg = f"No metadata files found. Searched in: {searched_paths}. Please ensure Single_Cell_Cropper_Tool has been executed successfully."
+            if debug_info:
+                error_msg += f"\nDebug info: {'; '.join(debug_info)}"
+            raise ValueError(error_msg)
         
         # Merge all metadata files (for multi-image processing)
         all_cell_crops = []
