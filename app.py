@@ -1799,7 +1799,20 @@ def prepare_group_assignment(uploaded_files, conversation_state):
     
     # Multiple images: create rows for each
     rows = [[image_name, ""] for image_name in state.upload_path_map.keys()]
-    return gr.update(value=rows, visible=True), "**Upload Status**: Multiple images detected. Please assign a group per image.", state
+    # Check if this is the multiple image comparison example (A2, A3, A4)
+    image_names = list(state.upload_path_map.keys())
+    if len(image_names) == 3:
+        # Check if filenames contain A2, A3, A4
+        has_a2 = any('A2' in name for name in image_names)
+        has_a3 = any('A3' in name for name in image_names)
+        has_a4 = any('A4' in name for name in image_names)
+        if has_a2 and has_a3 and has_a4:
+            status_msg = "**Upload Status**: Multiple images detected. Please assign groups: Control, Control, Treatment (for A2, A3, A4 images respectively)"
+        else:
+            status_msg = "**Upload Status**: Multiple images detected. Please assign a group per image."
+    else:
+        status_msg = "**Upload Status**: Multiple images detected. Please assign a group per image."
+    return gr.update(value=rows, visible=True), status_msg, state
 
 
 def upload_image_to_group(user_image, group_table, conversation_state):
@@ -2278,7 +2291,7 @@ def main(args):
                 examples = [
                     ["Cell counting", ["examples/A1_02_1_1_Phase Contrast_001.png"], "How many cells in the image?", "Image_Preprocessor_Tool, Cell_Segmenter_Tool", "Deliverable: Cell count. The system preprocesses the image and segments cells to provide an accurate cell count."],
                     ["Single image phenotyping", ["examples/A1_02_1_2_Phase Contrast_001.tif"], "How many morphological cell states in the image?", "Image_Preprocessor_Tool, Cell_Segmenter_Tool, Single_Cell_Cropper_Tool, Cell_State_Analyzer_Tool, Analysis_Visualizer_Tool", "Deliverables: Cell count, Cell clustering, UMAP embedding. Complete phenotypic analysis with state classification and visualization."],
-                    ["Multiple image comparison", ["examples/A2_02_1_1_Phase Contrast_001.png", "examples/A3_02_1_1_Phase Contrast_001.png", "examples/A4_02_1_1_Phase Contrast_001.png"], "Whether is there difference between Control and Treatment? (Upload A2, A3, A4 images and set groups: Control, Control, Treatment)", "Image_Preprocessor_Tool, Cell_Segmenter_Tool, Single_Cell_Cropper_Tool, Cell_State_Analyzer_Tool, Analysis_Visualizer_Tool", "Deliverables: Cell count, Cell clustering, UMAP embedding, Group comparison. Comparative analysis across treatment groups with statistical testing. Note: Upload all three images (A2, A3, A4) and set groups (Control, Control, Treatment) for full analysis."]
+                    ["Multiple image comparison", ["examples/A2_02_1_1_Phase Contrast_001.png", "examples/A3_02_1_1_Phase Contrast_001.png", "examples/A4_02_1_1_Phase Contrast_001.png"], "Whether is there difference between Control and Treatment?", "Image_Preprocessor_Tool, Cell_Segmenter_Tool, Single_Cell_Cropper_Tool, Cell_State_Analyzer_Tool, Analysis_Visualizer_Tool", "Deliverables: Cell count, Cell clustering, UMAP embedding, Group comparison. Comparative analysis across treatment groups with statistical testing. Note: Upload all three images (A2, A3, A4) and set groups (Control, Control, Treatment) for full analysis."]
                 ]
                 def distribute_tools(category, img, q, tools_str, ans):
                     selected_tools = [tool.strip() for tool in tools_str.split(',')]
@@ -2290,11 +2303,17 @@ def main(args):
                         img_list = img
                     else:
                         img_list = [img]
-                    return img_list, q
+                    # For multiple image comparison example, add instruction to group_prompt
+                    if category == "Multiple image comparison" and len(img_list) == 3:
+                        group_instruction = "**Upload Status**: Multiple images detected. Please assign groups: Control, Control, Treatment (for A2, A3, A4 images respectively)"
+                    else:
+                        # For other examples, don't update group_prompt
+                        group_instruction = gr.update()
+                    return img_list, q, group_instruction
                 gr.Examples(
                     examples=examples,
                     inputs=[gr.Textbox(label="Category", visible=False), user_image, user_query, gr.Textbox(label="Select Tools", visible=False), gr.Textbox(label="Reference Answer", visible=False)],
-                    outputs=[user_image, user_query],
+                    outputs=[user_image, user_query, group_prompt],
                     fn=distribute_tools,
                     cache_examples=False,
                     label=""
