@@ -2383,7 +2383,7 @@ def main(args):
                 examples = [
                     ["Cell counting", ["examples/iPSC-fibroblast.jpg"], "How many cells in the image?", "Image_Preprocessor_Tool, Cell_Segmenter_Tool", "Cell count. The system preprocesses the image and segments cells to provide an accurate cell count."],
                     ["Single image phenotyping", ["examples/iPSC-cardiomyocyte.tif"], "How many morphological cell states in the image?", "Image_Preprocessor_Tool, Cell_Segmenter_Tool, Single_Cell_Cropper_Tool, Cell_State_Analyzer_Tool, Analysis_Visualizer_Tool", "Cell count, Cell clustering, UMAP embedding. Complete phenotypic analysis with state classification and visualization."],
-                    ["Multiple image comparison", ["examples/Hela_Control.png", "examples/Hela_STS.png", "examples/Hela_AdOx 0.25 mM.png", "examples/Hela_AdOx 1 mM.png", "examples/Hela_AdOx 1 mM + zVAD-fmk.png"], "Is there difference among these images?", "Image_Preprocessor_Tool, Cell_Segmenter_Tool, Single_Cell_Cropper_Tool, Cell_State_Analyzer_Tool, Analysis_Visualizer_Tool", "Cell count, Cell clustering, UMAP embedding, Group comparison. Comparative analysis across treatment groups with statistical testing. Note: Upload all images and set groups for full analysis."]
+                    ["Multiple image comparison", ["examples/Hela_Control.png", "examples/Hela_AdOx 0.25 mM.png", "examples/Hela_AdOx 1 mM.png"], "What difference of these images at the cell state level?", "Image_Preprocessor_Tool, Cell_Segmenter_Tool, Single_Cell_Cropper_Tool, Cell_State_Analyzer_Tool, Analysis_Visualizer_Tool", "Cell count, Cell clustering, UMAP embedding, Group comparison. Comparative analysis across treatment groups with statistical testing. Note: Upload all images and set groups for full analysis."]
                 ]
                 def distribute_tools(category, img, q, tools_str, ans):
                     selected_tools = [tool.strip() for tool in tools_str.split(',')]
@@ -2396,7 +2396,7 @@ def main(args):
                     else:
                         img_list = [img]
                     # For multiple image comparison example, add instruction to group_prompt
-                    if category == "Multiple image comparison" and len(img_list) == 5:
+                    if category == "Multiple image comparison" and len(img_list) == 3:
                         group_instruction = "**Upload Status**: Multiple images detected. Please assign groups for all images."
                     else:
                         # For other examples, don't update group_prompt
