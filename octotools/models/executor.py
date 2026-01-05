@@ -36,14 +36,18 @@ class Executor:
 
     def set_query_cache_dir(self, query_cache_dir):
         if query_cache_dir:
-            self.query_cache_dir = query_cache_dir
-            # Also update tool_cache_dir to use the new query_cache_dir
-            # If query_cache_dir already contains "tool_cache", use it directly
-            # Otherwise, append "tool_cache" to it
-            if "tool_cache" in query_cache_dir:
-                self.tool_cache_dir = query_cache_dir
-            else:
-                self.tool_cache_dir = os.path.join(query_cache_dir, "tool_cache")
+            # Normalize query_cache_dir: if it ends with 'tool_cache', remove it to get parent directory
+            # query_cache_dir should always be the parent directory (without 'tool_cache')
+            normalized_query_cache_dir = query_cache_dir.rstrip(os.sep)
+            if normalized_query_cache_dir.endswith('tool_cache'):
+                # Remove 'tool_cache' suffix to get parent directory
+                normalized_query_cache_dir = os.path.dirname(normalized_query_cache_dir)
+            elif normalized_query_cache_dir.endswith(os.path.join('', 'tool_cache')):
+                normalized_query_cache_dir = os.path.dirname(normalized_query_cache_dir)
+            
+            self.query_cache_dir = normalized_query_cache_dir
+            # tool_cache_dir should always be query_cache_dir + 'tool_cache'
+            self.tool_cache_dir = os.path.join(self.query_cache_dir, "tool_cache")
         else:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             self.query_cache_dir = os.path.join(self.query_cache_dir, timestamp)
@@ -119,19 +123,25 @@ import glob
 
 # Dynamically find all metadata files (for multi-image processing)
 # _load_cell_data_from_metadata expects query_cache_dir (parent directory) and constructs tool_cache path internally
-# Get parent directory from tool_cache_dir (remove 'tool_cache' suffix if present)
+# query_cache_dir should already be the parent directory (without 'tool_cache')
 tool_cache_dir_str = r'{self.tool_cache_dir}'
 query_cache_dir_str = r'{self.query_cache_dir}'
 
-# Determine parent directory: if tool_cache_dir ends with 'tool_cache', get its parent
-# Otherwise, tool_cache_dir is already the parent and we need to append 'tool_cache' (but this shouldn't happen)
-if tool_cache_dir_str.endswith(os.path.sep + 'tool_cache') or tool_cache_dir_str.endswith('/tool_cache'):
-    query_cache_dir_parent = os.path.dirname(tool_cache_dir_str)
-elif tool_cache_dir_str.endswith('tool_cache'):
-    query_cache_dir_parent = os.path.dirname(tool_cache_dir_str)
+# query_cache_dir should already be the parent directory, use it directly
+# If for some reason it contains 'tool_cache', extract parent directory
+if 'tool_cache' in query_cache_dir_str:
+    # Extract parent directory if query_cache_dir contains 'tool_cache'
+    if query_cache_dir_str.endswith(os.path.sep + 'tool_cache') or query_cache_dir_str.endswith('/tool_cache'):
+        query_cache_dir_parent = os.path.dirname(query_cache_dir_str)
+    elif query_cache_dir_str.endswith('tool_cache'):
+        query_cache_dir_parent = os.path.dirname(query_cache_dir_str)
+    else:
+        # Find the parent of the 'tool_cache' directory
+        parts = query_cache_dir_str.split('tool_cache')
+        query_cache_dir_parent = parts[0].rstrip(os.sep) if parts[0] else query_cache_dir_str
 else:
-    # Fallback: use query_cache_dir if it doesn't contain tool_cache
-    query_cache_dir_parent = query_cache_dir_str if 'tool_cache' not in query_cache_dir_str else os.path.dirname(query_cache_dir_str)
+    # query_cache_dir is already the parent directory
+    query_cache_dir_parent = query_cache_dir_str
 
 logger.info(f"Looking for metadata files in: {{tool_cache_dir_str}}")
 logger.info(f"Using query_cache_dir_parent: {{query_cache_dir_parent}}")
