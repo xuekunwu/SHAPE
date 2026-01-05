@@ -22,6 +22,10 @@ from typing import List, Dict, Any, Optional, Tuple
 from uuid import uuid4
 import matplotlib.pyplot as plt
 import seaborn as sns
+
+# Set up logger
+logger = logging.getLogger(__name__)
+
 # Import hf_hub_download for loading PyTorch model weights
 try:
     from huggingface_hub import hf_hub_download
@@ -490,12 +494,33 @@ class Cell_State_Analyzer_Tool(BaseTool):
         """Load cell crops and metadata from metadata files. Merges all metadata files for multi-image processing."""
         logger.info(f"Cell_State_Analyzer_Tool: Loading metadata from query_cache_dir: {query_cache_dir}")
         
-        # Try multiple possible paths
+        # Standard tool_cache directory
+        tool_cache_dir = os.path.join(query_cache_dir, "tool_cache")
+        
+        # Try multiple possible paths:
+        # 1. Directly in tool_cache_dir (where Single_Cell_Cropper_Tool saves metadata)
+        # 2. In group subdirectories (e.g., tool_cache_dir/default/, tool_cache_dir/control/, etc.)
         possible_dirs = [
-            os.path.join(query_cache_dir, "tool_cache"),  # Standard path
-            query_cache_dir if "tool_cache" in query_cache_dir else None,  # If already contains tool_cache
+            tool_cache_dir,  # Standard path - metadata should be here
         ]
-        possible_dirs = [d for d in possible_dirs if d is not None]
+        
+        # Also check group subdirectories if they exist
+        if os.path.exists(tool_cache_dir):
+            try:
+                subdirs = [d for d in os.listdir(tool_cache_dir) 
+                          if os.path.isdir(os.path.join(tool_cache_dir, d))]
+                for subdir in subdirs:
+                    possible_dirs.append(os.path.join(tool_cache_dir, subdir))
+                logger.info(f"Cell_State_Analyzer_Tool: Found subdirectories in tool_cache: {subdirs}")
+            except Exception as e:
+                logger.warning(f"Cell_State_Analyzer_Tool: Error listing subdirectories: {e}")
+        
+        # Also check if query_cache_dir already contains tool_cache
+        if "tool_cache" in query_cache_dir:
+            possible_dirs.append(query_cache_dir)
+        
+        # Remove duplicates and None values
+        possible_dirs = list(set([d for d in possible_dirs if d is not None]))
         
         logger.info(f"Cell_State_Analyzer_Tool: Searching in possible directories: {possible_dirs}")
         
@@ -525,8 +550,11 @@ class Cell_State_Analyzer_Tool(BaseTool):
             debug_info = []
             for metadata_dir in possible_dirs:
                 if os.path.exists(metadata_dir):
-                    all_files = os.listdir(metadata_dir)
-                    debug_info.append(f"Directory {metadata_dir} contains: {all_files}")
+                    try:
+                        all_items = os.listdir(metadata_dir)
+                        debug_info.append(f"Directory {metadata_dir} contains: {all_items}")
+                    except Exception as e:
+                        debug_info.append(f"Directory {metadata_dir} exists but cannot list contents: {e}")
                 else:
                     debug_info.append(f"Directory {metadata_dir} does not exist")
             error_msg = f"No metadata files found. Searched in: {searched_paths}. Please ensure Single_Cell_Cropper_Tool has been executed successfully."
