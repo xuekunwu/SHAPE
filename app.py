@@ -674,10 +674,11 @@ def _check_tool_execution_error(result, tool_name: str) -> tuple[bool, str]:
     return False, ""  # No error detected
 
 
-def _collect_visual_outputs(result, visual_outputs_list):
+def _collect_visual_outputs(result, visual_outputs_list, downloadable_files_list=None):
     """
     Collect visual outputs from tool result and add to visual_outputs_list.
     Unified collection logic: handles both single image and per_image structures.
+    Also collects downloadable files (e.g., h5ad) to downloadable_files_list if provided.
     """
     visual_output_files = []
     seen_paths = set()  # Track seen paths to avoid duplicates
@@ -700,8 +701,8 @@ def _collect_visual_outputs(result, visual_outputs_list):
                     elif "visual_outputs" in img_result:
                         for path in img_result["visual_outputs"]:
                             add_path(path)
-                    # Collect from individual keys
-                    for key in ["overlay_path", "mask_path", "processed_image_path", "output_path"]:
+                    # Collect from individual keys (exclude processed_image_path and mask_path)
+                    for key in ["overlay_path", "output_path"]:
                         if key in img_result:
                             add_path(img_result[key])
         else:
@@ -713,8 +714,8 @@ def _collect_visual_outputs(result, visual_outputs_list):
             elif "visual_outputs" in result:
                 for path in result["visual_outputs"]:
                     add_path(path)
-            # Also check individual keys for single results
-            for key in ["overlay_path", "mask_path", "processed_image_path", "output_path"]:
+            # Also check individual keys for single results (exclude processed_image_path and mask_path)
+            for key in ["overlay_path", "output_path"]:
                 if key in result:
                     add_path(result[key])
     
@@ -727,6 +728,14 @@ def _collect_visual_outputs(result, visual_outputs_list):
             if "comparison" in filename and "preprocessed" in filename:
                 # Skip preprocessing comparison plots (we already show processed images)
                 continue
+            
+            # Skip processed images and segmentation masks (but keep overlays)
+            if "processed" in filename and "_processed" in filename:
+                # Skip processed images from Image_Preprocessor_Tool
+                continue
+            if "mask" in filename and "overlay" not in filename and "viz" not in filename:
+                # Skip segmentation masks from Segmenter_Tool (but keep overlay visualizations)
+                continue
                 
             # Support image files and data files (h5ad for AnnData)
             if not file_path.lower().endswith(('.png', '.jpg', '.jpeg', '.tif', '.tiff', '.h5ad')):
@@ -734,25 +743,13 @@ def _collect_visual_outputs(result, visual_outputs_list):
             if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
                 continue
             
-            # Handle .h5ad files separately (cannot be displayed as images)
+            # Handle .h5ad files separately - add to downloadable files list instead of visual outputs
             if file_path.lower().endswith('.h5ad'):
-                # Create a placeholder image for .h5ad files to indicate downloadable data
-                from PIL import ImageDraw, ImageFont
-                placeholder = Image.new('RGB', (400, 200), color='white')
-                draw = ImageDraw.Draw(placeholder)
-                try:
-                    # Try to use a default font
-                    font = ImageFont.truetype("arial.ttf", 20) if os.path.exists("arial.ttf") else ImageFont.load_default()
-                except:
-                    font = ImageFont.load_default()
-                text = f"AnnData File\n{os.path.basename(file_path)}\n(Download available)"
-                # Center text
-                bbox = draw.textbbox((0, 0), text, font=font)
-                text_width = bbox[2] - bbox[0]
-                text_height = bbox[3] - bbox[1]
-                position = ((400 - text_width) // 2, (200 - text_height) // 2)
-                draw.text(position, text, fill='black', font=font)
-                image = placeholder
+                # Add to downloadable files list if provided
+                if downloadable_files_list is not None:
+                    downloadable_files_list.append(file_path)
+                # Skip adding to visual outputs (no placeholder image)
+                continue
             else:
                 # Handle image files normally
                 image = Image.open(file_path)
@@ -787,9 +784,7 @@ def _collect_visual_outputs(result, visual_outputs_list):
             image_id_display = f" ({image_id[:8]}...)" if image_id and len(image_id) > 8 else (f" ({image_id})" if image_id else "")
             
             # Generate descriptive label
-            if file_path.lower().endswith('.h5ad'):
-                label = f"AnnData File: {filename} (Downloadable)"
-            elif "overlay" in filename_lower:
+            if "overlay" in filename_lower:
                 label = f"Segmentation Overlay{image_id_display}"
             elif "mask" in filename_lower and "viz" not in filename_lower:
                 label = f"Segmentation Mask{image_id_display}"
@@ -839,6 +834,7 @@ class Solver:
         self.start_time = time.time()
         self.step_tokens = []
         self.visual_outputs_for_gradio = []
+        self.downloadable_files = []  # List of file paths for downloadable files (e.g., h5ad)
 
         self.output_types = output_types.lower().split(',')
         assert all(output_type in ["base", "final", "direct"] for output_type in self.output_types), "Invalid output type. Supported types are 'base', 'final', 'direct'."
@@ -1374,8 +1370,8 @@ class Solver:
             # Generate dynamic visual description based on tool and results
             visual_description = self.generate_visual_description(tool_name, result, self.visual_outputs_for_gradio)
             
-            # Collect and add visual outputs
-            _collect_visual_outputs(result, self.visual_outputs_for_gradio)
+            # Collect and add visual outputs (also collect downloadable files)
+            _collect_visual_outputs(result, self.visual_outputs_for_gradio, self.downloadable_files)
             
             # Track successful step (if not failed in this iteration)
             step_has_error = any(
@@ -2259,8 +2255,10 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
             # Return the current state
             state.conversation = messages
             state.last_visual_description = visual_desc
+            # Get downloadable files from solver
+            downloadable_files = solver.downloadable_files if hasattr(solver, 'downloadable_files') else []
             # Direct yield messages (already a list of ChatMessage objects)
-            yield messages, text_output, gallery_output, progress_md, state
+            yield messages, text_output, gallery_output, progress_md, downloadable_files, state
             
     except Exception as e:
         print(f"Error in solve_problem_gradio: {e}")
@@ -2273,7 +2271,7 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
         error_message = f"⚠️ Error occurred during analysis:\n\n**Error Type:** {type(e).__name__}\n**Error Message:** {str(e)}\n\nPlease check your input and try again."
         error_messages = messages + [ChatMessage(role="assistant", content=error_message)]
         state.conversation = error_messages
-        yield error_messages, "", [], "**Progress**: Error occurred", state
+        yield error_messages, "", [], "**Progress**: Error occurred", [], state
     finally:
         print(f"Task completed for query_id: {query_id}. Preparing to clean up cache directory: {query_cache_dir}")
         try:
@@ -2375,6 +2373,8 @@ def main(args):
         text_output = gr.Markdown(value="")
         gr.Markdown("### 🖼️ Visual Outputs")
         gallery_output = gr.Gallery(label=None, show_label=False, height=350, columns=3, rows=2)
+        gr.Markdown("### 📥 Downloadable Files")
+        downloadable_files_output = gr.File(label="Download Analysis Data Files (e.g., AnnData .h5ad)", file_count="multiple", visible=True)
 
         # Examples row (optional, no nesting issues)
         with gr.Row():
@@ -2426,7 +2426,7 @@ def main(args):
         run_button.click(
             solve_problem_gradio,
             [user_query, language_model, conversation_state],
-            [chatbot_output, text_output, gallery_output, progress_md, conversation_state]
+            [chatbot_output, text_output, gallery_output, progress_md, downloadable_files_output, conversation_state]
         )
 
     #################### Gradio Interface ####################

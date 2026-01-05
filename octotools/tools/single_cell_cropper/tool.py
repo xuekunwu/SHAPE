@@ -258,12 +258,7 @@ class Single_Cell_Cropper_Tool(BaseTool):
                     "execution_status": "no_crops_generated"
                 }
 
-            # Create a summary visualization
-            summary_viz_path = self._create_summary_visualization(
-                original_img, mask, cell_crops, stats, query_cache_dir, min_area, margin
-            )
-            
-            # Build detailed summary with filtering information
+            # Build detailed summary with processing statistics
             summary_parts = [f"Successfully generated {stats['final_cell_count']} single-cell crops."]
             
             # Add filtering statistics if available
@@ -272,6 +267,16 @@ class Single_Cell_Cropper_Tool(BaseTool):
             filtered_by_border = stats.get('filtered_by_border', 0)
             invalid_crop_data = stats.get('invalid_crop_data', 0)
             total_filtered = filtered_by_area + filtered_by_border + invalid_crop_data
+            
+            # Add processing statistics to summary
+            stats_text = f"\n\n**Processing Statistics:**\n"
+            stats_text += f"- Total objects detected: {total_detected}\n"
+            stats_text += f"- Final cell count: {stats['final_cell_count']}\n"
+            stats_text += f"- Filtered by area (min_area={min_area}px): {filtered_by_area}\n"
+            stats_text += f"- Filtered by border constraints: {filtered_by_border}\n"
+            stats_text += f"- Invalid crop data: {invalid_crop_data}\n"
+            stats_text += f"- Total filtered: {total_filtered}\n"
+            stats_text += f"- Parameters: min_area={min_area}px, margin={margin}px"
             
             if total_detected > 0:
                 if total_filtered > 0:
@@ -290,6 +295,7 @@ class Single_Cell_Cropper_Tool(BaseTool):
                     summary_parts.append(f"All {total_detected} detected objects were successfully cropped.")
             
             summary_parts.append(f"All paths and metadata are saved in '{Path(metadata_path).name}'.")
+            summary_parts.append(stats_text)
             
             return {
                 "summary": " ".join(summary_parts),
@@ -300,7 +306,8 @@ class Single_Cell_Cropper_Tool(BaseTool):
                 "invalid_crop_data": invalid_crop_data,
                 "cell_crops_metadata_path": metadata_path,
                 "cell_crop_objects": cell_crop_objects,  # Return CellCrop objects for Stage 2 tools
-                "visual_outputs": [summary_viz_path] if summary_viz_path else [],
+                "visual_outputs": [],  # No summary visualization
+                "processing_statistics": stats  # Include processing statistics in result
             }
             
         except Exception as e:

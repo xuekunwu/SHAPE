@@ -814,40 +814,138 @@ class Analysis_Visualizer_Tool(BaseTool):
     
     def _create_publication_cluster_composition(self, adata, cluster_key: str,
                                                output_dir: str, figure_size: tuple, dpi: int) -> Optional[str]:
-        """Create publication-quality cluster composition plot by group."""
+        """Create publication-quality cluster composition plot by group with grouped bar chart and statistical testing."""
         if 'group' not in adata.obs or cluster_key not in adata.obs:
             return None
         
-        # Calculate composition
+        # Calculate composition (proportions)
         composition = pd.crosstab(
             adata.obs['group'], 
             adata.obs[cluster_key],
             normalize='index'
         )
         
-        fig, ax = VisualizationConfig.create_professional_figure(figsize=figure_size)
+        # Calculate number of images per group (if image_name column exists)
+        images_per_group = {}
+        if 'image_name' in adata.obs:
+            for group in composition.index:
+                group_mask = adata.obs['group'] == group
+                unique_images = adata.obs.loc[group_mask, 'image_name'].nunique()
+                images_per_group[group] = unique_images
+        else:
+            # If no image_name, assume we can't determine image count
+            for group in composition.index:
+                images_per_group[group] = 0
         
-        # Get professional colors for clusters
-        n_clusters = len(composition.columns)
-        cluster_colors = self._get_color_scheme(n_clusters)
+        # Check if we should perform statistical testing (>=2 images per group)
+        perform_statistical_test = all(count >= 2 for count in images_per_group.values()) and len(images_per_group) >= 2
         
-        # Stacked bar chart with professional colors
-        composition.plot(kind='bar', stacked=True, ax=ax, 
-                        color=cluster_colors[:n_clusters], width=0.6, 
-                        edgecolor='white', linewidth=1.0)
+        # Create figure with subplots if statistical test is needed
+        if perform_statistical_test:
+            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(figure_size[0] * 1.5, figure_size[1]), dpi=dpi)
+        else:
+            fig, ax1 = plt.subplots(1, 1, figsize=figure_size, dpi=dpi)
+            ax2 = None
+        
+        # Get professional colors for groups
+        n_groups = len(composition.index)
+        group_colors = self._get_color_scheme(n_groups)
+        
+        # Create grouped bar chart (each cluster is a group of bars, one per group)
+        clusters = composition.columns.tolist()
+        n_clusters = len(clusters)
+        x = np.arange(n_clusters)
+        width = 0.8 / n_groups  # Width of each bar
+        
+        for i, group in enumerate(composition.index):
+            proportions = composition.loc[group].values
+            offset = (i - n_groups / 2 + 0.5) * width
+            ax1.bar(x + offset, proportions, width, label=str(group), 
+                   color=group_colors[i], edgecolor='white', linewidth=1.0, alpha=0.8)
         
         # Apply professional styling
         VisualizationConfig.apply_professional_styling(
-            ax, title='Cluster Composition by Group', 
-            xlabel='Group', ylabel='Proportion'
+            ax1, title='Cluster Proportion by Group', 
+            xlabel='Cluster', ylabel='Proportion'
         )
         
-        # Professional legend
-        VisualizationConfig.create_professional_legend(
-            ax, title='Cluster', bbox_to_anchor=(1.02, 1), loc='upper left'
-        )
+        ax1.set_xticks(x)
+        ax1.set_xticklabels([f'Cluster {c}' for c in clusters], rotation=45, ha='right')
+        ax1.legend(title='Group', bbox_to_anchor=(1.02, 1), loc='upper left')
+        ax1.set_ylim([0, 1])
+        ax1.grid(axis='y', alpha=0.3, linestyle='--')
         
-        ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')
+        # Perform statistical testing if conditions are met
+        stats_text = ""
+        if perform_statistical_test and ax2 is not None:
+            # For each cluster, perform statistical test across groups
+            # We'll use chi-square test or Fisher's exact test for proportions
+            from scipy.stats import chi2_contingency, fisher_exact
+            import numpy as np
+            
+            stats_results = []
+            for cluster in clusters:
+                # Get counts (not proportions) for this cluster across groups
+                cluster_counts = pd.crosstab(adata.obs['group'], adata.obs[cluster_key] == cluster)
+                
+                # Prepare contingency table: [group1_not_in_cluster, group1_in_cluster], [group2_not_in_cluster, group2_in_cluster], ...
+                contingency = []
+                for group in composition.index:
+                    if group in cluster_counts.index:
+                        in_cluster = cluster_counts.loc[group, True] if True in cluster_counts.columns else 0
+                        not_in_cluster = cluster_counts.loc[group, False] if False in cluster_counts.columns else 0
+                        contingency.append([not_in_cluster, in_cluster])
+                    else:
+                        contingency.append([0, 0])
+                
+                contingency = np.array(contingency)
+                
+                # Perform chi-square test
+                try:
+                    if contingency.shape[0] == 2 and contingency.shape[1] == 2:
+                        # 2x2 table: use Fisher's exact test
+                        stat, p_value = fisher_exact(contingency)
+                        test_name = "Fisher's exact"
+                    else:
+                        # Larger table: use chi-square test
+                        stat, p_value, dof, expected = chi2_contingency(contingency)
+                        test_name = "Chi-square"
+                    
+                    significant = p_value < 0.05
+                    stats_results.append({
+                        'cluster': cluster,
+                        'test': test_name,
+                        'p_value': p_value,
+                        'significant': significant
+                    })
+                except Exception as e:
+                    stats_results.append({
+                        'cluster': cluster,
+                        'test': 'Failed',
+                        'p_value': None,
+                        'error': str(e)
+                    })
+            
+            # Display statistical results on second subplot
+            ax2.axis('off')
+            stats_lines = ["**Statistical Test Results**\n"]
+            stats_lines.append(f"Test performed: Chi-square / Fisher's exact\n")
+            stats_lines.append(f"Significance level: α = 0.05\n\n")
+            
+            for result in stats_results:
+                if 'error' in result:
+                    stats_lines.append(f"Cluster {result['cluster']}: {result['error']}\n")
+                else:
+                    sig_marker = "***" if result['significant'] else ""
+                    stats_lines.append(f"Cluster {result['cluster']}: p = {result['p_value']:.4f} {sig_marker}\n")
+            
+            stats_text = "".join(stats_lines)
+            ax2.text(0.1, 0.5, stats_text, transform=ax2.transAxes, 
+                    fontsize=10, verticalalignment='center', family='monospace',
+                    bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+        elif perform_statistical_test:
+            # If we should test but ax2 is None, add stats to summary
+            stats_text = "\n\n**Note**: Statistical testing requires >=2 images per group."
         
         output_path = os.path.join(output_dir, "cluster_composition_by_group.png")
         VisualizationConfig.save_professional_figure(fig, output_path)
