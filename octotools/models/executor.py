@@ -289,19 +289,28 @@ execution = tool.execute(
             logger.debug(f"Looking for mask in previous outputs: {previous_outputs['visual_outputs']}")
             for output_path in previous_outputs['visual_outputs']:
                 logger.debug(f"Checking output path: {output_path}")
-                # Check for various mask types
-                if output_path.endswith('.png') and 'viz' not in output_path:
-                    if 'nuclei_mask' in output_path:
+                # Check for various mask types (support .png, .tif, .tiff formats)
+                # Exclude visualization files (those with 'viz' in the name)
+                output_path_lower = output_path.lower()
+                is_mask_file = (
+                    (output_path_lower.endswith('.png') or 
+                     output_path_lower.endswith('.tif') or 
+                     output_path_lower.endswith('.tiff')) and 
+                    'viz' not in output_path_lower
+                )
+                
+                if is_mask_file:
+                    if 'nuclei_mask' in output_path_lower:
                         mask_path = output_path
                         mask_type = "nuclei_mask"
                         logger.debug(f"Found nuclei mask path: {mask_path}")
                         break
-                    elif 'cell_mask' in output_path:
+                    elif 'cell_mask' in output_path_lower:
                         mask_path = output_path
                         mask_type = "nuclei_mask"  # Use same parameter name for compatibility
                         logger.debug(f"Found cell mask path: {mask_path}")
                         break
-                    elif 'organoid_mask' in output_path:
+                    elif 'organoid_mask' in output_path_lower:
                         mask_path = output_path
                         mask_type = "nuclei_mask"  # Use same parameter name for compatibility
                         logger.debug(f"Found organoid mask path: {mask_path}")
