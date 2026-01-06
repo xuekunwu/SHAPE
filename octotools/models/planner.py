@@ -145,7 +145,7 @@ class Planner:
             logger.debug(f"Available tools after filtering: {available_tools}")
 
         query_prompt = f"""
-Task: Analyze the given query with accompanying inputs and determine the skills and tools needed to address it effectively.
+Task: Analyze the given query with accompanying inputs and determine the MINIMUM necessary skills and tools needed to address it directly and precisely.
 
 Conversation so far:
 {conversation_context}
@@ -158,20 +158,39 @@ Image: {image_info}
 
 Query: {question}
 
-Instructions:
-1. Carefully read and understand the query and any accompanying inputs.
-2. Identify the main objectives or tasks within the query.
-3. List the specific skills that would be necessary to address the query comprehensively.
-4. Examine the available tools in the toolbox and determine which ones are relevant and useful for addressing the query. Make sure to consider the user metadata for each tool, including limitations and potential applications (if available).
-5. Provide a brief explanation for each skill and tool you've identified, describing how it would contribute to answering the query.
+CRITICAL INSTRUCTIONS - READ CAREFULLY:
+1. **Understand the query precisely**: Read the query word-by-word and identify EXACTLY what is being asked. Do NOT add assumptions or extend the query beyond what is explicitly stated.
+
+2. **Identify the core objective**: Determine the SINGLE main objective or task. If the query asks for:
+   - "How many cells" → ONLY cell counting is needed (segmentation + counting)
+   - "What cell states" or "analyze cell states" → Full cell state analysis is needed (preprocessing → segmentation → cropping → clustering → visualization)
+   - "Compare images" → Comparison analysis is needed (may require cell state analysis if comparing at cell state level)
+   - "Detect objects" → Object detection is needed (NOT cell state analysis)
+   
+3. **DO NOT over-extend**: 
+   - If the query asks for cell count, DO NOT suggest cell state analysis tools
+   - If the query asks for cell state analysis, DO NOT suggest additional validation or biological interpretation tools
+   - Only include tools that are DIRECTLY necessary to answer the query
+   - Do NOT add "nice-to-have" or "comprehensive" analysis steps that are not explicitly requested
+
+4. **Select MINIMUM necessary tools**: 
+   - For "how many cells": Image_Preprocessor_Tool (if needed) → Cell_Segmenter_Tool → STOP (count is in segmentation result)
+   - For "what cell states": Full pipeline (preprocessing → segmentation → cropping → clustering → visualization)
+   - For "compare cell states": Full pipeline + group comparison
+   - Only add tools that are REQUIRED, not optional enhancements
+
+5. **Match query type to tool chain**:
+   - Simple counting/detection queries → Minimal tool chain (preprocessing → segmentation)
+   - State analysis queries → Full analysis chain (preprocessing → segmentation → cropping → clustering → visualization)
+   - Comparison queries → Full chain + comparison analysis
 
 Your response should include:
-1. A concise summary of the query's main points and objectives, as well as content in any accompanying inputs.
-2. A list of required skills, with a brief explanation for each.
-3. A list of relevant tools from the toolbox, with a brief explanation of how each tool would be utilized and its potential limitations.
-4. Any additional considerations that might be important for addressing the query effectively.
+1. A precise summary of what the query is asking for (EXACTLY, without additions).
+2. A list of MINIMUM required skills (only what is necessary to answer the query).
+3. A list of MINIMUM necessary tools (only tools directly required to answer the query, no optional enhancements).
+4. A clear explanation of why each tool is necessary (must directly contribute to answering the query).
 
-Please present your analysis in a clear, structured format.
+IMPORTANT: Do NOT suggest tools for analysis that is not explicitly requested in the query.
 """
 
         input_data = [query_prompt]
@@ -240,6 +259,46 @@ Please present your analysis in a clear, structured format.
         
         return False
     
+    def _requires_full_cell_state_analysis(self, question: str) -> bool:
+        """
+        Determine if the query requires full cell state analysis pipeline.
+        Returns True only if the query explicitly asks for cell state analysis, clustering, or comparison at cell state level.
+        Returns False for simple counting queries.
+        """
+        question_lower = question.lower()
+        
+        # Keywords that indicate full cell state analysis is needed
+        state_analysis_keywords = [
+            'cell state', 'cell states', 'cell state analysis', 'analyze cell state',
+            'cell clustering', 'cluster', 'clustering', 'cell type', 'cell types',
+            'phenotype', 'phenotypic', 'morphological state', 'cell morphology analysis',
+            'compare.*cell state', 'difference.*cell state', 'cell state.*difference',
+            'umap', 'embedding', 'cell state level', 'at the cell state level'
+        ]
+        
+        # Keywords that indicate simple counting (do NOT require full analysis)
+        counting_keywords = [
+            'how many', 'count', 'number of', 'quantity', 'total cells',
+            'cell count', 'how many cells', 'number of cells'
+        ]
+        
+        # Check for counting keywords first (higher priority)
+        for keyword in counting_keywords:
+            if keyword in question_lower:
+                # If it's explicitly about cell states, still need full analysis
+                if any(state_kw in question_lower for state_kw in ['cell state', 'cell states', 'state']):
+                    return True
+                # Otherwise, it's just counting
+                return False
+        
+        # Check for state analysis keywords
+        for keyword in state_analysis_keywords:
+            if keyword in question_lower:
+                return True
+        
+        # Default: if unclear, don't force full analysis (let LLM decide)
+        return False
+    
     def generate_next_step(self, question: str, image: str, query_analysis: str, memory: Memory, step_count: int, max_step_count: int, bytes_mode: bool = False, conversation_context: str = "", **kwargs) -> NextStep:
         image_info = self.get_image_info(image) if not bytes_mode else self.get_image_info_bytes(image)
         
@@ -272,23 +331,32 @@ Please present your analysis in a clear, structured format.
         used_tools = [action.get('tool_name', '') for action in actions_for_tools if 'tool_name' in action]
         
         # CRITICAL: Force Single_Cell_Cropper_Tool if last tool was a segmentation tool
+        # BUT ONLY if the query requires full cell state analysis (not just counting)
         if used_tools:
             last_tool = used_tools[-1]
             segmentation_tools = ["Cell_Segmenter_Tool", "Nuclei_Segmenter_Tool", "Organoid_Segmenter_Tool"]
             if last_tool in segmentation_tools:
-                # Override LLM selection - MUST use Single_Cell_Cropper_Tool next
-                logger.info(f"⚠️ FORCING Single_Cell_Cropper_Tool: Last tool '{last_tool}' was a segmentation tool")
-                if "Single_Cell_Cropper_Tool" not in available_tools:
-                    logger.error(f"Single_Cell_Cropper_Tool not available! Available: {available_tools}")
+                # Check if query requires full cell state analysis
+                requires_full_analysis = self._requires_full_cell_state_analysis(question)
+                
+                if requires_full_analysis:
+                    # Override LLM selection - MUST use Single_Cell_Cropper_Tool next
+                    logger.info(f"⚠️ FORCING Single_Cell_Cropper_Tool: Last tool '{last_tool}' was a segmentation tool, and query requires full cell state analysis")
+                    if "Single_Cell_Cropper_Tool" not in available_tools:
+                        logger.error(f"Single_Cell_Cropper_Tool not available! Available: {available_tools}")
+                    else:
+                        # Create a forced next step
+                        forced_context = self._format_memory_for_prompt(memory)
+                        return NextStep(
+                            justification=f"MANDATORY: Previous tool '{last_tool}' was a segmentation tool, and the query requires full cell state analysis. Single_Cell_Cropper_Tool MUST be called next according to the bioimage analysis chain.",
+                            context=forced_context,
+                            sub_goal="Generate single-cell crops from the segmentation mask produced in the previous step. Extract individual cell regions with appropriate margins for downstream analysis.",
+                            tool_name="Single_Cell_Cropper_Tool"
+                        )
                 else:
-                    # Create a forced next step
-                    forced_context = self._format_memory_for_prompt(memory)
-                    return NextStep(
-                        justification=f"MANDATORY: Previous tool '{last_tool}' was a segmentation tool. Single_Cell_Cropper_Tool MUST be called next according to the bioimage analysis chain.",
-                        context=forced_context,
-                        sub_goal="Generate single-cell crops from the segmentation mask produced in the previous step. Extract individual cell regions with appropriate margins for downstream analysis.",
-                        tool_name="Single_Cell_Cropper_Tool"
-                    )
+                    # Query is just counting - segmentation result contains the count, no need to force cropping
+                    logger.info(f"ℹ️ Query appears to be counting-only. Segmentation tool '{last_tool}' completed. " +
+                              f"Cell count should be available in segmentation result. Not forcing Single_Cell_Cropper_Tool.")
         recommended_tools = self.priority_manager.get_recommended_next_tools(
             available_tools, used_tools, self.detected_domain
         )
@@ -312,6 +380,12 @@ Please present your analysis in a clear, structured format.
         prompt_generate_next_step = f"""
 Task: Determine the optimal next step to address the given query based on the provided analysis, available tools, and previous steps taken.
 
+CRITICAL: Understand the query type and select ONLY the minimum necessary tools:
+- If query asks "how many cells" → Only need: Image_Preprocessor_Tool → Cell_Segmenter_Tool → STOP (count is in result)
+- If query asks "what cell states" or "analyze cell states" → Need full pipeline: preprocessing → segmentation → cropping → clustering → visualization
+- If query asks "compare" at cell state level → Need full pipeline + comparison
+- DO NOT add tools beyond what is explicitly needed to answer the query
+
 Context:
 Query: {question}
 Image: {image if not bytes_mode else 'image.jpg'}
@@ -324,7 +398,13 @@ Available Tools (organized by priority):
 Recommended Next Tools (considering dependencies and priorities):
 {recommended_tools_str}
 
-⚠️ CRITICAL CHECK: Look at "Previous Steps and Their Results" above. If the LAST tool executed was:
+⚠️ CRITICAL CHECK: Look at "Previous Steps and Their Results" above. 
+
+   IMPORTANT: Only enforce tool chain if the query requires full cell state analysis:
+   - If query asks "how many cells" → After segmentation, STOP (count is in result). Do NOT force Single_Cell_Cropper_Tool.
+   - If query asks "what cell states" or "analyze cell states" → Follow full pipeline below.
+   
+   If the query requires full cell state analysis AND the LAST tool executed was:
    - Cell_Segmenter_Tool, OR
    - Nuclei_Segmenter_Tool, OR  
    - Organoid_Segmenter_Tool
@@ -356,15 +436,27 @@ Current Step: {step_count} in {max_step_count} steps
 Remaining Steps: {max_step_count - step_count}
 
 Instructions:
-1. Analyze the context thoroughly, including the query, its analysis, any image, available tools and their metadata, and previous steps taken.
+1. **First, identify the query type precisely**:
+   - Is this a simple counting query ("how many cells")? → Use minimal tools (preprocessing → segmentation → STOP)
+   - Is this a cell state analysis query ("what cell states", "analyze cell states")? → Use full pipeline
+   - Is this a comparison query? → Determine if comparison is at cell state level or just counts
+   - DO NOT assume the query needs full analysis if it only asks for counts
 
-2. Determine the most appropriate next step by considering:
-   - Key objectives from the query analysis
+2. Analyze the context thoroughly, including the query, its analysis, any image, available tools and their metadata, and previous steps taken.
+
+3. Determine the most appropriate next step by considering:
+   - **Query type and minimum requirements**: What is the MINIMUM needed to answer the query?
+   - Key objectives from the query analysis (ONLY what is explicitly stated)
    - Capabilities of available tools (see priority grouping above)
-   - Logical progression of problem-solving
+   - Logical progression of problem-solving (but only for what is needed)
    - Outcomes from previous steps
    - Tool dependencies (some tools require other tools to run first)
    - Current step count and remaining steps
+   
+4. **CRITICAL: Do NOT over-extend**:
+   - If the query asks for cell count and segmentation is done → STOP, do NOT proceed to cell state analysis
+   - If the query asks for cell state analysis and visualization is done → STOP, do NOT add unnecessary validation steps
+   - Only proceed to next tool if it is REQUIRED to answer the query
 
 3. Tool Selection Priority (IMPORTANT - FOLLOW THIS ORDER):
    Tools are organized by priority level. You MUST follow this priority order:
@@ -383,24 +475,31 @@ Instructions:
    IMPORTANT: Always prefer tools from higher priority levels (HIGH > MEDIUM > LOW).
    Do NOT use LOW priority code generation tools if any higher-priority tool can address the query.
 
-4. CRITICAL: Bioimage Analysis Chain Priority (MUST FOLLOW THIS ORDER):
-   For bioimage analysis queries, you MUST follow this specific tool chain order:
+4. CRITICAL: Bioimage Analysis Chain Priority (MUST FOLLOW THIS ORDER ONLY IF QUERY REQUIRES IT):
+   IMPORTANT: Only follow the full chain if the query explicitly asks for cell state analysis, clustering, or comparison at cell state level.
+   For simple counting queries ("how many cells"), only use: Image_Preprocessor_Tool → Segmenter → STOP (count is in segmentation result).
+   
+   For cell state analysis queries, you MUST follow this specific tool chain order:
    
    Step 1: Image_Preprocessor_Tool (if image quality needs improvement)
    Step 2: Choose ONE segmentation tool based on image type:
            - Cell_Segmenter_Tool (for phase-contrast cell images)
            - Nuclei_Segmenter_Tool (for nuclei/fluorescence images)
            - Organoid_Segmenter_Tool (for organoid images)
-   Step 3: Single_Cell_Cropper_Tool (REQUIRED - must be called IMMEDIATELY after Step 2)
-          ⚠️ MANDATORY: If a segmentation tool (Cell_Segmenter_Tool, Nuclei_Segmenter_Tool, or Organoid_Segmenter_Tool) 
-          was just executed, you MUST select Single_Cell_Cropper_Tool as the next tool. 
+   Step 3: Single_Cell_Cropper_Tool (REQUIRED - must be called IMMEDIATELY after Step 2, ONLY if query requires cell state analysis)
+          ⚠️ MANDATORY: If a segmentation tool was just executed AND the query requires cell state analysis, 
+          you MUST select Single_Cell_Cropper_Tool as the next tool. 
           Do NOT skip this step. Do NOT select any other tool.
+          ⚠️ NOT REQUIRED: If the query is just counting cells, STOP after segmentation (count is in result).
    Step 4: Cell_State_Analyzer_Tool (requires single-cell crops from Step 3)
    
-   This chain MUST be followed in order: Image_Preprocessor → Segmenter → Single_Cell_Cropper → Cell_State_Analyzer
+   This chain MUST be followed in order ONLY for cell state analysis queries: 
+   Image_Preprocessor → Segmenter → Single_Cell_Cropper → Cell_State_Analyzer
    Do NOT skip steps or use tools out of order.
    
-   CRITICAL RULE: When a segmentation tool completes, the next tool MUST be Single_Cell_Cropper_Tool.
+   CRITICAL RULE: When a segmentation tool completes:
+   - If query requires cell state analysis → Next tool MUST be Single_Cell_Cropper_Tool
+   - If query is just counting → STOP (count is available in segmentation result)
 
 5. Check Tool Dependencies:
    Some tools require other tools to run first:
@@ -455,33 +554,39 @@ Example (do not copy, use only as reference):
         
         # CRITICAL: Code-level enforcement - verify LLM selection matches forced rules
         # (This is a safety check in case the pre-LLM check was somehow bypassed)
+        # BUT ONLY if the query requires full cell state analysis
         if used_tools:
             last_tool = used_tools[-1]
             segmentation_tools = ["Cell_Segmenter_Tool", "Nuclei_Segmenter_Tool", "Organoid_Segmenter_Tool"]
             if last_tool in segmentation_tools:
-                # Extract tool name from next_step
-                selected_tool = getattr(next_step, 'tool_name', '') if hasattr(next_step, 'tool_name') else ''
-                # Parse from string if needed
-                if not selected_tool and isinstance(next_step, str):
-                    from octotools.utils.response_parser import ResponseParser
-                    _, _, selected_tool = ResponseParser.parse_next_step(next_step, available_tools)
+                # Check if query requires full cell state analysis
+                requires_full_analysis = self._requires_full_cell_state_analysis(question)
                 
-                # Enforce: If LLM didn't select the correct tool, override it
-                if selected_tool != 'Single_Cell_Cropper_Tool':
-                    logger.warning(f"⚠️ CODE ENFORCEMENT: LLM selected '{selected_tool}' after segmentation tool '{last_tool}', "
-                                 f"overriding to Single_Cell_Cropper_Tool")
-                    # Override: Create forced next step
-                    forced_context = self._format_memory_for_prompt(memory)
-                    forced_next_step = NextStep(
-                        justification=f"MANDATORY ENFORCEMENT: Previous tool '{last_tool}' was a segmentation tool. "
-                                    f"Single_Cell_Cropper_Tool MUST be called next according to the bioimage analysis chain. "
-                                    f"LLM selected '{selected_tool}' which was overridden by code-level enforcement.",
-                        context=forced_context,
-                        sub_goal="Generate single-cell crops from the segmentation mask produced in the previous step. "
-                               "Extract individual cell regions with appropriate margins for downstream analysis.",
-                        tool_name="Single_Cell_Cropper_Tool"
-                    )
-                    return forced_next_step
+                if requires_full_analysis:
+                    # Extract tool name from next_step
+                    selected_tool = getattr(next_step, 'tool_name', '') if hasattr(next_step, 'tool_name') else ''
+                    # Parse from string if needed
+                    if not selected_tool and isinstance(next_step, str):
+                        from octotools.utils.response_parser import ResponseParser
+                        _, _, selected_tool = ResponseParser.parse_next_step(next_step, available_tools)
+                    
+                    # Enforce: If LLM didn't select the correct tool, override it
+                    if selected_tool != 'Single_Cell_Cropper_Tool':
+                        logger.warning(f"⚠️ CODE ENFORCEMENT: LLM selected '{selected_tool}' after segmentation tool '{last_tool}', " 
+                                     f"overriding to Single_Cell_Cropper_Tool (query requires full cell state analysis)")
+                        # Override: Create forced next step
+                        forced_context = self._format_memory_for_prompt(memory)
+                        forced_next_step = NextStep(
+                            justification=f"MANDATORY ENFORCEMENT: Previous tool '{last_tool}' was a segmentation tool, and the query requires full cell state analysis. "
+                                        f"Single_Cell_Cropper_Tool MUST be called next according to the bioimage analysis chain. "
+                                        f"LLM selected '{selected_tool}' which was overridden by code-level enforcement.",
+                            context=forced_context,
+                            sub_goal="Generate single-cell crops from the segmentation mask produced in the previous step. "
+                                   "Extract individual cell regions with appropriate margins for downstream analysis.",
+                            tool_name="Single_Cell_Cropper_Tool"
+                        )
+                        return forced_next_step
+                # If query is just counting, don't enforce - let LLM decide or stop
             
             # CRITICAL: Code-level enforcement for Analysis_Visualizer_Tool after Cell_State_Analyzer_Tool
             if last_tool == "Cell_State_Analyzer_Tool":
@@ -642,6 +747,12 @@ Example (do not copy, use only as reference):
         prompt_memory_verification = f"""
 Task: Thoroughly evaluate the completeness and accuracy of the memory for fulfilling the given query, considering the potential need for additional tool usage.
 
+CRITICAL: Understand the query type and verify ONLY what is explicitly asked:
+- If query asks "how many cells" → Verify that cell count is available (from segmentation result) → STOP if count exists
+- If query asks "what cell states" → Verify that cell state analysis (clustering + visualization) is complete → STOP if complete
+- If query asks "compare" → Verify that comparison analysis is complete → STOP if complete
+- DO NOT require information beyond what is explicitly asked in the query
+
 Conversation so far:
 {conversation_context}
 
@@ -654,10 +765,16 @@ Initial Analysis: {query_analysis}
 Memory (tools used and results): {self._format_memory_for_prompt(memory)}
 
 Detailed Instructions:
-1. Carefully analyze the query, initial analysis, and image (if provided):
-   - Identify the main objectives of the query.
-   - Note any specific requirements or constraints mentioned.
-   - If an image is provided, consider its relevance and what information it contributes.
+1. **First, identify the query type precisely**:
+   - Simple counting query ("how many cells")? → Only need cell count from segmentation
+   - Cell state analysis query ("what cell states", "analyze cell states")? → Need full analysis pipeline
+   - Comparison query? → Need comparison results
+   - DO NOT assume the query needs full analysis if it only asks for counts
+
+2. Carefully analyze the query, initial analysis, and image (if provided):
+   - Identify the EXACT objectives of the query (ONLY what is explicitly stated).
+   - Note any specific requirements or constraints mentioned (do NOT add assumptions).
+   - If an image is provided, consider its relevance and what information it contributes (only for what is asked).
 
 2. Review the available tools and their metadata:
    - Understand the capabilities and limitations and best practices of each tool.
@@ -668,14 +785,19 @@ Detailed Instructions:
    - Assess how well each tool's output contributes to answering the query.
 
 4. Critical Evaluation (address each point explicitly):
-   a) Completeness: Does the memory fully address all aspects of the query?
-      - Identify any parts of the query that remain unanswered.
-      - Consider if all relevant information has been extracted from the image (if applicable).
-      - IMPORTANT: For analysis tasks, ensure that the actual analysis has been performed, not just data preparation.
-      - For example: If the query asks to "analyze cell states", ensure that cell state analysis has been performed, not just cell cropping.
+   a) Completeness: Does the memory fully address the SPECIFIC aspects asked in the query?
+      - Identify ONLY the parts of the query that remain unanswered (do NOT add requirements beyond the query).
+      - For "how many cells" queries: If cell count is available (from segmentation), the query is COMPLETE. Do NOT require cell state analysis.
+      - For "what cell states" queries: If cell state analysis (clustering + visualization) is complete, the query is COMPLETE. Do NOT require additional validation.
+      - Consider if all relevant information has been extracted from the image (ONLY for what is explicitly asked).
+      - IMPORTANT: Match the query type to required results:
+        * Counting queries → Only need counts (from segmentation or detection)
+        * State analysis queries → Need full analysis pipeline results
+        * Comparison queries → Need comparison results
       - CRITICAL: If the query asks for analysis and you see analysis results with visualizations, distributions, and statistics, the task is COMPLETE.
       - For cell state analysis: If preprocessing → segmentation → cropping → clustering → visualization is complete, STOP.
       - Technical analysis results (clusters, UMAP, exemplars) are SUFFICIENT - do NOT require biological label mapping or validation.
+      - DO NOT require information that is not explicitly asked in the query.
 
    b) Unused Tools: Are there any unused tools that could provide additional relevant information?
       - Specify which unused tools might be helpful and why.
@@ -698,13 +820,16 @@ Detailed Instructions:
    Based on your thorough analysis, decide if the memory is complete and accurate enough to generate the final output, or if additional tool usage is necessary.
    
    CRITICAL CHECKLIST FOR STOPPING (PRIORITY: Stop early if query is satisfied):
-   - Has the MAIN query been answered? If yes, STOP immediately.
-   - Are there analysis results, visualizations, counts, or statistics that answer the query? If yes, STOP.
+   - Has the MAIN query been answered EXACTLY as asked? If yes, STOP immediately.
+   - For "how many cells" queries: If cell count is available (from segmentation), STOP. Do NOT require cell state analysis.
+   - For "what cell states" queries: If cell state analysis (clustering + visualization) is complete, STOP. Do NOT require additional steps.
+   - Are there analysis results, visualizations, counts, or statistics that DIRECTLY answer the query? If yes, STOP.
    - If the query asked for "compare", "count", "analyze", "detect" and you have those results, STOP.
    - If the query asked for specific outputs (charts, counts, comparisons) and they exist, STOP.
    - DO NOT continue just because there are unused tools available.
    - DO NOT use Python_Code_Generator_Tool unless NO other tools can solve the query.
    - STOP if the query is satisfied, even if some tools haven't been used.
+   - DO NOT require information beyond what is explicitly asked in the query.
    
    IMPORTANT: For cell state analysis queries ("what cell states", "analyze cell states", etc.):
    - If Analysis_Visualizer_Tool has been executed and produced visualizations (UMAP, clusters, exemplars), the task is COMPLETE. STOP.
