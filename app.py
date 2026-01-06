@@ -2341,15 +2341,21 @@ def main(args):
         /* Gradient buttons: only for Add Group and Ask Question buttons using elem_classes */
         /* Cool gradient: dark teal → lavender → magenta → peach */
         .gradient-button-primary button,
-        .gradient-button-primary button:not(:hover) {
+        .gradient-button-primary button:not(:hover),
+        button.gradient-button-primary,
+        .gradient-button-primary > button {
             background: linear-gradient(180deg, #2E5266 0%, #6B8E9F 25%, #B19CD9 50%, #D9468F 75%, #FF8C94 100%) !important;
+            background-image: linear-gradient(180deg, #2E5266 0%, #6B8E9F 25%, #B19CD9 50%, #D9468F 75%, #FF8C94 100%) !important;
             border: none !important;
             color: #ffffff !important;
             box-shadow: 0 4px 15px rgba(217, 70, 143, 0.3) !important;
             transition: all 0.3s ease !important;
         }
-        .gradient-button-primary button:hover {
+        .gradient-button-primary button:hover,
+        button.gradient-button-primary:hover,
+        .gradient-button-primary > button:hover {
             background: linear-gradient(180deg, #1E3A4A 0%, #5B7E8F 25%, #A18CC9 50%, #C9367F 75%, #FF7C84 100%) !important;
+            background-image: linear-gradient(180deg, #1E3A4A 0%, #5B7E8F 25%, #A18CC9 50%, #C9367F 75%, #FF7C84 100%) !important;
             border: none !important;
             color: #ffffff !important;
             box-shadow: 0 6px 20px rgba(217, 70, 143, 0.5) !important;
