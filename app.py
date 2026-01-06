@@ -42,10 +42,10 @@ _AVAILABLE_TOOLS_CACHE = None
 # All tools process images uniformly (batch processing style)
 # Each image is processed independently with group+image_name labeling
 # Tools that merge all images should NOT be executed in per_image loop
-# These tools execute once, merging all images' data together
+# These tools execute once, merging all images' data together for group comparison
 TOOLS_THAT_MERGE_ALL_IMAGES = [
-    "Cell_State_Analyzer_Tool",  # Merges all cells from all images for unified analysis
-    "Analysis_Visualizer_Tool",  # Visualizes results from Cell_State_Analyzer_Tool (merged data)
+    "Cell_State_Analyzer_Tool",  # Merges all cells from all images for unified analysis and group comparison
+    "Analysis_Visualizer_Tool",  # Visualizes results from Cell_State_Analyzer_Tool (merged data with group comparison)
 ]
 
 def get_available_tools() -> List[str]:
@@ -429,7 +429,10 @@ def record_question_result(state: "AgentState", question: str, status: str, fina
 
 
 def add_image_to_group(group_name: str, user_image, state: "AgentState", images_dir: Path, features_dir: Path) -> str:
-    """Store uploaded image(s) into a session-level group and cache their features."""
+    """
+    Store uploaded image(s) into a session-level group and cache their features.
+    Optimized for efficient multi-image processing and group comparison.
+    """
     if not user_image:
         return "⚠️ No image provided."
     images = user_image if isinstance(user_image, list) else [user_image]
@@ -655,7 +658,10 @@ def _read_group_table_rows(group_table):
 
 
 def _check_tool_execution_error(result, tool_name: str) -> tuple[bool, str]:
-    """Check if tool execution failed and return (is_error, error_message)."""
+    """
+    Check if tool execution failed and return (is_error, error_message).
+    Enhanced error detection for better debugging and user feedback.
+    """
     if result is None:
         return True, f"Tool '{tool_name}' execution returned None (no output)."
     elif isinstance(result, str):
@@ -664,14 +670,24 @@ def _check_tool_execution_error(result, tool_name: str) -> tuple[bool, str]:
         elif len(result.strip()) == 0:
             return True, f"Tool '{tool_name}' returned empty response."
         return False, ""  # Valid string response
-    elif isinstance(result, dict) and "error" in result:
-        error_msg = result.get("error", "Unknown error")
-        # Include error_details if available for better debugging
-        if "error_details" in result:
-            error_details = result.get("error_details", {})
-            details_str = ", ".join([f"{k}={v}" for k, v in error_details.items()])
-            error_msg = f"{error_msg} (Details: {details_str})"
-        return True, error_msg
+    elif isinstance(result, dict):
+        # Check for error in result
+        if "error" in result:
+            error_msg = result.get("error", "Unknown error")
+            # Include error_details if available for better debugging
+            if "error_details" in result:
+                error_details = result.get("error_details", {})
+                details_str = ", ".join([f"{k}={v}" for k, v in error_details.items()])
+                error_msg = f"{error_msg} (Details: {details_str})"
+            return True, error_msg
+        # Check for per_image errors in batch processing
+        if "per_image" in result:
+            errors = []
+            for idx, img_result in enumerate(result["per_image"]):
+                if isinstance(img_result, dict) and "error" in img_result:
+                    errors.append(f"Image {idx + 1}: {img_result.get('error', 'Unknown error')}")
+            if errors:
+                return True, f"Tool '{tool_name}' failed for {len(errors)} image(s): {'; '.join(errors)}"
     return False, ""  # No error detected
 
 
@@ -1001,9 +1017,23 @@ class Solver:
         
         if image_context and img_path_for_tools:
             if len(image_items) > 1:
+                # Enhanced group comparison information
                 groups_used = set(img.get("group", "") for img in image_items if img.get("group"))
-                group_label = f" ({len(image_items)} images from groups: {', '.join(sorted(groups_used))})" if groups_used else f" ({len(image_items)} images)"
-                messages.append(ChatMessage(role="assistant", content=f"### 📝 Received Query:\n{user_query}\n### 🖼️ Using session images{group_label}"))
+                group_counts = {}
+                for img in image_items:
+                    g = img.get("group", "default")
+                    group_counts[g] = group_counts.get(g, 0) + 1
+                
+                if groups_used and len(groups_used) > 1:
+                    # Multiple groups detected - highlight comparison capability
+                    group_summary = ", ".join([f"{g} ({group_counts[g]})" for g in sorted(groups_used)])
+                    group_label = f" ({len(image_items)} images from {len(groups_used)} groups: {group_summary})"
+                    comparison_note = "\n\n💡 **Group Comparison Enabled**: The system will analyze differences between groups."
+                else:
+                    group_label = f" ({len(image_items)} images)" + (f" in group `{group_name}`" if group_name else "")
+                    comparison_note = ""
+                
+                messages.append(ChatMessage(role="assistant", content=f"### 📝 Received Query:\n{user_query}\n### 🖼️ Using session images{group_label}{comparison_note}"))
             else:
                 group_label = f" in group `{group_name}`" if group_name else ""
                 messages.append(ChatMessage(role="assistant", content=f"### 📝 Received Query:\n{user_query}\n### 🖼️ Using session image `{img_id}`{group_label}"))
@@ -1250,7 +1280,14 @@ class Solver:
             
             if should_merge_all_images:
                 # For tools that merge all images, execute once outside the loop
+                # Enhanced logging for group comparison
+                groups_info = {}
+                for img in image_items:
+                    g = img.get("group", "default")
+                    groups_info[g] = groups_info.get(g, 0) + 1
+                groups_summary = ", ".join([f"{g}({c})" for g, c in sorted(groups_info.items())])
                 print(f"🔍 Processing {len(image_items)} image(s) with {tool_name} (merge-all mode - single execution)")
+                print(f"   Groups: {groups_summary}")
                 
                 # Use the first image's path and ID for command generation (tool will merge all data internally)
                 first_img_item = image_items[0] if image_items else {}
@@ -1258,12 +1295,16 @@ class Solver:
                 # Always use image_id (UUID) for consistent tracking
                 image_id = first_img_item.get("image_id")
                 
+                # Collect all groups for tools that need group information
+                all_groups = [img.get("group", "default") for img in image_items]
+                
                 # Generate tool command (tool will automatically merge all metadata from all images)
                 tool_command = self.executor.generate_tool_command(
                     user_query, safe_path, context, sub_goal, tool_name,
                     self.planner.toolbox_metadata[tool_name], self.memory, 
                     conversation_context=conversation_text, image_id=image_id,  # Always use image_id (UUID)
-                    current_image_path=first_img_item.get("image_path")
+                    current_image_path=first_img_item.get("image_path"),
+                    groups=all_groups  # Pass all groups for merge-all tools
                 )
                 analysis, explanation, command = self.executor.extract_explanation_and_command(tool_command)
                 
@@ -1298,11 +1339,19 @@ class Solver:
                 
             else:
                 # For tools that process each image separately, execute in loop
-                # Debug: Log image processing info
+                # Enhanced logging for batch processing with group information
+                groups_info = {}
+                for img in image_items:
+                    g = img.get("group", "default")
+                    groups_info[g] = groups_info.get(g, 0) + 1
+                groups_summary = ", ".join([f"{g}({c})" for g, c in sorted(groups_info.items())])
                 print(f"🔍 Processing {len(image_items)} image(s) with {tool_name} (batch processing mode)")
+                print(f"   Groups: {groups_summary}")
                 
                 for img_idx, img_item in enumerate(image_items):
-                    print(f"   Processing image {img_idx + 1}/{len(image_items)}: {img_item.get('image_id', 'unknown')} (group: {img_item.get('group', 'unknown')})")
+                    img_group = img_item.get('group', 'unknown')
+                    img_id = img_item.get('image_id', 'unknown')
+                    print(f"   [{img_idx + 1}/{len(image_items)}] Image {img_id} (group: {img_group})")
                     safe_path = img_item["image_path"].replace("\\", "\\\\") if img_item.get("image_path") else None
                     artifact_key = make_artifact_key(tool_name, safe_path, context, sub_goal, image_id=img_item.get("image_id"))
                     
@@ -1385,10 +1434,20 @@ class Solver:
 
                 # For downstream steps, if only one image use its result, else aggregate
                 # All tools return per_image structure for batch processing consistency
+                # Enhanced result aggregation for multi-image processing
                 if len(results_per_image) == 1:
                     result = results_per_image[0]
                 else:
+                    # Aggregate results with group information preserved
                     result = {"per_image": results_per_image}
+                    # Log group distribution for debugging
+                    groups_in_results = {}
+                    for idx, img_result in enumerate(results_per_image):
+                        img_item = image_items[idx] if idx < len(image_items) else {}
+                        g = img_item.get("group", "unknown")
+                        groups_in_results[g] = groups_in_results.get(g, 0) + 1
+                    if groups_in_results:
+                        print(f"   Results aggregated from {len(results_per_image)} images across {len(groups_in_results)} groups")
             
             # Generate dynamic visual description based on tool and results
             visual_description = self.generate_visual_description(tool_name, result, self.visual_outputs_for_gradio)
@@ -1919,23 +1978,30 @@ def prepare_group_assignment(uploaded_files, conversation_state):
     if len(files) == 1:
         # Show table even for single image so user can edit group
         image_name = list(state.upload_path_map.keys())[0] if state.upload_path_map else "image"
-        return gr.update(value=[[image_name, "default"]], visible=True), "**Upload Status**: Single image detected. You can edit the group if needed.", state
+        return gr.update(value=[[image_name, "default"]], visible=True), "**Upload Status**: ✅ Single image detected. You can edit the group if needed.", state
     
     # Multiple images: create rows for each
     rows = [[image_name, ""] for image_name in state.upload_path_map.keys()]
-    # Check if this is the multiple image comparison example (A2, A3, A4)
     image_names = list(state.upload_path_map.keys())
-    if len(image_names) == 3:
-        # Check if filenames contain A2, A3, A4
-        has_a2 = any('A2' in name for name in image_names)
-        has_a3 = any('A3' in name for name in image_names)
-        has_a4 = any('A4' in name for name in image_names)
-        if has_a2 and has_a3 and has_a4:
-            status_msg = "**Upload Status**: Multiple images detected. Please assign groups: Control, Control, Treatment (for A2, A3, A4 images respectively)"
-        else:
-            status_msg = "**Upload Status**: Multiple images detected. Please assign a group per image."
+    
+    # Enhanced status message for multiple images with group comparison guidance
+    num_images = len(image_names)
+    if num_images >= 2:
+        status_msg = f"**Upload Status**: ✅ {num_images} images detected. **Group Comparison Ready** 🎯\n\n"
+        status_msg += "💡 **Tip**: Assign meaningful group names (e.g., 'Control', 'Treatment', 'Drug_A') to enable group comparison analysis.\n"
+        status_msg += "   - Images in the same group will be analyzed together\n"
+        status_msg += " - Different groups will be compared statistically"
+        
+        # Check if this is the multiple image comparison example (A2, A3, A4)
+        if num_images == 3:
+            has_a2 = any('A2' in name for name in image_names)
+            has_a3 = any('A3' in name for name in image_names)
+            has_a4 = any('A4' in name for name in image_names)
+            if has_a2 and has_a3 and has_a4:
+                status_msg += "\n\n📋 **Suggested groups**: Control, Control, Treatment (for A2, A3, A4 respectively)"
     else:
         status_msg = "**Upload Status**: Multiple images detected. Please assign a group per image."
+    
     return gr.update(value=rows, visible=True), status_msg, state
 
 
@@ -1967,7 +2033,7 @@ def upload_image_to_group(user_image, group_table, conversation_state):
 
     # Multiple images: require group_table rows [filepath, group]
     if group_table is None or (isinstance(group_table, pd.DataFrame) and group_table.empty):
-        return state, "**Progress**: ⚠️ Multiple images uploaded. Please assign a group per image before adding.", gr.update()
+        return state, "**Progress**: ⚠️ Multiple images uploaded. Please assign a group per image before adding.\n\n💡 **Tip**: Use meaningful group names (e.g., 'Control', 'Treatment') to enable group comparison.", gr.update()
     
     rows = _read_group_table_rows(group_table)
     
@@ -2054,7 +2120,21 @@ def upload_image_to_group(user_image, group_table, conversation_state):
     # Update group_table
     updated_table = pd.DataFrame(updated_rows, columns=["image_name", "group"]) if updated_rows else None
     
-    progress = "**Progress**:\n" + "\n".join(f"- {m}" for m in added_msgs) if added_msgs else "**Progress**: ⚠️ No images processed."
+    # Enhanced progress message with group summary
+    if added_msgs:
+        progress = "**Progress**:\n" + "\n".join(f"- {m}" for m in added_msgs)
+        
+        # Add group summary if multiple groups were added
+        groups_added = set()
+        for row in updated_rows if updated_rows else rows:
+            if len(row) >= 2 and row[1]:
+                groups_added.add(str(row[1]).strip())
+        
+        if len(groups_added) > 1:
+            progress += f"\n\n✅ **Group Comparison Ready**: {len(groups_added)} groups detected ({', '.join(sorted(groups_added))})"
+            progress += "\n💡 You can now ask questions comparing these groups!"
+    else:
+        progress = "**Progress**: ⚠️ No images processed."
     
     if updated_table is not None and not updated_table.empty:
         return state, progress, gr.update(value=updated_table.values.tolist(), visible=True)
@@ -2226,19 +2306,29 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
         return
     
     # Collect all images from all groups with group metadata
+    # Optimized for efficient multi-group processing
     all_group_images = []
+    group_summary = {}  # Track group statistics
     for gname, gentry in state.image_groups.items():
-        for img in gentry.get("images", []):
+        group_images = gentry.get("images", [])
+        group_summary[gname] = len(group_images)
+        for img in group_images:
             img_with_group = img.copy()
             img_with_group["group"] = gname
             all_group_images.append(img_with_group)
     
     if not all_group_images:
-        prompt_msg = "⚠️ No images found in any group."
+        prompt_msg = "⚠️ No images found in any group. Please upload images and assign groups first."
         new_history = messages + [ChatMessage(role="assistant", content=prompt_msg)]
         state.conversation = new_history
         yield new_history, "", [], "**Progress**: Waiting for image upload", [], state
         return
+    
+    # Enhanced group context for multi-group comparison
+    num_groups = len(group_summary)
+    if num_groups > 1:
+        groups_info = ", ".join([f"{g}({c})" for g, c in sorted(group_summary.items())])
+        print(f"📊 Multi-group analysis: {num_groups} groups detected ({groups_info})")
     
     # Use first image as representative for context
     representative = all_group_images[0]
@@ -2399,14 +2489,13 @@ def main(args):
                 gr.Markdown("### 🛠️ Available Tools")
                 with gr.Accordion("🛠️ Available Tools", open=False):
                     gr.Markdown("\n".join([f"- {t}" for t in get_available_tools()]))
-                gr.Markdown("### 📤 Image Groups")
+                gr.Markdown("### 📤 Upload your images here")
                 user_image = gr.File(label="Upload Image(s)", file_count="multiple", type="filepath")
                 group_table = gr.Dataframe(headers=["image_name", "group"], row_count=0, wrap=True, interactive=True, visible=True)
                 group_prompt = gr.Markdown("**Upload Status**: No uploads yet")
                 upload_btn = gr.Button("Add Group(s) to Image(s)", variant="primary", elem_classes="gradient-button-primary")
-                gr.Markdown("### ❓ Ask Question")
                 user_query = gr.Textbox(label="Ask about your image(s)", placeholder="e.g., Compare cell counts between control and drugA", lines=5)
-                run_button = gr.Button("🚀 Ask Question", variant="primary", size="lg", elem_classes="gradient-button-primary")
+                run_button = gr.Button("Ask Question", variant="primary", size="lg", elem_classes="gradient-button-primary")
                 progress_md = gr.Markdown("**Progress**: Waiting for input...")
                 conversation_state = gr.State(AgentState())
             with gr.Column(scale=1):
@@ -2432,7 +2521,7 @@ def main(args):
                 examples = [
                     ["Cell counting", ["examples/iPSC-fibroblast.jpg"], "How many cells in the image?", "Image_Preprocessor_Tool, Cell_Segmenter_Tool", "Cell count. The system preprocesses the image and segments cells to provide an accurate cell count."],
                     ["Single image phenotyping", ["examples/iPSC-cardiomyocyte.tif"], "How many morphological cell states in the image?", "Image_Preprocessor_Tool, Cell_Segmenter_Tool, Single_Cell_Cropper_Tool, Cell_State_Analyzer_Tool, Analysis_Visualizer_Tool", "Cell count, Cell clustering, UMAP embedding. Complete phenotypic analysis with state classification and visualization."],
-                    ["Multiple image comparison", ["examples/Hela_Control.png", "examples/Hela_AdOx 0.25 mM.png", "examples/Hela_AdOx 1 mM.png"], "What difference of these images at the cell state level?", "Image_Preprocessor_Tool, Cell_Segmenter_Tool, Single_Cell_Cropper_Tool, Cell_State_Analyzer_Tool, Analysis_Visualizer_Tool", "Cell count, Cell clustering, UMAP embedding, Group comparison. Comparative analysis across treatment groups with statistical testing. Note: Upload all images and set groups for full analysis."]
+                    ["Multiple image comparison", ["examples/Hela_Control.png", "examples/Hela_AdOx 0.25 mM.png", "examples/Hela_AdOx 1 mM.png"], "What difference of these images at the cell state level?", "Image_Preprocessor_Tool, Cell_Segmenter_Tool, Single_Cell_Cropper_Tool, Cell_State_Analyzer_Tool, Analysis_Visualizer_Tool", "Cell count, Cell clustering, UMAP embedding, Group comparison. Comparative analysis across treatment groups with statistical testing. 💡 Tip: Assign groups (e.g., 'Control', 'Treatment') for optimal group comparison."]
                 ]
                 def distribute_tools(category, img, q, tools_str, ans):
                     selected_tools = [tool.strip() for tool in tools_str.split(',')]
@@ -2444,9 +2533,9 @@ def main(args):
                         img_list = img
                     else:
                         img_list = [img]
-                    # For multiple image comparison example, add instruction to group_prompt
+                    # For multiple image comparison example, add enhanced instruction to group_prompt
                     if category == "Multiple image comparison" and len(img_list) == 3:
-                        group_instruction = "**Upload Status**: Multiple images detected. Please assign groups for all images."
+                        group_instruction = "**Upload Status**: ✅ 3 images detected. **Group Comparison Ready** 🎯\n\n💡 **Tip**: Assign meaningful group names (e.g., 'Control', 'Treatment', 'Drug_A') to enable group comparison analysis."
                     else:
                         # For other examples, don't update group_prompt
                         group_instruction = gr.update()

@@ -858,10 +858,20 @@ class Cell_State_Analyzer_Tool(BaseTool):
             }
         
         adata = ad.AnnData(X=feats)
-        # Direct path: use groups and image_names extracted from cell_metadata
-        # These come directly from Single_Cell_Cropper_Tool output, so they should match adata.n_obs
-        adata.obs["image_name"] = image_names[:adata.n_obs] if len(image_names) >= adata.n_obs else (image_names + ['unknown'] * (adata.n_obs - len(image_names)))
-        adata.obs["group"] = groups[:adata.n_obs] if len(groups) >= adata.n_obs else (groups + ['default'] * (adata.n_obs - len(groups)))
+        # Use groups_extracted and img_names from _extract_features to ensure order matches features
+        # These are extracted from the dataloader in the same order as features
+        # Fallback to groups/image_names from metadata if lengths don't match
+        if len(groups_extracted) == adata.n_obs:
+            adata.obs["group"] = groups_extracted
+        else:
+            logger.warning(f"groups_extracted length ({len(groups_extracted)}) doesn't match adata.n_obs ({adata.n_obs}), using groups from metadata")
+            adata.obs["group"] = groups[:adata.n_obs] if len(groups) >= adata.n_obs else (groups + ['default'] * (adata.n_obs - len(groups)))
+        
+        if len(img_names) == adata.n_obs:
+            adata.obs["image_name"] = img_names
+        else:
+            logger.warning(f"img_names length ({len(img_names)}) doesn't match adata.n_obs ({adata.n_obs}), using image_names from metadata")
+            adata.obs["image_name"] = image_names[:adata.n_obs] if len(image_names) >= adata.n_obs else (image_names + ['unknown'] * (adata.n_obs - len(image_names)))
         # Store full cell crop paths for visualization
         adata.obs["crop_path"] = cell_crops
         # Use cell_id from metadata as index if available, otherwise use default

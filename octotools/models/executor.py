@@ -397,9 +397,10 @@ execution = tool.execute(
                 # Include query_cache_dir, source_image_id, and group to ensure metadata files are saved correctly
                 # query_cache_dir should be the parent directory (without 'tool_cache')
                 query_cache_dir_str = self.query_cache_dir.replace("\\", "\\\\")
-                # Extract group from image_id if available (e.g., "Control_7dd4a783..." -> "Control")
-                group = "default"
-                if image_id and '_' in image_id:
+                # Get group from kwargs first (passed from app.py), then fallback to extracting from image_id
+                group = kwargs.get('group', "default")
+                if group == "default" and image_id and '_' in image_id:
+                    # Fallback: Extract group from image_id if available (e.g., "Control_7dd4a783..." -> "Control")
                     group = image_id.split('_')[0]
                 
                 # Use image_id as source_image_id for tracking
