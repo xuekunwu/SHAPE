@@ -2339,28 +2339,30 @@ def main(args):
         # Custom CSS for gradient buttons and background colors
         demo.css = """
         /* Gradient buttons: only for Add Group and Ask Question buttons using elem_classes */
-        /* Blue gradient with transparency */
+        /* Blue gradient (dark blue to light blue) with transparency, inner glow, and glassmorphism */
         .gradient-button-primary button,
         .gradient-button-primary button:not(:hover),
         button.gradient-button-primary,
         .gradient-button-primary > button {
-            background: linear-gradient(135deg, rgba(30, 144, 255, 0.8) 0%, rgba(70, 130, 180, 0.75) 50%, rgba(100, 149, 237, 0.8) 100%) !important;
-            background-image: linear-gradient(135deg, rgba(30, 144, 255, 0.8) 0%, rgba(70, 130, 180, 0.75) 50%, rgba(100, 149, 237, 0.8) 100%) !important;
+            background: linear-gradient(135deg, rgba(30, 144, 255, 0.8) 0%, rgba(100, 149, 237, 0.8) 100%) !important;
+            background-image: linear-gradient(135deg, rgba(30, 144, 255, 0.8) 0%, rgba(100, 149, 237, 0.8) 100%) !important;
             border: 1px solid rgba(135, 206, 250, 0.4) !important;
             color: #ffffff !important;
             font-weight: 600 !important;
             text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3) !important;
-            box-shadow: 0 4px 15px rgba(30, 144, 255, 0.3) !important;
+            box-shadow: 0 4px 15px rgba(30, 144, 255, 0.3), 0 0 30px rgba(135, 206, 250, 0.4) inset, 0 2px 0 rgba(255, 255, 255, 0.2) inset !important;
+            backdrop-filter: blur(10px) saturate(180%) !important;
+            -webkit-backdrop-filter: blur(10px) saturate(180%) !important;
             transition: all 0.3s ease !important;
         }
         .gradient-button-primary button:hover,
         button.gradient-button-primary:hover,
         .gradient-button-primary > button:hover {
-            background: linear-gradient(135deg, rgba(0, 120, 215, 0.85) 0%, rgba(50, 110, 170, 0.8) 50%, rgba(80, 139, 227, 0.85) 100%) !important;
-            background-image: linear-gradient(135deg, rgba(0, 120, 215, 0.85) 0%, rgba(50, 110, 170, 0.8) 50%, rgba(80, 139, 227, 0.85) 100%) !important;
+            background: linear-gradient(135deg, rgba(0, 120, 215, 0.85) 0%, rgba(80, 139, 227, 0.85) 100%) !important;
+            background-image: linear-gradient(135deg, rgba(0, 120, 215, 0.85) 0%, rgba(80, 139, 227, 0.85) 100%) !important;
             border: 1px solid rgba(135, 206, 250, 0.6) !important;
             color: #ffffff !important;
-            box-shadow: 0 6px 25px rgba(30, 144, 255, 0.5) !important;
+            box-shadow: 0 6px 25px rgba(30, 144, 255, 0.5), 0 0 40px rgba(135, 206, 250, 0.5) inset, 0 2px 0 rgba(255, 255, 255, 0.3) inset !important;
             transform: translateY(-2px) !important;
         }
         /* Background colors for Conversation, Visual Outputs, and Available Tools */
