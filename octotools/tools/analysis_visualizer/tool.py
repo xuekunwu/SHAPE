@@ -862,12 +862,22 @@ class Analysis_Visualizer_Tool(BaseTool):
         clusters = composition.columns.tolist()
         n_clusters = len(clusters)
         x = np.arange(n_clusters)  # X positions for clusters
-        width = 0.8 / n_groups if n_groups > 0 else 0.8  # Width of each bar group
+        
+        # Calculate bar width: if only one group, use wider bars; otherwise group them
+        if n_groups == 1:
+            width = 0.6  # Wider bars for single group
+        else:
+            width = 0.8 / n_groups  # Width of each bar group
         
         # Plot bars for each group
         for i, group in enumerate(composition.index):
             proportions = composition.loc[group].values  # Proportions for this group across all clusters
-            offset = (i - n_groups / 2 + 0.5) * width  # Offset to center bars around cluster position
+            if n_groups == 1:
+                # Single group: center the bars
+                offset = 0
+            else:
+                # Multiple groups: offset to center bars around cluster position
+                offset = (i - n_groups / 2 + 0.5) * width
             bars = ax1.bar(x + offset, proportions, width, label=str(group), 
                           color=group_colors[i], edgecolor='white', linewidth=1.0, alpha=0.8)
             # Add value labels on top of bars

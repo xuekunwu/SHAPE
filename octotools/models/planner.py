@@ -337,6 +337,12 @@ Recommended Next Tools (considering dependencies and priorities):
    
    Then you MUST select Analysis_Visualizer_Tool as the next tool. This is MANDATORY.
    Do NOT select any other tool. Do NOT skip this step.
+   
+   If the LAST tool executed was:
+   - Analysis_Visualizer_Tool
+   
+   Then you SHOULD consider using Image_Captioner_Tool to generate a final summary and interpretation of the visualizations. 
+   This is RECOMMENDED (not mandatory) to provide a comprehensive final answer to the user's query.
 
 Tool Metadata:
 {toolbox_metadata}
@@ -500,6 +506,36 @@ Example (do not copy, use only as reference):
                         sub_goal="Visualize cell state analysis results from Cell_State_Analyzer_Tool. "
                                "Generate publication-quality UMAP plots, cluster composition charts, and exemplar cell montages.",
                         tool_name="Analysis_Visualizer_Tool"
+                    )
+                    return forced_next_step
+            
+            # RECOMMENDATION: Suggest Image_Captioner_Tool after Analysis_Visualizer_Tool (if not already used)
+            if last_tool == "Analysis_Visualizer_Tool":
+                # Extract tool name from next_step
+                selected_tool = getattr(next_step, 'tool_name', '') if hasattr(next_step, 'tool_name') else ''
+                # Parse from string if needed
+                if not selected_tool and isinstance(next_step, str):
+                    from octotools.utils.response_parser import ResponseParser
+                    _, _, selected_tool = ResponseParser.parse_next_step(next_step, available_tools)
+                
+                # Check if Image_Captioner_Tool has been used
+                used_tools = [action.get('tool_name') for action in memory.get_actions(llm_safe=True) if 'tool_name' in action]
+                
+                # If Image_Captioner_Tool hasn't been used and LLM didn't select it, suggest it
+                if 'Image_Captioner_Tool' not in used_tools and selected_tool != 'Image_Captioner_Tool' and 'Image_Captioner_Tool' in available_tools:
+                    logger.info(f"💡 RECOMMENDATION: Analysis_Visualizer_Tool completed. Suggesting Image_Captioner_Tool for final summary. "
+                              f"LLM selected '{selected_tool}', but Image_Captioner_Tool is recommended.")
+                    # Override: Create recommended next step
+                    forced_context = self._format_memory_for_prompt(memory)
+                    forced_next_step = NextStep(
+                        justification=f"RECOMMENDED: Previous tool 'Analysis_Visualizer_Tool' completed visualization generation. "
+                                    f"Image_Captioner_Tool is recommended to generate a final summary and interpretation of the visualizations "
+                                    f"to provide a comprehensive answer to the user's query. "
+                                    f"LLM selected '{selected_tool}' which was overridden by recommendation.",
+                        context=forced_context,
+                        sub_goal="Generate a final summary and interpretation of the analysis visualizations using Image_Captioner_Tool. "
+                               "Provide a comprehensive answer to the user's query based on the generated visualizations.",
+                        tool_name="Image_Captioner_Tool"
                     )
                     return forced_next_step
         
