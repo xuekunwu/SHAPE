@@ -2339,39 +2339,29 @@ def main(args):
         # Custom CSS for gradient buttons and background colors
         demo.css = """
         /* Gradient buttons: only for Add Group and Ask Question buttons using elem_classes */
-        /* Dynamic mixed gradient: dark teal (top-left) → lavender (center) → magenta (bottom-left) → peach (bottom-right) */
+        /* Blue gradient with transparency */
         .gradient-button-primary button,
         .gradient-button-primary button:not(:hover),
         button.gradient-button-primary,
         .gradient-button-primary > button {
-            background: 
-                radial-gradient(ellipse at top left, #2E5266 0%, transparent 50%),
-                radial-gradient(ellipse at center, #B19CD9 30%, transparent 70%),
-                radial-gradient(ellipse at bottom left, #D9468F 40%, transparent 80%),
-                radial-gradient(ellipse at bottom right, #FF8C94 30%, transparent 70%),
-                linear-gradient(135deg, #2E5266 0%, #6B8E9F 25%, #B19CD9 50%, #D9468F 75%, #FF8C94 100%) !important;
-            background-size: 100% 100% !important;
-            border: none !important;
+            background: linear-gradient(135deg, rgba(30, 144, 255, 0.8) 0%, rgba(70, 130, 180, 0.75) 50%, rgba(100, 149, 237, 0.8) 100%) !important;
+            background-image: linear-gradient(135deg, rgba(30, 144, 255, 0.8) 0%, rgba(70, 130, 180, 0.75) 50%, rgba(100, 149, 237, 0.8) 100%) !important;
+            border: 1px solid rgba(135, 206, 250, 0.4) !important;
             color: #ffffff !important;
             font-weight: 600 !important;
-            text-shadow: 0 1px 3px rgba(0, 0, 0, 0.3) !important;
-            box-shadow: 0 4px 20px rgba(217, 70, 143, 0.4), 0 0 40px rgba(255, 140, 148, 0.2) inset !important;
-            transition: all 0.4s ease !important;
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3) !important;
+            box-shadow: 0 4px 15px rgba(30, 144, 255, 0.3) !important;
+            transition: all 0.3s ease !important;
         }
         .gradient-button-primary button:hover,
         button.gradient-button-primary:hover,
         .gradient-button-primary > button:hover {
-            background: 
-                radial-gradient(ellipse at top left, #1E3A4A 0%, transparent 50%),
-                radial-gradient(ellipse at center, #A18CC9 30%, transparent 70%),
-                radial-gradient(ellipse at bottom left, #C9367F 40%, transparent 80%),
-                radial-gradient(ellipse at bottom right, #FF7C84 30%, transparent 70%),
-                linear-gradient(135deg, #1E3A4A 0%, #5B7E8F 25%, #A18CC9 50%, #C9367F 75%, #FF7C84 100%) !important;
-            background-size: 100% 100% !important;
-            border: none !important;
+            background: linear-gradient(135deg, rgba(0, 120, 215, 0.85) 0%, rgba(50, 110, 170, 0.8) 50%, rgba(80, 139, 227, 0.85) 100%) !important;
+            background-image: linear-gradient(135deg, rgba(0, 120, 215, 0.85) 0%, rgba(50, 110, 170, 0.8) 50%, rgba(80, 139, 227, 0.85) 100%) !important;
+            border: 1px solid rgba(135, 206, 250, 0.6) !important;
             color: #ffffff !important;
-            box-shadow: 0 6px 30px rgba(217, 70, 143, 0.6), 0 0 50px rgba(255, 140, 148, 0.3) inset !important;
-            transform: translateY(-2px) scale(1.02) !important;
+            box-shadow: 0 6px 25px rgba(30, 144, 255, 0.5) !important;
+            transform: translateY(-2px) !important;
         }
         /* Background colors for Conversation, Visual Outputs, and Available Tools */
         .chatbot {
