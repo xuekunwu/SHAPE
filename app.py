@@ -1397,8 +1397,9 @@ class Solver:
             _collect_visual_outputs(result, self.visual_outputs_for_gradio, self.downloadable_files)
             
             # Track successful step (if not failed in this iteration)
+            # Use centralized error checking function for consistent error detection
             step_has_error = any(
-                isinstance(r, dict) and ("error" in r or r.get("result") is None) 
+                _check_tool_execution_error(r, tool_name)[0]  # [0] is the is_error boolean
                 for r in results_per_image
             ) if results_per_image else False
             
@@ -1471,18 +1472,17 @@ class Solver:
             self.memory.add_action(step_count, tool_name, sub_goal, tool_command, result)
             
             # Check if tool execution failed - if same tool failed multiple times, stop to avoid infinite loop
+            # Use the centralized error checking function to avoid false positives
+            execution_failed, error_msg = _check_tool_execution_error(result, tool_name)
+            
             recent_actions = self.memory.get_actions()[-3:]  # Check last 3 actions
             same_tool_failures = 0
             for action in recent_actions:
                 if action.get('tool_name') == tool_name:
                     action_result = action.get('result')
-                    # Check various failure conditions
-                    if action_result is None:
-                        same_tool_failures += 1
-                    elif isinstance(action_result, dict):
-                        if action_result.get('error') or action_result.get('result') is None:
-                            same_tool_failures += 1
-                    elif isinstance(action_result, str) and action_result.startswith("Error"):
+                    # Use centralized error checking function for consistent error detection
+                    action_failed, _ = _check_tool_execution_error(action_result, tool_name)
+                    if action_failed:
                         same_tool_failures += 1
             
             if same_tool_failures >= 2:
