@@ -887,7 +887,6 @@ class Analysis_Visualizer_Tool(BaseTool):
             # For each cluster, perform statistical test across groups
             # We'll use chi-square test or Fisher's exact test for proportions
             from scipy.stats import chi2_contingency, fisher_exact
-            import numpy as np
             
             stats_results = []
             for cluster in clusters:

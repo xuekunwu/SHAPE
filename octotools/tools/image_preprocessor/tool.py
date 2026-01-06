@@ -169,13 +169,44 @@ class Image_Preprocessor_Tool(BaseTool):
         if isinstance(groups, dict):
             mapping = {}
             for img in images:
-                key = os.path.basename(img)
+                # Try multiple matching strategies
+                matched = False
+                # Strategy 1: Direct path match
                 if img in groups:
                     mapping[img] = groups[img]
-                elif key in groups:
-                    mapping[img] = groups[key]
-                else:
-                    raise ValueError(f"Missing group for image: {img}")
+                    matched = True
+                # Strategy 2: Basename match
+                elif not matched:
+                    key = os.path.basename(img)
+                    if key in groups:
+                        mapping[img] = groups[key]
+                        matched = True
+                # Strategy 3: Try matching by image_id if available (extract from path)
+                if not matched:
+                    # Try to extract image identifier from path and match
+                    path_parts = os.path.splitext(os.path.basename(img))[0]
+                    for key in groups.keys():
+                        if path_parts in str(key) or str(key) in path_parts:
+                            mapping[img] = groups[key]
+                            matched = True
+                            break
+                # Strategy 4: If still not matched, try to extract group from path structure
+                if not matched:
+                    # Try to extract group from path (e.g., /path/to/Control/image.jpg -> Control)
+                    path_parts = img.split(os.sep)
+                    for part in reversed(path_parts):
+                        if part in groups.values():
+                            # Find the key for this group value
+                            for k, v in groups.items():
+                                if v == part:
+                                    mapping[img] = part
+                                    matched = True
+                                    break
+                            if matched:
+                                break
+                # Fallback: use default if still not matched
+                if not matched:
+                    mapping[img] = "default"
             return mapping
         raise ValueError("Unsupported groups format.")
 

@@ -417,6 +417,14 @@ execution = tool.execute(
                 # Fallback to standard command generation
                 pass
         
+        # Special handling for Image_Preprocessor_Tool to include group parameter
+        if tool_name == "Image_Preprocessor_Tool" and 'group' in kwargs:
+            group = kwargs.get('group', 'default')
+            # Include group parameter in the prompt
+            group_info = f"\nGroup: {group} (MUST include groups parameter in command: groups='{group}' or groups=['{group}'])"
+        else:
+            group_info = ""
+        
         # For other tools, use the standard prompt
         # Include query_cache_dir in context for tools that need it
         query_cache_dir_str = self.query_cache_dir.replace("\\", "\\\\")
@@ -428,7 +436,7 @@ Conversation so far:
 
 Query: {question}
 Image Path: {safe_path}
-Image ID: {image_id if image_id else "Not provided"}
+Image ID: {image_id if image_id else "Not provided"}{group_info}
 Context: {context}
 Sub-Goal: {sub_goal}
 Selected Tool: {tool_name}
@@ -438,6 +446,7 @@ Query Cache Directory: {query_cache_dir_str} (use this for query_cache_dir param
 
 IMPORTANT: When the tool requires an image parameter, you MUST use the exact image path provided above: "{safe_path}"
 {"IMPORTANT: Nuclei_Segmenter_Tool, Cell_Segmenter_Tool, Organoid_Segmenter_Tool, and Image_Preprocessor_Tool accept the image_id parameter for consistent file naming and tracking. Include image_id parameter when available for these tools." if image_id else ""}
+{f"CRITICAL: Image_Preprocessor_Tool requires the groups parameter when processing images. Use groups='{kwargs.get('group', 'default')}' or groups=['{kwargs.get('group', 'default')}'] in the command." if tool_name == "Image_Preprocessor_Tool" and 'group' in kwargs else ""}
 
 CRITICAL TOOL DEPENDENCY RULES:
 - Fibroblast_Activation_Scorer_Tool MUST use the h5ad file output from Cell_State_Analyzer_Tool

@@ -1321,11 +1321,14 @@ class Solver:
                         # image_id is the unique identifier (UUID) generated at upload time
                         # This ensures consistent matching across all tools
                         image_id = img_item.get("image_id")
+                        # Get group information for tools that need it (e.g., Image_Preprocessor_Tool)
+                        group = img_item.get("group", "default")
                         tool_command = self.executor.generate_tool_command(
                             user_query, safe_path, context, sub_goal, tool_name,
                             self.planner.toolbox_metadata[tool_name], self.memory, 
                             conversation_context=conversation_text, image_id=image_id,  # Always use image_id (UUID)
-                            current_image_path=img_item.get("image_path")  # Pass current image path for reference
+                            current_image_path=img_item.get("image_path"),  # Pass current image path for reference
+                            group=group  # Pass group information for tools that need it
                         )
                         analysis, explanation, command = self.executor.extract_explanation_and_command(tool_command)
                         result = self.executor.execute_tool_command(tool_name, command)
@@ -2330,8 +2333,8 @@ def main(args):
         **SHPAE** is an open-source assistant for interpreting cell images, powered by large language models and tool-based reasoning.
         """)
         
-        # Model / tool configuration (top row, equal height)
-        with gr.Row(equal_height=True):
+        # Model / tool configuration (top row)
+        with gr.Row():
             with gr.Column(scale=1, min_width=250):
                 gr.Markdown("### ⚙️ LLM Configuration")
                 multimodal_models = [m for m in OPENAI_MODEL_CONFIGS.values()]
@@ -2342,7 +2345,6 @@ def main(args):
                                        next((m["model_id"] for m in multimodal_models if m.get("model_type") == "openai"), 
                                            model_names[0] if model_names else None)))
                 language_model = gr.Dropdown(choices=model_names, value=default_model)
-            with gr.Column(scale=1):
                 gr.Markdown("### 🛠️ Available Tools")
                 with gr.Accordion("🛠️ Available Tools", open=False):
                     gr.Markdown("\n".join([f"- {t}" for t in get_available_tools()]))
