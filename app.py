@@ -1564,9 +1564,16 @@ class Solver:
             }
             self.step_info.append(step_info)
 
+            # If conclusion is STOP, allow one more step for Image_Captioner_Tool if not already used
             if conclusion == 'STOP':
-                execution_successful = True
-                break
+                # Check if Image_Captioner_Tool has been used
+                used_tools = [action.get('tool_name') for action in self.memory.get_actions() if 'tool_name' in action]
+                if 'Image_Captioner_Tool' not in used_tools and step_count < self.max_steps:
+                    # Allow one more step for Image_Captioner_Tool
+                    continue
+                else:
+                    execution_successful = True
+                    break
 
         self.end_time = time.time()
         
@@ -2381,7 +2388,7 @@ def main(args):
             with gr.Column(scale=1):
                 gr.Markdown("### 🗣️ Conversation")
                 # Use type="messages" directly like original version
-                chatbot_output = gr.Chatbot(type="messages", height=700, show_label=False)
+                chatbot_output = gr.Chatbot(type="messages", height=1000, show_label=False)
 
         # Bottom: summary (left) and visual outputs + downloadable files (right)
         with gr.Row():
