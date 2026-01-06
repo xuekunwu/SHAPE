@@ -824,7 +824,7 @@ class Analysis_Visualizer_Tool(BaseTool):
         if unique_groups == 0:
             return None
         
-        # Calculate composition (proportions)
+        # Calculate composition (proportions) - rows are groups, columns are clusters
         composition = pd.crosstab(
             adata.obs['group'], 
             adata.obs[cluster_key],
@@ -857,17 +857,24 @@ class Analysis_Visualizer_Tool(BaseTool):
         n_groups = len(composition.index)
         group_colors = self._get_color_scheme(n_groups)
         
-        # Create grouped bar chart (each cluster is a group of bars, one per group)
+        # Create grouped bar chart: X-axis = clusters, Y-axis = proportion, color = groups
+        # Each cluster has multiple bars (one per group)
         clusters = composition.columns.tolist()
         n_clusters = len(clusters)
-        x = np.arange(n_clusters)
-        width = 0.8 / n_groups  # Width of each bar
+        x = np.arange(n_clusters)  # X positions for clusters
+        width = 0.8 / n_groups if n_groups > 0 else 0.8  # Width of each bar group
         
+        # Plot bars for each group
         for i, group in enumerate(composition.index):
-            proportions = composition.loc[group].values
-            offset = (i - n_groups / 2 + 0.5) * width
-            ax1.bar(x + offset, proportions, width, label=str(group), 
-                   color=group_colors[i], edgecolor='white', linewidth=1.0, alpha=0.8)
+            proportions = composition.loc[group].values  # Proportions for this group across all clusters
+            offset = (i - n_groups / 2 + 0.5) * width  # Offset to center bars around cluster position
+            bars = ax1.bar(x + offset, proportions, width, label=str(group), 
+                          color=group_colors[i], edgecolor='white', linewidth=1.0, alpha=0.8)
+            # Add value labels on top of bars
+            for j, (bar, prop) in enumerate(zip(bars, proportions)):
+                if prop > 0.01:  # Only label if proportion is significant
+                    ax1.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.01,
+                           f'{prop:.2f}', ha='center', va='bottom', fontsize=8)
         
         # Apply professional styling
         VisualizationConfig.apply_professional_styling(
@@ -876,10 +883,11 @@ class Analysis_Visualizer_Tool(BaseTool):
         )
         
         ax1.set_xticks(x)
-        ax1.set_xticklabels([f'Cluster {c}' for c in clusters], rotation=45, ha='right')
-        ax1.legend(title='Group', bbox_to_anchor=(1.02, 1), loc='upper left')
-        ax1.set_ylim([0, 1])
-        ax1.grid(axis='y', alpha=0.3, linestyle='--')
+        ax1.set_xticklabels([f'Cluster {c}' for c in clusters], rotation=0, ha='center')
+        ax1.legend(title='Group', bbox_to_anchor=(1.02, 1), loc='upper left', frameon=True)
+        ax1.set_ylim([0, max(1.0, composition.values.max() * 1.15)])  # Add some padding for labels
+        ax1.grid(axis='y', alpha=0.3, linestyle='--', linewidth=0.5)
+        ax1.set_axisbelow(True)  # Put grid behind bars
         
         # Perform statistical testing if conditions are met
         stats_text = ""

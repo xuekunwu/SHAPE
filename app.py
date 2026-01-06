@@ -744,15 +744,32 @@ def _collect_visual_outputs(result, visual_outputs_list, downloadable_files_list
             if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
                 continue
             
-            # Handle .h5ad files separately - add to downloadable files list instead of visual outputs
-            if file_path.lower().endswith('.h5ad'):
+            # Handle .h5ad files and specific visualization files separately - add to downloadable files list
+            filename_lower_check = os.path.basename(file_path).lower()
+            is_downloadable_file = (
+                file_path.lower().endswith('.h5ad') or
+                'segmentation_overlay' in filename_lower_check or
+                'loss_curve' in filename_lower_check or
+                'umap_cluster' in filename_lower_check or
+                'cluster_proportion' in filename_lower_check or
+                'cluster_composition' in filename_lower_check or
+                'cluster_example' in filename_lower_check or
+                'exemplar' in filename_lower_check
+            )
+            
+            # Handle downloadable files (h5ad and specific visualization images)
+            if is_downloadable_file:
                 # Add to downloadable files list if provided
                 if downloadable_files_list is not None:
                     downloadable_files_list.append(file_path)
-                # Skip adding to visual outputs (no placeholder image)
-                continue
-            else:
-                # Handle image files normally
+                # For .h5ad files, skip adding to visual outputs (no placeholder image)
+                if file_path.lower().endswith('.h5ad'):
+                    continue
+                # For visualization images, continue to add to visual outputs for preview
+                # (fall through to image processing below)
+            
+            # Handle image files (including visualization images that are also downloadable)
+            try:
                 image = Image.open(file_path)
                 if image.size[0] == 0 or image.size[1] == 0:
                     continue
@@ -763,6 +780,9 @@ def _collect_visual_outputs(result, visual_outputs_list, downloadable_files_list
                 img_array = np.array(image)
                 if img_array.size == 0 or np.isnan(img_array).any():
                     continue
+            except Exception as e:
+                print(f"Warning: Failed to load image {file_path}: {e}")
+                continue
             
             filename = os.path.basename(file_path)
             filename_lower = filename.lower()
@@ -2333,9 +2353,9 @@ def main(args):
         **SHPAE** is an open-source assistant for interpreting cell images, powered by large language models and tool-based reasoning.
         """)
         
-        # Model / tool configuration (top row)
+        # Main layout: left (config + tools + inputs), right (conversation)
         with gr.Row():
-            with gr.Column(scale=1, min_width=250):
+            with gr.Column(scale=1):
                 gr.Markdown("### ⚙️ LLM Configuration")
                 multimodal_models = [m for m in OPENAI_MODEL_CONFIGS.values()]
                 model_names = [m["model_id"] for m in multimodal_models]
@@ -2348,10 +2368,6 @@ def main(args):
                 gr.Markdown("### 🛠️ Available Tools")
                 with gr.Accordion("🛠️ Available Tools", open=False):
                     gr.Markdown("\n".join([f"- {t}" for t in get_available_tools()]))
-
-        # Main interaction row: left (uploads + question), right (conversation)
-        with gr.Row():
-            with gr.Column(scale=1):
                 gr.Markdown("### 📤 Image Groups")
                 user_image = gr.File(label="Upload Image(s)", file_count="multiple", type="filepath")
                 group_table = gr.Dataframe(headers=["image_name", "group"], row_count=0, wrap=True, interactive=True, visible=True)
