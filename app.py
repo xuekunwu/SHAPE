@@ -1564,12 +1564,21 @@ class Solver:
             }
             self.step_info.append(step_info)
 
-            # If conclusion is STOP, allow one more step for Image_Captioner_Tool if not already used
+            # If conclusion is STOP, check if we should continue for Image_Captioner_Tool
+            # Only continue if the query requires full cell state analysis (not just counting)
             if conclusion == 'STOP':
-                # Check if Image_Captioner_Tool has been used
+                # Check if query requires full cell state analysis
+                requires_full_analysis = self.planner._requires_full_cell_state_analysis(user_query) if hasattr(self.planner, '_requires_full_cell_state_analysis') else False
+                
+                # For counting queries, stop immediately
+                if not requires_full_analysis:
+                    execution_successful = True
+                    break
+                
+                # For cell state analysis queries, allow one more step for Image_Captioner_Tool if not already used
                 used_tools = [action.get('tool_name') for action in self.memory.get_actions() if 'tool_name' in action]
                 if 'Image_Captioner_Tool' not in used_tools and step_count < self.max_steps:
-                    # Allow one more step for Image_Captioner_Tool
+                    # Allow one more step for Image_Captioner_Tool (only for full analysis queries)
                     continue
                 else:
                     execution_successful = True
@@ -2330,16 +2339,21 @@ def main(args):
         # Custom CSS for gradient buttons and background colors
         demo.css = """
         /* Gradient buttons: only for Add Group and Ask Question buttons using elem_classes */
+        /* Cool gradient: dark teal → lavender → magenta → peach */
         .gradient-button-primary button,
         .gradient-button-primary button:not(:hover) {
-            background: linear-gradient(135deg, #00BFFF 0%, #9B87F5 50%, #FFB6C1 100%) !important;
+            background: linear-gradient(180deg, #2E5266 0%, #6B8E9F 25%, #B19CD9 50%, #D9468F 75%, #FF8C94 100%) !important;
             border: none !important;
             color: #ffffff !important;
+            box-shadow: 0 4px 15px rgba(217, 70, 143, 0.3) !important;
+            transition: all 0.3s ease !important;
         }
         .gradient-button-primary button:hover {
-            background: linear-gradient(135deg, #0099CC 0%, #8B77E5 50%, #FFA0B0 100%) !important;
+            background: linear-gradient(180deg, #1E3A4A 0%, #5B7E8F 25%, #A18CC9 50%, #C9367F 75%, #FF7C84 100%) !important;
             border: none !important;
             color: #ffffff !important;
+            box-shadow: 0 6px 20px rgba(217, 70, 143, 0.5) !important;
+            transform: translateY(-2px) !important;
         }
         /* Background colors for Conversation, Visual Outputs, and Available Tools */
         .chatbot {
