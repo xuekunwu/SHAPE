@@ -831,6 +831,7 @@ class Analysis_Visualizer_Tool(BaseTool):
             normalize='index'
         )
         
+        
         # Calculate number of images per group (if image_name column exists)
         images_per_group = {}
         if 'image_name' in adata.obs:
@@ -886,18 +887,26 @@ class Analysis_Visualizer_Tool(BaseTool):
                     ax1.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.01,
                            f'{prop:.2f}', ha='center', va='bottom', fontsize=8)
         
-        # Apply professional styling
+        # Set x-axis ticks and labels BEFORE applying professional styling to ensure they're not overridden
+        ax1.set_xticks(x)
+        ax1.set_xticklabels([f'Cluster {c}' for c in clusters], rotation=0, ha='center')
+        
+        # Apply professional styling (this will set title, xlabel, ylabel, and basic grid)
         VisualizationConfig.apply_professional_styling(
             ax1, title='Cluster Proportion by Group', 
             xlabel='Cluster', ylabel='Proportion'
         )
         
-        ax1.set_xticks(x)
-        ax1.set_xticklabels([f'Cluster {c}' for c in clusters], rotation=0, ha='center')
-        ax1.legend(title='Group', bbox_to_anchor=(1.02, 1), loc='upper left', frameon=True)
-        ax1.set_ylim([0, max(1.0, composition.values.max() * 1.15)])  # Add some padding for labels
+        # Override grid settings to show only y-axis grid with specific style
+        ax1.grid(False)  # Clear all grids first
         ax1.grid(axis='y', alpha=0.3, linestyle='--', linewidth=0.5)
         ax1.set_axisbelow(True)  # Put grid behind bars
+        
+        # Set y-axis limits with padding for labels
+        ax1.set_ylim([0, max(1.0, composition.values.max() * 1.15)])
+        
+        # Add legend
+        ax1.legend(title='Group', bbox_to_anchor=(1.02, 1), loc='upper left', frameon=True)
         
         # Perform statistical testing if conditions are met
         stats_text = ""

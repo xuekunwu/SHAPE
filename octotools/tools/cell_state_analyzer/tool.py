@@ -702,35 +702,29 @@ class Cell_State_Analyzer_Tool(BaseTool):
                 f"Execution statuses: {execution_statuses if execution_statuses else 'unknown'}"
             )
         
-        # If cell_crop_objects are available, extract group and image_name from them
-        # Otherwise, try to extract from cell_metadata or cell_id
-        if all_cell_crop_objects and len(all_cell_crop_objects) == len(all_cell_crops):
-            # Extract group and image_name from cell_crop_objects
-            for i, crop_obj in enumerate(all_cell_crop_objects):
+        # Ensure all cell_metadata entries have group and image_name from Single_Cell_Cropper_Tool
+        # Single_Cell_Cropper_Tool saves group and image_name directly in cell_metadata (line 529)
+        # If missing, use cell_crop_objects as backup source
+        for i in range(len(all_cell_crops)):
+            # Initialize metadata entry if needed
+            if i >= len(all_cell_metadata):
+                all_cell_metadata.append({})
+            if not isinstance(all_cell_metadata[i], dict):
+                all_cell_metadata[i] = {}
+            
+            # Direct path: get from cell_metadata first (saved by Single_Cell_Cropper_Tool)
+            # Backup: get from cell_crop_objects if not in cell_metadata
+            if 'group' not in all_cell_metadata[i] and all_cell_crop_objects and i < len(all_cell_crop_objects):
+                crop_obj = all_cell_crop_objects[i]
                 if isinstance(crop_obj, dict):
-                    # Extract group and source_image_id (image_name) from cell_crop_objects
-                    group = crop_obj.get('group', 'default')
-                    image_name = crop_obj.get('source_image_id', '')
-                    cell_id = crop_obj.get('cell_id', '')
-                    
-                    # If cell_id is in format {group}_{image_name}_{crop_id}, parse it
-                    if cell_id and '_' in cell_id:
-                        parts = cell_id.split('_', 2)  # Split into max 3 parts
-                        if len(parts) >= 3:
-                            # Format: group_image_name_crop_id
-                            group = parts[0]
-                            image_name = parts[1]
-                    
-                    # Update cell_metadata to include group and image_name
-                    if i < len(all_cell_metadata):
-                        if isinstance(all_cell_metadata[i], dict):
-                            all_cell_metadata[i]['group'] = group
-                            all_cell_metadata[i]['image_name'] = image_name
-                            all_cell_metadata[i]['cell_id'] = cell_id
-                        else:
-                            all_cell_metadata[i] = {'group': group, 'image_name': image_name, 'cell_id': cell_id}
-                    else:
-                        all_cell_metadata.append({'group': group, 'image_name': image_name, 'cell_id': cell_id})
+                    all_cell_metadata[i]['group'] = crop_obj.get('group', 'default')
+                    all_cell_metadata[i]['image_name'] = crop_obj.get('source_image_id', 'unknown')
+            
+            # Ensure required fields exist
+            if 'group' not in all_cell_metadata[i]:
+                all_cell_metadata[i]['group'] = 'default'
+            if 'image_name' not in all_cell_metadata[i]:
+                all_cell_metadata[i]['image_name'] = 'unknown'
         
         return all_cell_crops, all_cell_metadata
     
@@ -772,25 +766,16 @@ class Cell_State_Analyzer_Tool(BaseTool):
         output_dir = os.path.join(query_cache_dir, "cell_state_analysis")
         os.makedirs(output_dir, exist_ok=True)
         
-        # Extract groups and image_names from metadata
+        # Extract groups and image_names from metadata - direct path, no fallbacks
         groups = []
         image_names = []
         for meta in cell_metadata:
             if isinstance(meta, dict):
-                groups.append(meta.get('group', 'default'))
-                # Extract image_name from metadata, or from cell_id if available
+                # Direct extraction: group and image_name should be in metadata from Single_Cell_Cropper_Tool
+                group = meta.get('group', 'default')
                 image_name = meta.get('image_name', '')
-                if not image_name and 'cell_id' in meta:
-                    # Parse cell_id in format: {group}_{image_name}_{crop_id}
-                    cell_id = meta.get('cell_id', '')
-                    if cell_id and '_' in cell_id:
-                        parts = cell_id.split('_', 2)
-                        if len(parts) >= 3:
-                            image_name = parts[1]
-                if not image_name:
-                    # Fallback: extract from crop path if available
-                    image_name = 'unknown'
-                image_names.append(image_name)
+                groups.append(group)
+                image_names.append(image_name if image_name else 'unknown')
             else:
                 groups.append("default")
                 image_names.append("unknown")
@@ -839,9 +824,10 @@ class Cell_State_Analyzer_Tool(BaseTool):
             }
         
         adata = ad.AnnData(X=feats)
-        # Use image_names extracted from metadata instead of img_names from paths
-        adata.obs["image_name"] = image_names if len(image_names) == adata.n_obs else img_names
-        adata.obs["group"] = groups if len(groups) == adata.n_obs else groups_extracted
+        # Direct path: use groups and image_names extracted from cell_metadata
+        # These come directly from Single_Cell_Cropper_Tool output, so they should match adata.n_obs
+        adata.obs["image_name"] = image_names[:adata.n_obs] if len(image_names) >= adata.n_obs else (image_names + ['unknown'] * (adata.n_obs - len(image_names)))
+        adata.obs["group"] = groups[:adata.n_obs] if len(groups) >= adata.n_obs else (groups + ['default'] * (adata.n_obs - len(groups)))
         # Store full cell crop paths for visualization
         adata.obs["crop_path"] = cell_crops
         # Use cell_id from metadata as index if available, otherwise use default
