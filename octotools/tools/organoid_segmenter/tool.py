@@ -217,7 +217,7 @@ class Organoid_Segmenter_Tool(BaseTool):
             try:
                 self.model_path = hf_hub_download(
                     repo_id="5xuekun/organoid-segmenter-model",
-                    filename="cpsam_CO_10x_260106",
+                    filename="cpsam_CO_4x_260105",
                     token=os.getenv("HUGGINGFACE_TOKEN")
                 )
                 print(f"Organoid_Segmenter_Tool: Custom organoid model path determined: {self.model_path}")
@@ -238,7 +238,7 @@ class Organoid_Segmenter_Tool(BaseTool):
             try:
                 model_to_load = hf_hub_download(
                     repo_id="5xuekun/organoid-segmenter-model",
-                    filename="cpsam_CO_10x_260106",
+                    filename="cpsam_CO_4x_260105",
                     token=os.getenv("HUGGINGFACE_TOKEN")
                 )
                 self.model_path = model_to_load
