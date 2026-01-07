@@ -11,6 +11,78 @@ from huggingface_hub import hf_hub_download
 from octotools.models.utils import VisualizationConfig
 import traceback
 import tifffile
+import tempfile
+
+def check_image_quality(img, min_brightness=50, max_brightness=200, max_cv_threshold=0.3):
+    """
+    Check image quality: brightness and illumination uniformity.
+    
+    Args:
+        img: Input image as numpy array (uint8, 0-255)
+        min_brightness: Minimum acceptable mean brightness (default: 50)
+        max_brightness: Maximum acceptable mean brightness (default: 200)
+        max_cv_threshold: Maximum acceptable coefficient of variation for illumination (default: 0.3)
+        
+    Returns:
+        tuple: (needs_preprocessing: bool, reason: str, stats: dict)
+    """
+    if img is None or img.size == 0:
+        return True, "Empty image", {}
+    
+    # Ensure image is uint8
+    if img.dtype != np.uint8:
+        if img.dtype == np.uint16:
+            img = (img / 65535.0 * 255).astype(np.uint8)
+        else:
+            img = np.clip(img, 0, 255).astype(np.uint8)
+    
+    # Calculate mean brightness
+    mean_brightness = np.mean(img)
+    
+    # Calculate illumination uniformity using coefficient of variation
+    # Divide image into blocks and calculate local brightness
+    h, w = img.shape[:2]
+    block_size = min(64, h // 4, w // 4)  # Adaptive block size
+    if block_size < 8:
+        block_size = 8
+    
+    local_brightness = []
+    for i in range(0, h, block_size):
+        for j in range(0, w, block_size):
+            block = img[i:min(i+block_size, h), j:min(j+block_size, w)]
+            if block.size > 0:
+                local_brightness.append(np.mean(block))
+    
+    if len(local_brightness) > 1:
+        local_brightness = np.array(local_brightness)
+        cv_illumination = np.std(local_brightness) / (np.mean(local_brightness) + 1e-6)  # Coefficient of variation
+    else:
+        cv_illumination = 0.0
+    
+    # Determine if preprocessing is needed
+    needs_preprocessing = False
+    reasons = []
+    
+    if mean_brightness < min_brightness:
+        needs_preprocessing = True
+        reasons.append(f"too dark (brightness: {mean_brightness:.1f} < {min_brightness})")
+    elif mean_brightness > max_brightness:
+        needs_preprocessing = True
+        reasons.append(f"too bright (brightness: {mean_brightness:.1f} > {max_brightness})")
+    
+    if cv_illumination > max_cv_threshold:
+        needs_preprocessing = True
+        reasons.append(f"uneven illumination (CV: {cv_illumination:.3f} > {max_cv_threshold})")
+    
+    reason = "; ".join(reasons) if reasons else "good quality"
+    
+    stats = {
+        "mean_brightness": float(mean_brightness),
+        "cv_illumination": float(cv_illumination),
+        "needs_preprocessing": needs_preprocessing
+    }
+    
+    return needs_preprocessing, reason, stats
 
 class Nuclei_Segmenter_Tool(BaseTool):
     def __init__(self, model_path=None):
@@ -179,6 +251,71 @@ class Nuclei_Segmenter_Tool(BaseTool):
                         "error": f"Failed to load image: {image_path}. All loading methods failed: {str(pil_error)}",
                         "summary": "Image loading failed with all methods"
                     }
+            
+            # Ensure img is uint8 for quality check
+            img_uint8 = img.copy()
+            if img_uint8.dtype != np.uint8:
+                if img_uint8.dtype == np.uint16:
+                    img_uint8 = (img_uint8 / 65535.0 * 255).astype(np.uint8)
+                else:
+                    img_uint8 = np.clip(img_uint8, 0, 255).astype(np.uint8)
+            
+            # Check image quality and apply preprocessing if needed
+            needs_preprocessing, quality_reason, quality_stats = check_image_quality(img_uint8)
+            if needs_preprocessing:
+                print(f"⚠️ Image quality check: {quality_reason}")
+                print(f"   Brightness: {quality_stats['mean_brightness']:.1f}, Illumination CV: {quality_stats['cv_illumination']:.3f}")
+                print(f"   Auto-applying Image_Preprocessor_Tool for better segmentation results...")
+                
+                # Import and use Image_Preprocessor_Tool
+                from octotools.tools.image_preprocessor.tool import Image_Preprocessor_Tool
+                preprocessor = Image_Preprocessor_Tool()
+                
+                # Save image temporarily for preprocessing
+                temp_dir = tempfile.mkdtemp() if query_cache_dir is None else os.path.join(query_cache_dir, "temp_preprocess")
+                os.makedirs(temp_dir, exist_ok=True)
+                temp_img_path = os.path.join(temp_dir, f"image_{image_identifier}.png")
+                Image.fromarray(img_uint8, mode='L').save(temp_img_path)
+                
+                try:
+                    # Apply preprocessing
+                    preprocess_result = preprocessor.execute(
+                        image=temp_img_path,
+                        target_brightness=120,
+                        gaussian_kernel_size=151,
+                        output_format='png',
+                        save_intermediate=False,
+                        image_id=f"{image_identifier}_preprocessed",
+                        query_cache_dir=query_cache_dir
+                    )
+                    
+                    # Load preprocessed image
+                    if isinstance(preprocess_result, dict) and "processed_image_path" in preprocess_result:
+                        preprocessed_path = preprocess_result["processed_image_path"]
+                        if os.path.exists(preprocessed_path):
+                            preprocessed_img = cv2.imread(preprocessed_path, cv2.IMREAD_GRAYSCALE)
+                            if preprocessed_img is not None:
+                                img = preprocessed_img
+                                print(f"✅ Successfully applied preprocessing. New brightness: {np.mean(img):.1f}")
+                            else:
+                                print(f"⚠️ Failed to load preprocessed image, using original")
+                        else:
+                            print(f"⚠️ Preprocessed image not found, using original")
+                    else:
+                        print(f"⚠️ Preprocessing returned unexpected result, using original")
+                except Exception as preprocess_error:
+                    print(f"⚠️ Error during automatic preprocessing: {preprocess_error}")
+                    print(f"   Continuing with original image...")
+                finally:
+                    # Clean up temp file
+                    try:
+                        if os.path.exists(temp_img_path):
+                            os.remove(temp_img_path)
+                    except:
+                        pass
+            else:
+                print(f"✅ Image quality check passed: {quality_reason}")
+                print(f"   Brightness: {quality_stats['mean_brightness']:.1f}, Illumination CV: {quality_stats['cv_illumination']:.3f}")
             
             img = img.astype(np.float32)
             
