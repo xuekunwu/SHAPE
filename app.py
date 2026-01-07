@@ -464,12 +464,40 @@ def add_image_to_group(group_name: str, user_image, state: "AgentState", images_
             continue
 
         image_id = uuid.uuid4().hex
-        image_path = group_image_dir / f"{image_id}.jpg"
+        
+        # Determine file extension based on original file format
+        # Preserve TIFF format for multi-channel images
+        original_path = None
+        if isinstance(img, dict) and 'path' in img:
+            original_path = img['path']
+        elif isinstance(img, str) and os.path.exists(img):
+            original_path = img
+        
+        # Check if original file is TIFF to preserve multi-channel format
+        file_ext = '.jpg'  # default
+        if original_path:
+            original_ext = os.path.splitext(original_path)[1].lower()
+            if original_ext in ['.tif', '.tiff']:
+                file_ext = '.tiff'  # Preserve TIFF format for multi-channel images
+        
+        image_path = group_image_dir / f"{image_id}{file_ext}"
         try:
             if isinstance(img, dict) and 'path' in img:
-                shutil.copy(img['path'], image_path)
+                # For TIFF files, use tifffile to preserve multi-channel data
+                if file_ext == '.tiff':
+                    import tifffile
+                    img_data = tifffile.imread(img['path'])
+                    tifffile.imwrite(str(image_path), img_data)
+                else:
+                    shutil.copy(img['path'], image_path)
             elif isinstance(img, str) and os.path.exists(img):
-                shutil.copy(img, image_path)
+                # For TIFF files, use tifffile to preserve multi-channel data
+                if file_ext == '.tiff':
+                    import tifffile
+                    img_data = tifffile.imread(img)
+                    tifffile.imwrite(str(image_path), img_data)
+                else:
+                    shutil.copy(img, image_path)
             elif hasattr(img, "save"):
                 img.save(image_path)
             else:
