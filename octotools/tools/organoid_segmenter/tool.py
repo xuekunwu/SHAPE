@@ -234,6 +234,8 @@ class Organoid_Segmenter_Tool(BaseTool):
             # Check if it's a multi-channel TIFF file
             image_path_lower = image_path.lower()
             is_tiff = image_path_lower.endswith('.tif') or image_path_lower.endswith('.tiff')
+            is_multi_channel = False
+            phase_contrast_img = None  # Store phase contrast image for overlay
             
             if is_tiff:
                 # Try loading with tifffile first to handle multi-channel TIFF
@@ -242,31 +244,44 @@ class Organoid_Segmenter_Tool(BaseTool):
                     # Check if multi-channel (shape: (H, W, C) or (C, H, W) or (Z, H, W, C))
                     if img_full.ndim == 3:
                         # Check if last dimension is channels (typical: H, W, C)
-                        if img_full.shape[2] <= 4:  # Likely channels in last dimension
-                            print(f"Detected multi-channel TIFF with {img_full.shape[2]} channels. Using first channel (bright-field) for segmentation.")
-                            img = img_full[:, :, 0]  # Extract first channel (bright-field)
-                        elif img_full.shape[0] <= 4:  # Likely channels in first dimension (C, H, W)
-                            print(f"Detected multi-channel TIFF with {img_full.shape[0]} channels. Using first channel (bright-field) for segmentation.")
-                            img = img_full[0, :, :]  # Extract first channel (bright-field)
+                        if img_full.shape[2] > 1 and img_full.shape[2] <= 4:  # Multi-channel in last dimension
+                            is_multi_channel = True
+                            print(f"Detected multi-channel TIFF with {img_full.shape[2]} channels. Using first channel (phase contrast) for segmentation.")
+                            phase_contrast_img = img_full[:, :, 0]  # Extract first channel (phase contrast)
+                        elif img_full.shape[0] > 1 and img_full.shape[0] <= 4:  # Multi-channel in first dimension (C, H, W)
+                            is_multi_channel = True
+                            print(f"Detected multi-channel TIFF with {img_full.shape[0]} channels. Using first channel (phase contrast) for segmentation.")
+                            phase_contrast_img = img_full[0, :, :]  # Extract first channel (phase contrast)
                         else:
-                            # Assume 2D + depth, use first slice
-                            img = img_full[:, :, 0] if img_full.shape[2] < img_full.shape[0] else img_full[0, :, :]
+                            # Single channel or 2D + depth, use first slice
+                            phase_contrast_img = img_full[:, :, 0] if img_full.shape[2] < img_full.shape[0] else img_full[0, :, :]
                     elif img_full.ndim == 4:
                         # 4D: could be (Z, H, W, C) or (C, Z, H, W)
-                        print(f"Detected 4D TIFF. Using first channel of first slice for segmentation.")
-                        if img_full.shape[3] <= 4:  # (Z, H, W, C)
-                            img = img_full[0, :, :, 0]
+                        is_multi_channel = True
+                        print(f"Detected 4D multi-channel TIFF. Using first channel of first slice (phase contrast) for segmentation.")
+                        if img_full.shape[3] > 1 and img_full.shape[3] <= 4:  # (Z, H, W, C)
+                            phase_contrast_img = img_full[0, :, :, 0]
                         else:  # (C, Z, H, W)
-                            img = img_full[0, 0, :, :]
+                            phase_contrast_img = img_full[0, 0, :, :]
                     else:
                         # 2D grayscale
-                        img = img_full
+                        phase_contrast_img = img_full
+                    
+                    # Normalize phase contrast image to uint8 if needed
+                    if phase_contrast_img.dtype == np.uint16:
+                        phase_contrast_img = (phase_contrast_img / 65535.0 * 255).astype(np.uint8)
+                    elif phase_contrast_img.dtype != np.uint8:
+                        phase_contrast_img = np.clip(phase_contrast_img, 0, 255).astype(np.uint8)
+                    
+                    img = phase_contrast_img.astype(np.float32)
                 except Exception as tiff_error:
                     print(f"Warning: Failed to load TIFF with tifffile: {tiff_error}, trying cv2")
                     img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+                    phase_contrast_img = img.copy() if img is not None else None
             else:
                 # For non-TIFF files, use cv2
                 img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+                phase_contrast_img = img.copy() if img is not None else None
             
             if img is None:
                 # Try alternative: use PIL to load and convert
@@ -275,12 +290,16 @@ class Organoid_Segmenter_Tool(BaseTool):
                     if pil_img.mode != 'L':
                         pil_img = pil_img.convert('L')
                     img = np.array(pil_img)
+                    phase_contrast_img = img.copy()
                     print(f"Loaded image using PIL: {image_path}")
                 except Exception as pil_error:
                     return {
                         "error": f"Failed to load image: {image_path}. All loading methods failed: {str(pil_error)}",
                         "summary": "Image loading failed with all methods"
                     }
+            
+            if phase_contrast_img is None:
+                phase_contrast_img = img.copy()
             
             img = img.astype(np.float32)
             
@@ -317,7 +336,14 @@ class Organoid_Segmenter_Tool(BaseTool):
             )
             
             mask = masks[0]
-            overlay = plot.mask_overlay(img, mask)
+            
+            # Use phase contrast image for overlay (ensure it's uint8)
+            phase_contrast_for_overlay = phase_contrast_img.copy()
+            if phase_contrast_for_overlay.dtype != np.uint8:
+                phase_contrast_for_overlay = np.clip(phase_contrast_for_overlay, 0, 255).astype(np.uint8)
+            
+            # Create overlay on phase contrast image
+            overlay = plot.mask_overlay(phase_contrast_for_overlay, mask)
             
             # Setup output directory using centralized configuration
             output_dir = VisualizationConfig.get_output_dir(query_cache_dir)
@@ -325,7 +351,7 @@ class Organoid_Segmenter_Tool(BaseTool):
             # Save overlay visualization with professional styling using image identifier
             output_path = os.path.join(output_dir, f"organoid_overlay_{image_identifier}.png")
             fig, ax = VisualizationConfig.create_professional_figure(figsize=(12, 8))
-            # Ensure overlay has same brightness as original image
+            # Ensure overlay has same brightness as original phase contrast image
             overlay_normalized = overlay.astype(np.float32) / 255.0
             ax.imshow(overlay_normalized, vmin=0, vmax=1)
             ax.axis('off')
