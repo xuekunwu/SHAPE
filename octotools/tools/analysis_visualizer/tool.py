@@ -17,6 +17,7 @@ import random
 from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 from PIL import Image
 import cv2
+import tifffile
 
 # Add the project root to the Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -748,11 +749,67 @@ class Analysis_Visualizer_Tool(BaseTool):
         return output_path
     
     def _load_and_resize_crop(self, crop_path: str, size: tuple = (60, 60)) -> Optional[np.ndarray]:
-        """Load and resize cell crop image for display in UMAP plot."""
+        """Load and resize cell crop image for display in UMAP plot. Supports multi-channel TIFF with merged RGB view."""
         try:
             # Try to load with PIL first (handles various formats)
             if os.path.exists(crop_path):
-                # Try PIL
+                # Check if it's a multi-channel TIFF that needs merging
+                crop_path_lower = crop_path.lower()
+                is_tiff = crop_path_lower.endswith('.tif') or crop_path_lower.endswith('.tiff')
+                
+                if is_tiff:
+                    # Try loading with tifffile to check if multi-channel
+                    try:
+                        img_full = tifffile.imread(crop_path)
+                        
+                        # Check if multi-channel
+                        if img_full.ndim == 3 and img_full.shape[2] > 1:
+                            # Multi-channel TIFF: create merged RGB view
+                            def normalize_channel(x):
+                                x = x.astype(np.float32)
+                                x_min = x.min()
+                                x_max = x.max()
+                                if x_max > x_min:
+                                    return (x - x_min) / (x_max - x_min + 1e-8)
+                                return x
+                            
+                            num_channels = img_full.shape[2]
+                            # Normalize all channels
+                            normalized_channels = []
+                            for c in range(num_channels):
+                                normalized_channels.append(normalize_channel(img_full[:, :, c]))
+                            
+                            # Create merged RGB: Bright-field -> gray, GFP -> green
+                            merged = np.zeros((img_full.shape[0], img_full.shape[1], 3), dtype=np.float32)
+                            
+                            if num_channels >= 1:
+                                bf_n = normalized_channels[0]  # Bright-field
+                                merged[:, :, 0] = bf_n  # Red
+                                merged[:, :, 1] = bf_n  # Green (gray component)
+                                merged[:, :, 2] = bf_n  # Blue (gray component)
+                            
+                            if num_channels >= 2:
+                                gfp_n = normalized_channels[1]  # GFP
+                                merged[:, :, 1] = bf_n + gfp_n  # Green = BF + GFP
+                            
+                            if num_channels >= 3:
+                                # If there's a third channel (e.g., DAPI), add to blue
+                                dapi_n = normalized_channels[2]
+                                merged[:, :, 2] = bf_n + dapi_n  # Blue = BF + DAPI
+                            
+                            # Clip and convert to uint8
+                            merged = np.clip(merged, 0, 1)
+                            merged_uint8 = (merged * 255).astype(np.uint8)
+                            
+                            # Resize
+                            img_pil = Image.fromarray(merged_uint8, mode='RGB')
+                            img_pil = img_pil.resize(size, Image.Resampling.LANCZOS)
+                            return np.array(img_pil)
+                    except Exception:
+                        # Fall through to PIL loading if tifffile fails
+                        pass
+                
+                # Try PIL for single-channel or already-merged images
                 try:
                     img = Image.open(crop_path)
                     if img.mode != 'RGB':
@@ -1045,7 +1102,15 @@ class Analysis_Visualizer_Tool(BaseTool):
                         try:
                             crop_img = self._load_and_resize_crop(crop_path, size=(crop_size, crop_size))
                             if crop_img is not None:
-                                ax.imshow(crop_img, cmap='gray' if len(crop_img.shape) == 2 else None)
+                                # Always display as RGB (no grayscale colormap)
+                                if len(crop_img.shape) == 3 and crop_img.shape[2] == 3:
+                                    ax.imshow(crop_img)  # RGB image
+                                elif len(crop_img.shape) == 2:
+                                    # Grayscale: convert to RGB
+                                    crop_img_rgb = np.stack([crop_img, crop_img, crop_img], axis=2)
+                                    ax.imshow(crop_img_rgb)
+                                else:
+                                    ax.imshow(crop_img)
                                 # Add border with cluster color
                                 for spine in ax.spines.values():
                                     spine.set_visible(True)

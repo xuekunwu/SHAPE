@@ -249,9 +249,12 @@ class Single_Cell_Cropper_Tool(BaseTool):
             if source_image_id is None:
                 source_image_id = Path(original_image).stem
             
+            # Determine if this is an organoid mask
+            is_organoid_mask = "organoid_mask" in mask_filename_lower
+            
             # Generate cell crops and CellCrop objects
             cell_crops, cell_metadata, cell_crop_objects, stats = self._generate_cell_crops(
-                original_img, mask, original_image, source_image_id, group, min_area, margin, tool_cache_dir, output_format, is_multi_channel
+                original_img, mask, original_image, source_image_id, group, min_area, margin, tool_cache_dir, output_format, is_multi_channel, is_organoid_mask
             )
             
             # Always save metadata file, even if no crops were generated
@@ -401,7 +404,7 @@ class Single_Cell_Cropper_Tool(BaseTool):
                 "execution_status": "error"
             }
 
-    def _generate_cell_crops(self, original_img, mask, original_image_path, source_image_id, group, min_area, margin, output_dir, output_format, is_multi_channel=False):
+    def _generate_cell_crops(self, original_img, mask, original_image_path, source_image_id, group, min_area, margin, output_dir, output_format, is_multi_channel=False, is_organoid_mask=False):
         """
         Generate individual cell crops from the mask and create CellCrop objects.
         
@@ -525,24 +528,77 @@ class Single_Cell_Cropper_Tool(BaseTool):
             try:
                 # Handle multi-channel images
                 if is_multi_channel and cell_crop.ndim == 3:
-                    # Multi-channel image - save as TIFF to preserve channels
-                    if output_format.lower() in ['tif', 'tiff']:
-                        # Save directly with tifffile to preserve multi-channel data
-                        tifffile.imwrite(crop_path, cell_crop)
-                    else:
-                        # For other formats, convert to RGB if 3 channels, or use first channel
-                        if cell_crop.shape[2] == 3:
-                            pil_image = Image.fromarray(cell_crop, mode='RGB')
-                        elif cell_crop.shape[2] == 2:
-                            # 2 channels: duplicate to make RGB
-                            cell_crop_rgb = np.zeros((cell_crop.shape[0], cell_crop.shape[1], 3), dtype=cell_crop.dtype)
-                            cell_crop_rgb[:, :, 0] = cell_crop[:, :, 0]  # Channel 1 -> Red
-                            cell_crop_rgb[:, :, 1] = cell_crop[:, :, 1]  # Channel 2 -> Green
-                            cell_crop_rgb[:, :, 2] = cell_crop[:, :, 0]  # Channel 1 -> Blue (duplicate)
-                            pil_image = Image.fromarray(cell_crop_rgb, mode='RGB')
+                    # For organoid multi-channel images, create merged RGB view
+                    if is_organoid_mask:
+                        # Normalize each channel independently for visualization
+                        def normalize_channel(x):
+                            x = x.astype(np.float32)
+                            x_min = x.min()
+                            x_max = x.max()
+                            if x_max > x_min:
+                                return (x - x_min) / (x_max - x_min + 1e-8)
+                            return x
+                        
+                        num_channels = cell_crop.shape[2]
+                        # Normalize all channels
+                        normalized_channels = []
+                        for c in range(num_channels):
+                            normalized_channels.append(normalize_channel(cell_crop[:, :, c]))
+                        
+                        # Create merged RGB: Bright-field -> gray, GFP -> green
+                        merged = np.zeros((cell_crop.shape[0], cell_crop.shape[1], 3), dtype=np.float32)
+                        
+                        if num_channels >= 1:
+                            bf_n = normalized_channels[0]  # Bright-field
+                            merged[:, :, 0] = bf_n  # Red
+                            merged[:, :, 1] = bf_n  # Green (gray component)
+                            merged[:, :, 2] = bf_n  # Blue (gray component)
+                        
+                        if num_channels >= 2:
+                            gfp_n = normalized_channels[1]  # GFP
+                            merged[:, :, 1] = bf_n + gfp_n  # Green = BF + GFP
+                        
+                        if num_channels >= 3:
+                            # If there's a third channel (e.g., DAPI), add to blue
+                            dapi_n = normalized_channels[2]
+                            merged[:, :, 2] = bf_n + dapi_n  # Blue = BF + DAPI
+                        
+                        # Clip and convert to uint8
+                        merged = np.clip(merged, 0, 1)
+                        merged_uint8 = (merged * 255).astype(np.uint8)
+                        
+                        # Save as RGB PNG
+                        pil_image = Image.fromarray(merged_uint8, mode='RGB')
+                        if output_format.lower() in ['tif', 'tiff']:
+                            pil_image.save(crop_path, 'TIFF', compression='tiff_lzw')
                         else:
-                            # More than 3 channels: use first 3
-                            pil_image = Image.fromarray(cell_crop[:, :, :3], mode='RGB')
+                            pil_image.save(crop_path, 'PNG', optimize=True)
+                    else:
+                        # For non-organoid multi-channel images, preserve channels in TIFF
+                        if output_format.lower() in ['tif', 'tiff']:
+                            # Save directly with tifffile to preserve multi-channel data
+                            tifffile.imwrite(crop_path, cell_crop)
+                        else:
+                            # For other formats, convert to RGB if 3 channels, or use first channel
+                            if cell_crop.shape[2] == 3:
+                                pil_image = Image.fromarray(cell_crop, mode='RGB')
+                            elif cell_crop.shape[2] == 2:
+                                # 2 channels: duplicate to make RGB
+                                cell_crop_rgb = np.zeros((cell_crop.shape[0], cell_crop.shape[1], 3), dtype=cell_crop.dtype)
+                                cell_crop_rgb[:, :, 0] = cell_crop[:, :, 0]  # Channel 1 -> Red
+                                cell_crop_rgb[:, :, 1] = cell_crop[:, :, 1]  # Channel 2 -> Green
+                                cell_crop_rgb[:, :, 2] = cell_crop[:, :, 0]  # Channel 1 -> Blue (duplicate)
+                                pil_image = Image.fromarray(cell_crop_rgb, mode='RGB')
+                            else:
+                                # More than 3 channels: use first 3
+                                pil_image = Image.fromarray(cell_crop[:, :, :3], mode='RGB')
+                            
+                            if output_format.lower() == 'tif':
+                                pil_image.save(crop_path, 'TIFF', compression='tiff_lzw')
+                            elif output_format.lower() == 'png':
+                                pil_image.save(crop_path, 'PNG', optimize=True)
+                            elif output_format.lower() == 'jpg':
+                                pil_image.save(crop_path, 'JPEG', quality=95, optimize=True)
                 elif len(cell_crop.shape) == 2:
                     # Grayscale image - convert to PIL and save
                     pil_image = Image.fromarray(cell_crop, mode='L')
@@ -551,8 +607,9 @@ class Single_Cell_Cropper_Tool(BaseTool):
                     pil_image = Image.fromarray(cell_crop)
                 
                 # Save with proper format and error handling
-                # Note: Multi-channel images saved with tifffile above, skip PIL save for those
-                if not (is_multi_channel and cell_crop.ndim == 3 and output_format.lower() in ['tif', 'tiff']):
+                # Note: Multi-channel organoid images saved as merged RGB above, skip PIL save for those
+                # Also skip non-organoid multi-channel TIFF saves
+                if not (is_multi_channel and cell_crop.ndim == 3 and (is_organoid_mask or output_format.lower() in ['tif', 'tiff'])):
                     # Validate PIL image
                     if pil_image.size[0] == 0 or pil_image.size[1] == 0:
                         print(f"Warning: Invalid PIL image size for cell {idx}, skipping")
