@@ -84,6 +84,83 @@ def check_image_quality(img, min_brightness=50, max_brightness=200, max_cv_thres
     
     return needs_preprocessing, reason, stats
 
+def check_brightness_only(img, min_brightness=50, max_brightness=200):
+    """
+    Check image brightness only (for organoid segmentation - no illumination correction).
+    
+    Args:
+        img: Input image as numpy array (uint8, 0-255)
+        min_brightness: Minimum acceptable mean brightness (default: 50)
+        max_brightness: Maximum acceptable mean brightness (default: 200)
+        
+    Returns:
+        tuple: (needs_brightness_adjustment: bool, reason: str, stats: dict)
+    """
+    if img is None or img.size == 0:
+        return True, "Empty image", {}
+    
+    # Ensure image is uint8
+    if img.dtype != np.uint8:
+        if img.dtype == np.uint16:
+            img = (img / 65535.0 * 255).astype(np.uint8)
+        else:
+            img = np.clip(img, 0, 255).astype(np.uint8)
+    
+    # Calculate mean brightness
+    mean_brightness = np.mean(img)
+    
+    # Determine if brightness adjustment is needed
+    needs_adjustment = False
+    reasons = []
+    
+    if mean_brightness < min_brightness:
+        needs_adjustment = True
+        reasons.append(f"too dark (brightness: {mean_brightness:.1f} < {min_brightness})")
+    elif mean_brightness > max_brightness:
+        needs_adjustment = True
+        reasons.append(f"too bright (brightness: {mean_brightness:.1f} > {max_brightness})")
+    
+    reason = "; ".join(reasons) if reasons else "good brightness"
+    
+    stats = {
+        "mean_brightness": float(mean_brightness),
+        "needs_adjustment": needs_adjustment
+    }
+    
+    return needs_adjustment, reason, stats
+
+def adjust_brightness_only(img, target_brightness=120):
+    """
+    Adjust image brightness only (no illumination correction).
+    
+    Args:
+        img: Input image as numpy array (uint8, 0-255)
+        target_brightness: Target brightness level (0-255)
+        
+    Returns:
+        Brightness-adjusted image as numpy array (uint8)
+    """
+    if img is None or img.size == 0:
+        return img
+    
+    # Ensure image is uint8
+    if img.dtype != np.uint8:
+        if img.dtype == np.uint16:
+            img = (img / 65535.0 * 255).astype(np.uint8)
+        else:
+            img = np.clip(img, 0, 255).astype(np.uint8)
+    
+    current_brightness = np.mean(img)
+    if current_brightness < 1e-6:  # Avoid division by zero
+        return img
+    
+    adjustment_factor = target_brightness / current_brightness
+    
+    # Apply brightness adjustment
+    adjusted_image = cv2.convertScaleAbs(img, alpha=adjustment_factor, beta=0)
+    
+    return adjusted_image
+
 class Organoid_Segmenter_Tool(BaseTool):
     """
     Organoid segmentation tool using pretrained Cellpose models.
@@ -357,62 +434,23 @@ class Organoid_Segmenter_Tool(BaseTool):
                     elif phase_contrast_img.dtype != np.uint8:
                         phase_contrast_img = np.clip(phase_contrast_img, 0, 255).astype(np.uint8)
                     
-                    # Check image quality and apply preprocessing if needed
-                    needs_preprocessing, quality_reason, quality_stats = check_image_quality(phase_contrast_img)
-                    if needs_preprocessing:
-                        print(f"⚠️ Image quality check: {quality_reason}")
-                        print(f"   Brightness: {quality_stats['mean_brightness']:.1f}, Illumination CV: {quality_stats['cv_illumination']:.3f}")
-                        print(f"   Auto-applying Image_Preprocessor_Tool for better segmentation results...")
-                        
-                        # Import and use Image_Preprocessor_Tool
-                        from octotools.tools.image_preprocessor.tool import Image_Preprocessor_Tool
-                        preprocessor = Image_Preprocessor_Tool()
-                        
-                        # Save phase contrast image temporarily for preprocessing
-                        temp_dir = tempfile.mkdtemp() if query_cache_dir is None else os.path.join(query_cache_dir, "temp_preprocess")
-                        os.makedirs(temp_dir, exist_ok=True)
-                        temp_phase_path = os.path.join(temp_dir, f"phase_contrast_{image_identifier}.png")
-                        Image.fromarray(phase_contrast_img, mode='L').save(temp_phase_path)
+                    # Check brightness only (for organoid - no illumination correction)
+                    needs_brightness_adjustment, brightness_reason, brightness_stats = check_brightness_only(phase_contrast_img)
+                    if needs_brightness_adjustment:
+                        print(f"⚠️ Brightness check: {brightness_reason}")
+                        print(f"   Current brightness: {brightness_stats['mean_brightness']:.1f}")
+                        print(f"   Auto-adjusting brightness to 120 (no illumination correction)...")
                         
                         try:
-                            # Apply preprocessing
-                            preprocess_result = preprocessor.execute(
-                                image=temp_phase_path,
-                                target_brightness=120,
-                                gaussian_kernel_size=151,
-                                output_format='png',
-                                save_intermediate=False,
-                                image_id=f"{image_identifier}_preprocessed",
-                                query_cache_dir=query_cache_dir
-                            )
-                            
-                            # Load preprocessed image
-                            if isinstance(preprocess_result, dict) and "processed_image_path" in preprocess_result:
-                                preprocessed_path = preprocess_result["processed_image_path"]
-                                if os.path.exists(preprocessed_path):
-                                    preprocessed_img = cv2.imread(preprocessed_path, cv2.IMREAD_GRAYSCALE)
-                                    if preprocessed_img is not None:
-                                        phase_contrast_img = preprocessed_img
-                                        print(f"✅ Successfully applied preprocessing. New brightness: {np.mean(phase_contrast_img):.1f}")
-                                    else:
-                                        print(f"⚠️ Failed to load preprocessed image, using original")
-                                else:
-                                    print(f"⚠️ Preprocessed image not found, using original")
-                            else:
-                                print(f"⚠️ Preprocessing returned unexpected result, using original")
-                        except Exception as preprocess_error:
-                            print(f"⚠️ Error during automatic preprocessing: {preprocess_error}")
+                            # Apply brightness adjustment only (no illumination correction)
+                            phase_contrast_img = adjust_brightness_only(phase_contrast_img, target_brightness=120)
+                            print(f"✅ Successfully adjusted brightness. New brightness: {np.mean(phase_contrast_img):.1f}")
+                        except Exception as adjust_error:
+                            print(f"⚠️ Error during brightness adjustment: {adjust_error}")
                             print(f"   Continuing with original image...")
-                        finally:
-                            # Clean up temp file
-                            try:
-                                if os.path.exists(temp_phase_path):
-                                    os.remove(temp_phase_path)
-                            except:
-                                pass
                     else:
-                        print(f"✅ Image quality check passed: {quality_reason}")
-                        print(f"   Brightness: {quality_stats['mean_brightness']:.1f}, Illumination CV: {quality_stats['cv_illumination']:.3f}")
+                        print(f"✅ Brightness check passed: {brightness_reason}")
+                        print(f"   Brightness: {brightness_stats['mean_brightness']:.1f}")
                     
                     img = phase_contrast_img.astype(np.float32)
                 except Exception as tiff_error:
@@ -449,62 +487,23 @@ class Organoid_Segmenter_Tool(BaseTool):
                 else:
                     phase_contrast_img = np.clip(phase_contrast_img, 0, 255).astype(np.uint8)
             
-            # Check image quality and apply preprocessing if needed
-            needs_preprocessing, quality_reason, quality_stats = check_image_quality(phase_contrast_img)
-            if needs_preprocessing:
-                print(f"⚠️ Image quality check: {quality_reason}")
-                print(f"   Brightness: {quality_stats['mean_brightness']:.1f}, Illumination CV: {quality_stats['cv_illumination']:.3f}")
-                print(f"   Auto-applying Image_Preprocessor_Tool for better segmentation results...")
-                
-                # Import and use Image_Preprocessor_Tool
-                from octotools.tools.image_preprocessor.tool import Image_Preprocessor_Tool
-                preprocessor = Image_Preprocessor_Tool()
-                
-                # Save phase contrast image temporarily for preprocessing
-                temp_dir = tempfile.mkdtemp() if query_cache_dir is None else os.path.join(query_cache_dir, "temp_preprocess")
-                os.makedirs(temp_dir, exist_ok=True)
-                temp_phase_path = os.path.join(temp_dir, f"phase_contrast_{image_identifier}.png")
-                Image.fromarray(phase_contrast_img, mode='L').save(temp_phase_path)
+            # Check brightness only (for organoid - no illumination correction)
+            needs_brightness_adjustment, brightness_reason, brightness_stats = check_brightness_only(phase_contrast_img)
+            if needs_brightness_adjustment:
+                print(f"⚠️ Brightness check: {brightness_reason}")
+                print(f"   Current brightness: {brightness_stats['mean_brightness']:.1f}")
+                print(f"   Auto-adjusting brightness to 120 (no illumination correction)...")
                 
                 try:
-                    # Apply preprocessing
-                    preprocess_result = preprocessor.execute(
-                        image=temp_phase_path,
-                        target_brightness=120,
-                        gaussian_kernel_size=151,
-                        output_format='png',
-                        save_intermediate=False,
-                        image_id=f"{image_identifier}_preprocessed",
-                        query_cache_dir=query_cache_dir
-                    )
-                    
-                    # Load preprocessed image
-                    if isinstance(preprocess_result, dict) and "processed_image_path" in preprocess_result:
-                        preprocessed_path = preprocess_result["processed_image_path"]
-                        if os.path.exists(preprocessed_path):
-                            preprocessed_img = cv2.imread(preprocessed_path, cv2.IMREAD_GRAYSCALE)
-                            if preprocessed_img is not None:
-                                phase_contrast_img = preprocessed_img
-                                print(f"✅ Successfully applied preprocessing. New brightness: {np.mean(phase_contrast_img):.1f}")
-                            else:
-                                print(f"⚠️ Failed to load preprocessed image, using original")
-                        else:
-                            print(f"⚠️ Preprocessed image not found, using original")
-                    else:
-                        print(f"⚠️ Preprocessing returned unexpected result, using original")
-                except Exception as preprocess_error:
-                    print(f"⚠️ Error during automatic preprocessing: {preprocess_error}")
+                    # Apply brightness adjustment only (no illumination correction)
+                    phase_contrast_img = adjust_brightness_only(phase_contrast_img, target_brightness=120)
+                    print(f"✅ Successfully adjusted brightness. New brightness: {np.mean(phase_contrast_img):.1f}")
+                except Exception as adjust_error:
+                    print(f"⚠️ Error during brightness adjustment: {adjust_error}")
                     print(f"   Continuing with original image...")
-                finally:
-                    # Clean up temp file
-                    try:
-                        if os.path.exists(temp_phase_path):
-                            os.remove(temp_phase_path)
-                    except:
-                        pass
             else:
-                print(f"✅ Image quality check passed: {quality_reason}")
-                print(f"   Brightness: {quality_stats['mean_brightness']:.1f}, Illumination CV: {quality_stats['cv_illumination']:.3f}")
+                print(f"✅ Brightness check passed: {brightness_reason}")
+                print(f"   Brightness: {brightness_stats['mean_brightness']:.1f}")
             
             img = phase_contrast_img.astype(np.float32)
             
