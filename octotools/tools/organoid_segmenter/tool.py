@@ -242,9 +242,14 @@ class Organoid_Segmenter_Tool(BaseTool):
                 try:
                     img_full = tifffile.imread(image_path)
                     # Check if multi-channel (shape: (H, W, C) or (C, H, W) or (Z, H, W, C))
-                    if img_full.ndim == 3:
-                        # Check if last dimension is channels (typical: H, W, C)
-                        if img_full.shape[2] > 1 and img_full.shape[2] <= 4:  # Multi-channel in last dimension
+                    if img_full.ndim == 2:
+                        # Single channel 2D image - use directly
+                        is_multi_channel = False
+                        print(f"Detected single-channel 2D TIFF. Using directly for segmentation.")
+                        phase_contrast_img = img_full
+                    elif img_full.ndim == 3:
+                        # 3D: could be (H, W, C) or (C, H, W) or (H, W, 1) single channel
+                        if img_full.shape[2] > 1 and img_full.shape[2] <= 4:  # Multi-channel in last dimension (H, W, C)
                             is_multi_channel = True
                             print(f"Detected multi-channel TIFF with {img_full.shape[2]} channels. Using first channel (phase contrast) for segmentation.")
                             phase_contrast_img = img_full[:, :, 0]  # Extract first channel (phase contrast)
@@ -253,8 +258,13 @@ class Organoid_Segmenter_Tool(BaseTool):
                             print(f"Detected multi-channel TIFF with {img_full.shape[0]} channels. Using first channel (phase contrast) for segmentation.")
                             phase_contrast_img = img_full[0, :, :]  # Extract first channel (phase contrast)
                         else:
-                            # Single channel or 2D + depth, use first slice
-                            phase_contrast_img = img_full[:, :, 0] if img_full.shape[2] < img_full.shape[0] else img_full[0, :, :]
+                            # Single channel 3D (H, W, 1) or ambiguous - squeeze to 2D
+                            is_multi_channel = False
+                            print(f"Detected single-channel 3D TIFF. Squeezing to 2D for segmentation.")
+                            phase_contrast_img = np.squeeze(img_full)
+                            if phase_contrast_img.ndim != 2:
+                                # If still not 2D, use first slice
+                                phase_contrast_img = img_full[:, :, 0] if img_full.shape[2] < img_full.shape[0] else img_full[0, :, :]
                     elif img_full.ndim == 4:
                         # 4D: could be (Z, H, W, C) or (C, Z, H, W)
                         is_multi_channel = True
@@ -264,7 +274,9 @@ class Organoid_Segmenter_Tool(BaseTool):
                         else:  # (C, Z, H, W)
                             phase_contrast_img = img_full[0, 0, :, :]
                     else:
-                        # 2D grayscale
+                        # Unexpected dimensions - try to use as-is
+                        is_multi_channel = False
+                        print(f"Warning: Unexpected TIFF dimensions {img_full.shape}. Attempting to use directly.")
                         phase_contrast_img = img_full
                     
                     # Normalize phase contrast image to uint8 if needed

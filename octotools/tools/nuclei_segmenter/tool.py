@@ -128,26 +128,35 @@ class Nuclei_Segmenter_Tool(BaseTool):
                 try:
                     img_full = tifffile.imread(image_path)
                     # Check if multi-channel (shape: (H, W, C) or (C, H, W) or (Z, H, W, C))
-                    if img_full.ndim == 3:
-                        # Check if last dimension is channels (typical: H, W, C)
-                        if img_full.shape[2] <= 4:  # Likely channels in last dimension
+                    if img_full.ndim == 2:
+                        # Single channel 2D image - use directly
+                        print(f"Detected single-channel 2D TIFF. Using directly for segmentation.")
+                        img = img_full
+                    elif img_full.ndim == 3:
+                        # 3D: could be (H, W, C) or (C, H, W) or (H, W, 1) single channel
+                        if img_full.shape[2] > 1 and img_full.shape[2] <= 4:  # Multi-channel in last dimension (H, W, C)
                             print(f"Detected multi-channel TIFF with {img_full.shape[2]} channels. Using first channel (bright-field) for segmentation.")
                             img = img_full[:, :, 0]  # Extract first channel (bright-field)
-                        elif img_full.shape[0] <= 4:  # Likely channels in first dimension (C, H, W)
+                        elif img_full.shape[0] > 1 and img_full.shape[0] <= 4:  # Multi-channel in first dimension (C, H, W)
                             print(f"Detected multi-channel TIFF with {img_full.shape[0]} channels. Using first channel (bright-field) for segmentation.")
                             img = img_full[0, :, :]  # Extract first channel (bright-field)
                         else:
-                            # Assume 2D + depth, use first slice
-                            img = img_full[:, :, 0] if img_full.shape[2] < img_full.shape[0] else img_full[0, :, :]
+                            # Single channel 3D (H, W, 1) or ambiguous - squeeze to 2D
+                            print(f"Detected single-channel 3D TIFF. Squeezing to 2D for segmentation.")
+                            img = np.squeeze(img_full)
+                            if img.ndim != 2:
+                                # If still not 2D, use first slice
+                                img = img_full[:, :, 0] if img_full.shape[2] < img_full.shape[0] else img_full[0, :, :]
                     elif img_full.ndim == 4:
                         # 4D: could be (Z, H, W, C) or (C, Z, H, W)
-                        print(f"Detected 4D TIFF. Using first channel of first slice for segmentation.")
-                        if img_full.shape[3] <= 4:  # (Z, H, W, C)
+                        print(f"Detected 4D multi-channel TIFF. Using first channel of first slice for segmentation.")
+                        if img_full.shape[3] > 1 and img_full.shape[3] <= 4:  # (Z, H, W, C)
                             img = img_full[0, :, :, 0]
                         else:  # (C, Z, H, W)
                             img = img_full[0, 0, :, :]
                     else:
-                        # 2D grayscale
+                        # Unexpected dimensions - try to use as-is
+                        print(f"Warning: Unexpected TIFF dimensions {img_full.shape}. Attempting to use directly.")
                         img = img_full
                 except Exception as tiff_error:
                     print(f"Warning: Failed to load TIFF with tifffile: {tiff_error}, trying cv2")
