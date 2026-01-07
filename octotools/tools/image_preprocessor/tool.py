@@ -250,6 +250,10 @@ class Image_Preprocessor_Tool(BaseTool):
             image_path_lower = img_path.lower()
             is_tiff = image_path_lower.endswith('.tif') or image_path_lower.endswith('.tiff')
             
+            # Variables to track multi-channel extraction
+            multi_channel_images = None
+            channel_names = None
+            
             if is_tiff:
                 # Try loading with tifffile first to handle multi-channel TIFF
                 try:
@@ -258,14 +262,63 @@ class Image_Preprocessor_Tool(BaseTool):
                     if img_full.ndim == 3:
                         # Check if last dimension is channels (typical: H, W, C)
                         if img_full.shape[2] <= 4:  # Likely channels in last dimension
-                            print(f"Detected multi-channel TIFF with {img_full.shape[2]} channels. Using first channel (phase contrast) for preprocessing.")
-                            original_image = img_full[:, :, 0]  # Extract first channel (phase contrast)
+                            num_channels = img_full.shape[2]
+                            print(f"Detected multi-channel TIFF with {num_channels} channels (H, W, C format).")
+                            # Extract all channels
+                            multi_channel_images = []
+                            for c in range(num_channels):
+                                channel_img = img_full[:, :, c]
+                                # Normalize to uint8
+                                if channel_img.dtype != np.uint8:
+                                    if channel_img.dtype == np.uint16:
+                                        channel_img = (channel_img / 65535.0 * 255).astype(np.uint8)
+                                    else:
+                                        channel_img = cv2.normalize(channel_img, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+                                multi_channel_images.append(channel_img)
+                            # Use first channel for standard preprocessing (backward compatibility)
+                            original_image = multi_channel_images[0]
+                            # Assign channel names (bright-field typically first, GFP typically second)
+                            channel_names = []
+                            for i in range(num_channels):
+                                if i == 0:
+                                    channel_names.append("bright-field")
+                                elif i == 1:
+                                    channel_names.append("GFP")
+                                else:
+                                    channel_names.append(f"Channel_{i+1}")
                         elif img_full.shape[0] <= 4:  # Likely channels in first dimension (C, H, W)
-                            print(f"Detected multi-channel TIFF with {img_full.shape[0]} channels. Using first channel (phase contrast) for preprocessing.")
-                            original_image = img_full[0, :, :]  # Extract first channel (phase contrast)
+                            num_channels = img_full.shape[0]
+                            print(f"Detected multi-channel TIFF with {num_channels} channels (C, H, W format).")
+                            # Extract all channels
+                            multi_channel_images = []
+                            for c in range(num_channels):
+                                channel_img = img_full[c, :, :]
+                                # Normalize to uint8
+                                if channel_img.dtype != np.uint8:
+                                    if channel_img.dtype == np.uint16:
+                                        channel_img = (channel_img / 65535.0 * 255).astype(np.uint8)
+                                    else:
+                                        channel_img = cv2.normalize(channel_img, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+                                multi_channel_images.append(channel_img)
+                            # Use first channel for standard preprocessing (backward compatibility)
+                            original_image = multi_channel_images[0]
+                            # Assign channel names
+                            channel_names = []
+                            for i in range(num_channels):
+                                if i == 0:
+                                    channel_names.append("bright-field")
+                                elif i == 1:
+                                    channel_names.append("GFP")
+                                else:
+                                    channel_names.append(f"Channel_{i+1}")
                         else:
                             # Assume 2D + depth, use first slice
                             original_image = img_full[:, :, 0] if img_full.shape[2] < img_full.shape[0] else img_full[0, :, :]
+                            if original_image.dtype != np.uint8:
+                                if original_image.dtype == np.uint16:
+                                    original_image = (original_image / 65535.0 * 255).astype(np.uint8)
+                                else:
+                                    original_image = cv2.normalize(original_image, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
                     elif img_full.ndim == 4:
                         # 4D: could be (Z, H, W, C) or (C, Z, H, W)
                         print(f"Detected 4D TIFF. Using first channel of first slice (phase contrast) for preprocessing.")
@@ -273,17 +326,19 @@ class Image_Preprocessor_Tool(BaseTool):
                             original_image = img_full[0, :, :, 0]
                         else:  # (C, Z, H, W)
                             original_image = img_full[0, 0, :, :]
+                        if original_image.dtype != np.uint8:
+                            if original_image.dtype == np.uint16:
+                                original_image = (original_image / 65535.0 * 255).astype(np.uint8)
+                            else:
+                                original_image = cv2.normalize(original_image, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
                     else:
                         # 2D grayscale
                         original_image = img_full
-                    
-                    # Ensure image is uint8 for processing
-                    if original_image.dtype != np.uint8:
-                        # Normalize to 0-255 range if needed
-                        if original_image.dtype == np.uint16:
-                            original_image = (original_image / 65535.0 * 255).astype(np.uint8)
-                        else:
-                            original_image = cv2.normalize(original_image, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+                        if original_image.dtype != np.uint8:
+                            if original_image.dtype == np.uint16:
+                                original_image = (original_image / 65535.0 * 255).astype(np.uint8)
+                            else:
+                                original_image = cv2.normalize(original_image, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
                 except Exception as tiff_error:
                     print(f"Warning: Failed to load TIFF with tifffile: {tiff_error}, trying cv2")
                     original_image = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
@@ -328,6 +383,37 @@ class Image_Preprocessor_Tool(BaseTool):
                 error_msg = f"Failed to save processed image to {final_output_path}: {str(save_error)}"
                 print(f"Error: {error_msg}")
                 raise ValueError(error_msg)
+            
+            # Handle multi-channel extraction: save each channel separately
+            channel_outputs = []
+            channel_mapping = {}
+            if multi_channel_images is not None and len(multi_channel_images) > 1:
+                print(f"Extracting and saving {len(multi_channel_images)} channels separately...")
+                for idx, channel_img in enumerate(multi_channel_images):
+                    # Apply preprocessing to each channel
+                    channel_corrected = self.global_illumination_correction(channel_img, gaussian_kernel_size)
+                    channel_normalized = self.adjust_brightness(channel_corrected, target_brightness)
+                    
+                    # Generate channel-specific filename
+                    channel_name = channel_names[idx] if channel_names and idx < len(channel_names) else f"channel_{idx+1}"
+                    # Sanitize channel name for filename (replace spaces and special chars)
+                    channel_name_safe = channel_name.replace(" ", "_").replace("-", "_").lower()
+                    channel_output_path = os.path.join(group_dir, f"{base_name}_{channel_name_safe}.{output_format}")
+                    channel_output_path = os.path.normpath(channel_output_path)
+                    
+                    # Save channel as grayscale PNG
+                    try:
+                        Image.fromarray(channel_normalized, mode='L').save(channel_output_path)
+                        if os.path.exists(channel_output_path):
+                            channel_outputs.append(channel_output_path)
+                            channel_mapping[channel_name] = {
+                                "channel_index": idx,
+                                "file_path": channel_output_path,
+                                "brightness": round(float(np.mean(channel_normalized)), 2)
+                            }
+                            print(f"Saved {channel_name} channel (index {idx}) to: {channel_output_path}")
+                    except Exception as channel_save_error:
+                        print(f"Warning: Failed to save {channel_name} channel: {channel_save_error}")
 
             stats = {
                 "original_brightness": round(float(np.mean(original_image)), 2),
@@ -352,6 +438,13 @@ class Image_Preprocessor_Tool(BaseTool):
             )
 
             # Build result in FBagent_250627 compatible format (flat structure)
+            visual_outputs_list = [
+                p for p in [comparison_plot, final_output_path if output_format in ("png", "jpg", "jpeg") else None] if p is not None
+            ]
+            # Add channel-specific outputs to visual_outputs
+            if channel_outputs:
+                visual_outputs_list.extend(channel_outputs)
+            
             result = {
                 "original_image_path": img_path,
                 "processed_image_path": final_output_path,
@@ -361,12 +454,19 @@ class Image_Preprocessor_Tool(BaseTool):
                     "gaussian_kernel_size": gaussian_kernel_size,
                     "output_format": output_format,
                 },
-                "visual_outputs": [
-                    p for p in [comparison_plot, final_output_path if output_format in ("png", "jpg", "jpeg") else None] if p is not None
-                ],
+                "visual_outputs": visual_outputs_list,
                 "image_id": image_identifier,  # Add image_id for matching in downstream tools
                 "image_identifier": image_identifier,  # Alias for compatibility
             }
+            
+            # Add multi-channel information if available
+            if multi_channel_images is not None and len(multi_channel_images) > 1:
+                result["multi_channel"] = {
+                    "num_channels": len(multi_channel_images),
+                    "channel_mapping": channel_mapping,
+                    "channel_outputs": channel_outputs
+                }
+                print(f"Multi-channel extraction complete: {len(multi_channel_images)} channels saved separately.")
             all_results.append(result)
         
         # Return single result if only one image, otherwise return per_image structure
