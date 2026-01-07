@@ -23,7 +23,7 @@ git add .
 # Commit
 Write-Host "💾 Committing changes..." -ForegroundColor Yellow
 $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-git commit -m "Refactor: Optimize codebase with unified logging and response parser, fix tool discovery - $timestamp"
+git commit -m "Optimize: Enhanced multi-image processing and group comparison, updated organoid_segmenter model to cpsam_CO_4x_260105 - $timestamp"
 
 # Force push
 Write-Host ""

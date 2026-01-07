@@ -110,9 +110,53 @@ class Single_Cell_Cropper_Tool(BaseTool):
                 processed_image_path = os.path.join(query_cache_dir, "tool_cache", "query_image_processed.png")
                 print(f"Using processed image: {processed_image_path}")
                 original_img = cv2.imread(processed_image_path, cv2.IMREAD_GRAYSCALE)
+                is_multi_channel = False
             else:
-                # Load original image
-                original_img = cv2.imread(original_image, cv2.IMREAD_GRAYSCALE)
+                # Load original image - check if it's a multi-channel TIFF
+                original_image_lower = original_image.lower()
+                is_tiff = original_image_lower.endswith('.tif') or original_image_lower.endswith('.tiff')
+                
+                if is_tiff:
+                    # Try loading with tifffile to handle multi-channel TIFF
+                    try:
+                        original_img_full = tifffile.imread(original_image)
+                        # Check if multi-channel
+                        if original_img_full.ndim == 3:
+                            if original_img_full.shape[2] <= 4:  # Likely (H, W, C)
+                                print(f"Detected multi-channel TIFF with {original_img_full.shape[2]} channels. Will preserve all channels in crops.")
+                                original_img = original_img_full  # Keep full multi-channel image
+                                is_multi_channel = True
+                            elif original_img_full.shape[0] <= 4:  # Likely (C, H, W)
+                                print(f"Detected multi-channel TIFF with {original_img_full.shape[0]} channels. Will preserve all channels in crops.")
+                                # Convert (C, H, W) to (H, W, C) for easier cropping
+                                original_img = np.transpose(original_img_full, (1, 2, 0))
+                                is_multi_channel = True
+                            else:
+                                # Assume 2D + depth, use first slice
+                                original_img = original_img_full[:, :, 0] if original_img_full.shape[2] < original_img_full.shape[0] else original_img_full[0, :, :]
+                                is_multi_channel = False
+                        elif original_img_full.ndim == 4:
+                            # 4D: use first slice, check channels
+                            if original_img_full.shape[3] <= 4:  # (Z, H, W, C)
+                                print(f"Detected 4D multi-channel TIFF. Using first slice with {original_img_full.shape[3]} channels.")
+                                original_img = original_img_full[0, :, :, :]  # (H, W, C)
+                                is_multi_channel = True
+                            else:  # (C, Z, H, W)
+                                print(f"Detected 4D multi-channel TIFF. Using first slice with {original_img_full.shape[0]} channels.")
+                                original_img = np.transpose(original_img_full[:, 0, :, :], (1, 2, 0))  # (H, W, C)
+                                is_multi_channel = True
+                        else:
+                            # 2D grayscale
+                            original_img = original_img_full
+                            is_multi_channel = False
+                    except Exception as tiff_error:
+                        print(f"Warning: Failed to load TIFF with tifffile: {tiff_error}, trying cv2")
+                        original_img = cv2.imread(original_image, cv2.IMREAD_GRAYSCALE)
+                        is_multi_channel = False
+                else:
+                    # For non-TIFF files, use cv2
+                    original_img = cv2.imread(original_image, cv2.IMREAD_GRAYSCALE)
+                    is_multi_channel = False
             
             # Setup output directory early, so we can save metadata even on errors
             if query_cache_dir is None:
@@ -207,7 +251,7 @@ class Single_Cell_Cropper_Tool(BaseTool):
             
             # Generate cell crops and CellCrop objects
             cell_crops, cell_metadata, cell_crop_objects, stats = self._generate_cell_crops(
-                original_img, mask, original_image, source_image_id, group, min_area, margin, tool_cache_dir, output_format
+                original_img, mask, original_image, source_image_id, group, min_area, margin, tool_cache_dir, output_format, is_multi_channel
             )
             
             # Always save metadata file, even if no crops were generated
@@ -357,14 +401,14 @@ class Single_Cell_Cropper_Tool(BaseTool):
                 "execution_status": "error"
             }
 
-    def _generate_cell_crops(self, original_img, mask, original_image_path, source_image_id, group, min_area, margin, output_dir, output_format):
+    def _generate_cell_crops(self, original_img, mask, original_image_path, source_image_id, group, min_area, margin, output_dir, output_format, is_multi_channel=False):
         """
         Generate individual cell crops from the mask and create CellCrop objects.
         
         This method produces CellCrop objects as atomic data units for Stage 2 analysis.
         
         Args:
-            original_img: Original image array
+            original_img: Original image array (can be 2D grayscale or multi-channel)
             mask: Binary mask array
             original_image_path: Path to the original source image
             source_image_id: Source image ID for tracking
@@ -373,6 +417,7 @@ class Single_Cell_Cropper_Tool(BaseTool):
             margin: Margin around each nucleus
             output_dir: Output directory
             output_format: Output image format
+            is_multi_channel: Whether the original image is multi-channel (preserve all channels in crops)
             
         Returns:
             tuple: (list of crop paths, list of metadata dicts, list of CellCrop objects, dict of statistics)
@@ -386,8 +431,14 @@ class Single_Cell_Cropper_Tool(BaseTool):
         original_img = np.asarray(original_img)
         mask = np.asarray(mask)
         
-        # Check image dimensions
-        if original_img.shape != mask.shape:
+        # For multi-channel images, extract first channel for dimension checking
+        if is_multi_channel and original_img.ndim == 3:
+            original_img_2d = original_img[:, :, 0]  # Use first channel (bright-field) for dimension check
+        else:
+            original_img_2d = original_img
+        
+        # Check image dimensions (compare 2D shapes)
+        if original_img_2d.shape[:2] != mask.shape[:2]:
             print(f"Error: Image shape mismatch - original: {original_img.shape}, mask: {mask.shape}")
             return [], [], [], {}
         
@@ -439,18 +490,23 @@ class Single_Cell_Cropper_Tool(BaseTool):
             half_side = max(half_height, half_width)
             
             # Define new square bounding box
+            img_height = original_img.shape[0]
+            img_width = original_img.shape[1]
             new_minr = max(center_row - half_side, 0)
-            new_maxr = min(center_row + half_side, original_img.shape[0])
+            new_maxr = min(center_row + half_side, img_height)
             new_minc = max(center_col - half_side, 0)
-            new_maxc = min(center_col + half_side, original_img.shape[1])
+            new_maxc = min(center_col + half_side, img_width)
             
             # Skip if the crop is not square (i.e., at the border)
             if (new_maxr - new_minr) != (new_maxc - new_minc):
                 filtered_by_border += 1
                 continue
                 
-            # Crop from original image
-            cell_crop = original_img[new_minr:new_maxr, new_minc:new_maxc]
+            # Crop from original image (preserve all channels if multi-channel)
+            if is_multi_channel and original_img.ndim == 3:
+                cell_crop = original_img[new_minr:new_maxr, new_minc:new_maxc, :]  # Preserve all channels
+            else:
+                cell_crop = original_img[new_minr:new_maxr, new_minc:new_maxc]
             
             # Validate crop data
             if cell_crop.size == 0 or np.isnan(cell_crop).any() or np.isinf(cell_crop).any():
@@ -467,29 +523,51 @@ class Single_Cell_Cropper_Tool(BaseTool):
             crop_path = os.path.join(output_dir, crop_filename)
             
             try:
-                # Ensure image is in the correct format for Gradio compatibility
-                if len(cell_crop.shape) == 2:
+                # Handle multi-channel images
+                if is_multi_channel and cell_crop.ndim == 3:
+                    # Multi-channel image - save as TIFF to preserve channels
+                    if output_format.lower() in ['tif', 'tiff']:
+                        # Save directly with tifffile to preserve multi-channel data
+                        tifffile.imwrite(crop_path, cell_crop)
+                    else:
+                        # For other formats, convert to RGB if 3 channels, or use first channel
+                        if cell_crop.shape[2] == 3:
+                            pil_image = Image.fromarray(cell_crop, mode='RGB')
+                        elif cell_crop.shape[2] == 2:
+                            # 2 channels: duplicate to make RGB
+                            cell_crop_rgb = np.zeros((cell_crop.shape[0], cell_crop.shape[1], 3), dtype=cell_crop.dtype)
+                            cell_crop_rgb[:, :, 0] = cell_crop[:, :, 0]  # Channel 1 -> Red
+                            cell_crop_rgb[:, :, 1] = cell_crop[:, :, 1]  # Channel 2 -> Green
+                            cell_crop_rgb[:, :, 2] = cell_crop[:, :, 0]  # Channel 1 -> Blue (duplicate)
+                            pil_image = Image.fromarray(cell_crop_rgb, mode='RGB')
+                        else:
+                            # More than 3 channels: use first 3
+                            pil_image = Image.fromarray(cell_crop[:, :, :3], mode='RGB')
+                elif len(cell_crop.shape) == 2:
                     # Grayscale image - convert to PIL and save
                     pil_image = Image.fromarray(cell_crop, mode='L')
                 else:
-                    # Color image - convert to PIL and save
+                    # Color image (3D but not multi-channel) - convert to PIL and save
                     pil_image = Image.fromarray(cell_crop)
                 
-                # Validate PIL image
-                if pil_image.size[0] == 0 or pil_image.size[1] == 0:
-                    print(f"Warning: Invalid PIL image size for cell {idx}, skipping")
-                    continue
-                
                 # Save with proper format and error handling
-                if output_format.lower() == 'tif':
-                    pil_image.save(crop_path, 'TIFF', compression='tiff_lzw')
-                elif output_format.lower() == 'png':
-                    pil_image.save(crop_path, 'PNG', optimize=True)
-                elif output_format.lower() == 'jpg':
-                    pil_image.save(crop_path, 'JPEG', quality=95, optimize=True)
-                else:
-                    # Default to PNG for compatibility
-                    pil_image.save(crop_path, 'PNG', optimize=True)
+                # Note: Multi-channel images saved with tifffile above, skip PIL save for those
+                if not (is_multi_channel and cell_crop.ndim == 3 and output_format.lower() in ['tif', 'tiff']):
+                    # Validate PIL image
+                    if pil_image.size[0] == 0 or pil_image.size[1] == 0:
+                        print(f"Warning: Invalid PIL image size for cell {idx}, skipping")
+                        continue
+                    
+                    # Save with proper format and error handling
+                    if output_format.lower() == 'tif':
+                        pil_image.save(crop_path, 'TIFF', compression='tiff_lzw')
+                    elif output_format.lower() == 'png':
+                        pil_image.save(crop_path, 'PNG', optimize=True)
+                    elif output_format.lower() == 'jpg':
+                        pil_image.save(crop_path, 'JPEG', quality=95, optimize=True)
+                    else:
+                        # Default to PNG for compatibility
+                        pil_image.save(crop_path, 'PNG', optimize=True)
                 
                 # Verify the saved file
                 if not os.path.exists(crop_path) or os.path.getsize(crop_path) == 0:

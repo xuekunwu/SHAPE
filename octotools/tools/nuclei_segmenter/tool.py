@@ -119,7 +119,43 @@ class Nuclei_Segmenter_Tool(BaseTool):
                 }
             
             # Load and preprocess image
-            img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+            # Check if it's a multi-channel TIFF file
+            image_path_lower = image_path.lower()
+            is_tiff = image_path_lower.endswith('.tif') or image_path_lower.endswith('.tiff')
+            
+            if is_tiff:
+                # Try loading with tifffile first to handle multi-channel TIFF
+                try:
+                    img_full = tifffile.imread(image_path)
+                    # Check if multi-channel (shape: (H, W, C) or (C, H, W) or (Z, H, W, C))
+                    if img_full.ndim == 3:
+                        # Check if last dimension is channels (typical: H, W, C)
+                        if img_full.shape[2] <= 4:  # Likely channels in last dimension
+                            print(f"Detected multi-channel TIFF with {img_full.shape[2]} channels. Using first channel (bright-field) for segmentation.")
+                            img = img_full[:, :, 0]  # Extract first channel (bright-field)
+                        elif img_full.shape[0] <= 4:  # Likely channels in first dimension (C, H, W)
+                            print(f"Detected multi-channel TIFF with {img_full.shape[0]} channels. Using first channel (bright-field) for segmentation.")
+                            img = img_full[0, :, :]  # Extract first channel (bright-field)
+                        else:
+                            # Assume 2D + depth, use first slice
+                            img = img_full[:, :, 0] if img_full.shape[2] < img_full.shape[0] else img_full[0, :, :]
+                    elif img_full.ndim == 4:
+                        # 4D: could be (Z, H, W, C) or (C, Z, H, W)
+                        print(f"Detected 4D TIFF. Using first channel of first slice for segmentation.")
+                        if img_full.shape[3] <= 4:  # (Z, H, W, C)
+                            img = img_full[0, :, :, 0]
+                        else:  # (C, Z, H, W)
+                            img = img_full[0, 0, :, :]
+                    else:
+                        # 2D grayscale
+                        img = img_full
+                except Exception as tiff_error:
+                    print(f"Warning: Failed to load TIFF with tifffile: {tiff_error}, trying cv2")
+                    img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+            else:
+                # For non-TIFF files, use cv2
+                img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+            
             if img is None:
                 # Try alternative: use PIL to load and convert
                 try:
@@ -131,8 +167,8 @@ class Nuclei_Segmenter_Tool(BaseTool):
                     print(f"Loaded image using PIL: {image_path}")
                 except Exception as pil_error:
                     return {
-                        "error": f"Failed to load image: {image_path}. cv2.imread returned None, PIL also failed: {str(pil_error)}",
-                        "summary": "Image loading failed with both cv2 and PIL"
+                        "error": f"Failed to load image: {image_path}. All loading methods failed: {str(pil_error)}",
+                        "summary": "Image loading failed with all methods"
                     }
             
             img = img.astype(np.float32)
