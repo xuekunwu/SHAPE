@@ -92,6 +92,99 @@ class Image_Preprocessor_Tool(BaseTool):
         
         return adjusted_image
 
+    def create_multi_channel_visualization(self, channels, channel_names, normalized_channels, filename, vis_config, group=None, image_identifier=None, query_cache_dir=None):
+        """
+        Create a multi-channel visualization showing individual channels and merged view.
+        
+        Args:
+            channels: List of original channel images (numpy arrays)
+            channel_names: List of channel names (e.g., ['bright-field', 'GFP'])
+            normalized_channels: List of normalized channel images
+            filename: Original filename for title
+            vis_config: An instance of VisualizationConfig
+            group: Optional group name
+            image_identifier: Optional image identifier for file naming
+            query_cache_dir: Optional directory for caching results
+            
+        Returns:
+            Path to saved visualization
+        """
+        # Use centralized output directory from the vis_config instance
+        output_dir = vis_config.get_output_dir(query_cache_dir)
+        if group:
+            output_dir = os.path.join(output_dir, group)
+            os.makedirs(output_dir, exist_ok=True)
+        
+        num_channels = len(channels)
+        
+        # Create figure with appropriate layout
+        # For 2 channels: 1 row, 3 columns (BF, GFP, Merged)
+        # For more channels: adjust layout
+        if num_channels == 2:
+            fig, axs = plt.subplots(1, 3, figsize=(15, 4))
+            axs = axs.flatten()
+        else:
+            # For more channels, create a grid
+            cols = min(4, num_channels + 1)  # channels + merged view
+            rows = (num_channels + cols - 1) // cols
+            fig, axs = plt.subplots(rows, cols, figsize=(5*cols, 5*rows))
+            if rows == 1:
+                axs = axs.flatten()
+            else:
+                axs = axs.flatten()
+        
+        # Display individual channels
+        for idx, (channel, name, norm_channel) in enumerate(zip(channels, channel_names, normalized_channels)):
+            if idx < len(axs):
+                ax = axs[idx]
+                
+                # Choose colormap based on channel type
+                if 'gfp' in name.lower() or 'fluorescence' in name.lower():
+                    ax.imshow(norm_channel, cmap='Greens')
+                    ax.set_title(f"{name} (fluorescence)", fontsize=12, fontweight='bold')
+                else:
+                    ax.imshow(norm_channel, cmap='gray')
+                    ax.set_title(f"{name} (grayscale)", fontsize=12, fontweight='bold')
+                ax.axis('off')
+        
+        # Create merged RGB visualization (for 2-channel images)
+        if num_channels == 2:
+            # Bright-field mapped to grayscale (R=G=B)
+            # GFP mapped to green channel
+            merged = np.zeros((*normalized_channels[0].shape, 3), dtype=np.float32)
+            bf_n = normalized_channels[0]
+            gfp_n = normalized_channels[1] if len(normalized_channels) > 1 else bf_n
+            
+            merged[..., 0] = bf_n          # Red
+            merged[..., 1] = bf_n + gfp_n  # Green (BF + GFP for visibility)
+            merged[..., 2] = bf_n          # Blue
+            merged = np.clip(merged, 0, 1)
+            
+            # Display merged view
+            if len(axs) > num_channels:
+                ax = axs[num_channels]
+                ax.imshow(merged)
+                ax.set_title("Merged (BF + GFP)", fontsize=12, fontweight='bold')
+                ax.axis('off')
+        
+        # Add overall title
+        fig.suptitle(f"Multi-Channel Image: {os.path.basename(filename)}", 
+                     fontsize=vis_config.PROFESSIONAL_STYLE['axes.titlesize'], 
+                     fontweight='bold', y=0.98)
+        plt.tight_layout()
+        
+        # Save with professional settings
+        group_suffix = f"_{group}" if group else ""
+        if image_identifier:
+            plot_name = f"multi_channel_{image_identifier}{group_suffix}.png"
+        else:
+            plot_name = f"multi_channel_{os.path.splitext(os.path.basename(filename))[0]}{group_suffix}.png"
+        plot_path = os.path.join(output_dir, plot_name)
+        vis_config.save_professional_figure(fig, plot_path)
+        plt.close(fig)
+        
+        return plot_path
+
     def create_comparison_plot(self, original, corrected, normalized, filename, vis_config, group=None, image_identifier=None, query_cache_dir=None):
         """
         Create a comparison plot of original, corrected, and normalized images with professional styling.
@@ -387,16 +480,50 @@ class Image_Preprocessor_Tool(BaseTool):
             # Handle multi-channel extraction: save each channel separately
             channel_outputs = []
             channel_mapping = {}
+            normalized_channels_for_vis = []
+            
             if multi_channel_images is not None and len(multi_channel_images) > 1:
                 print(f"Extracting and saving {len(multi_channel_images)} channels separately...")
+                
+                # Normalize function for visualization (independent normalization per channel)
+                def normalize_channel(x):
+                    """Normalize channel to [0, 1] range for visualization"""
+                    x = x.astype(np.float32)
+                    x_min = x.min()
+                    x_max = x.max()
+                    if x_max > x_min:
+                        return (x - x_min) / (x_max - x_min + 1e-8)
+                    return x
+                
                 for idx, channel_img in enumerate(multi_channel_images):
-                    # Apply preprocessing to each channel
-                    channel_corrected = self.global_illumination_correction(channel_img, gaussian_kernel_size)
-                    channel_normalized = self.adjust_brightness(channel_corrected, target_brightness)
+                    channel_name = channel_names[idx] if channel_names and idx < len(channel_names) else f"channel_{idx+1}"
+                    
+                    # For bright-field: apply minimal/careful preprocessing
+                    # For other channels (GFP, etc.): only normalize, no heavy preprocessing
+                    is_brightfield = 'bright' in channel_name.lower() or 'field' in channel_name.lower() or idx == 0
+                    
+                    if is_brightfield:
+                        # Apply careful preprocessing to bright-field only
+                        # Use smaller kernel size for more conservative correction
+                        careful_kernel_size = min(gaussian_kernel_size, 101)  # Cap at 101 for bright-field
+                        channel_corrected = self.global_illumination_correction(channel_img, careful_kernel_size)
+                        # Use more conservative brightness adjustment for bright-field
+                        channel_normalized = self.adjust_brightness(channel_corrected, target_brightness)
+                        print(f"Applied careful preprocessing to {channel_name} channel")
+                    else:
+                        # For GFP and other channels: only normalize, preserve original characteristics
+                        # Just normalize to uint8 for saving, but keep original for visualization
+                        if channel_img.dtype == np.uint16:
+                            channel_normalized = (channel_img / 65535.0 * 255).astype(np.uint8)
+                        else:
+                            channel_normalized = np.clip(channel_img, 0, 255).astype(np.uint8)
+                        print(f"Preserved original characteristics for {channel_name} channel (no heavy preprocessing)")
+                    
+                    # Normalize for visualization (independent normalization)
+                    channel_for_vis = normalize_channel(channel_img.astype(np.float32))
+                    normalized_channels_for_vis.append(channel_for_vis)
                     
                     # Generate channel-specific filename
-                    channel_name = channel_names[idx] if channel_names and idx < len(channel_names) else f"channel_{idx+1}"
-                    # Sanitize channel name for filename (replace spaces and special chars)
                     channel_name_safe = channel_name.replace(" ", "_").replace("-", "_").lower()
                     channel_output_path = os.path.join(group_dir, f"{base_name}_{channel_name_safe}.{output_format}")
                     channel_output_path = os.path.normpath(channel_output_path)
@@ -409,11 +536,28 @@ class Image_Preprocessor_Tool(BaseTool):
                             channel_mapping[channel_name] = {
                                 "channel_index": idx,
                                 "file_path": channel_output_path,
-                                "brightness": round(float(np.mean(channel_normalized)), 2)
+                                "brightness": round(float(np.mean(channel_normalized)), 2),
+                                "preprocessing_applied": is_brightfield
                             }
                             print(f"Saved {channel_name} channel (index {idx}) to: {channel_output_path}")
                     except Exception as channel_save_error:
                         print(f"Warning: Failed to save {channel_name} channel: {channel_save_error}")
+                
+                # Create multi-channel visualization
+                vis_config = VisualizationConfig()
+                multi_channel_plot = self.create_multi_channel_visualization(
+                    multi_channel_images,
+                    channel_names,
+                    normalized_channels_for_vis,
+                    filename,
+                    vis_config,
+                    group=group,
+                    image_identifier=image_identifier,
+                    query_cache_dir=query_cache_dir
+                )
+                if multi_channel_plot:
+                    channel_outputs.append(multi_channel_plot)
+                    print(f"Created multi-channel visualization: {multi_channel_plot}")
 
             stats = {
                 "original_brightness": round(float(np.mean(original_image)), 2),
