@@ -2465,6 +2465,16 @@ def main(args):
         .accordion {
             background-color: #f5f5f5 !important;
         }
+        /* Auto-wrap long image names in group table */
+        .dataframe table td:first-child {
+            word-wrap: break-word !important;
+            word-break: break-all !important;
+            white-space: normal !important;
+            max-width: 300px !important;
+        }
+        .dataframe table th:first-child {
+            max-width: 300px !important;
+        }
         """
         
         # Theming https://www.gradio.app/guides/theming-guide

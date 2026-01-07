@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 from PIL import Image
 import io
 import base64
+import tifffile
 
 from octotools.tools.base import BaseTool
 from octotools.models.utils import VisualizationConfig
@@ -91,7 +92,7 @@ class Image_Preprocessor_Tool(BaseTool):
         
         return adjusted_image
 
-    def create_comparison_plot(self, original, corrected, normalized, filename, vis_config, group=None, image_identifier=None):
+    def create_comparison_plot(self, original, corrected, normalized, filename, vis_config, group=None, image_identifier=None, query_cache_dir=None):
         """
         Create a comparison plot of original, corrected, and normalized images with professional styling.
         
@@ -103,12 +104,13 @@ class Image_Preprocessor_Tool(BaseTool):
             vis_config: An instance of VisualizationConfig
             group: Optional group name
             image_identifier: Optional image identifier for file naming
+            query_cache_dir: Optional directory for caching results
             
         Returns:
             Path to saved comparison plot
         """
         # Use centralized output directory from the vis_config instance
-        output_dir = vis_config.get_output_dir()
+        output_dir = vis_config.get_output_dir(query_cache_dir)
         if group:
             output_dir = os.path.join(output_dir, group)
             os.makedirs(output_dir, exist_ok=True)
@@ -210,7 +212,7 @@ class Image_Preprocessor_Tool(BaseTool):
             return mapping
         raise ValueError("Unsupported groups format.")
 
-    def execute(self, image, target_brightness=120, gaussian_kernel_size=151, output_format='png', save_intermediate=False, groups=None, image_id=None):
+    def execute(self, image, target_brightness=120, gaussian_kernel_size=151, output_format='png', save_intermediate=False, groups=None, image_id=None, query_cache_dir=None):
         """
         Execute the image preprocessing pipeline.
         
@@ -222,6 +224,7 @@ class Image_Preprocessor_Tool(BaseTool):
             save_intermediate: Whether to save intermediate processing steps
             groups: Optional grouping for images
             image_id: Optional image identifier for consistent file naming and tracking
+            query_cache_dir: Optional directory for caching results
             
         Returns:
             Dictionary containing processing results and file paths
@@ -242,7 +245,52 @@ class Image_Preprocessor_Tool(BaseTool):
             # Check if file exists
             if not os.path.exists(img_path):
                 raise ValueError(f"Image file not found: {img_path}")
-            original_image = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
+            
+            # Load image - check if it's a multi-channel TIFF file
+            image_path_lower = img_path.lower()
+            is_tiff = image_path_lower.endswith('.tif') or image_path_lower.endswith('.tiff')
+            
+            if is_tiff:
+                # Try loading with tifffile first to handle multi-channel TIFF
+                try:
+                    img_full = tifffile.imread(img_path)
+                    # Check if multi-channel (shape: (H, W, C) or (C, H, W) or (Z, H, W, C))
+                    if img_full.ndim == 3:
+                        # Check if last dimension is channels (typical: H, W, C)
+                        if img_full.shape[2] <= 4:  # Likely channels in last dimension
+                            print(f"Detected multi-channel TIFF with {img_full.shape[2]} channels. Using first channel (phase contrast) for preprocessing.")
+                            original_image = img_full[:, :, 0]  # Extract first channel (phase contrast)
+                        elif img_full.shape[0] <= 4:  # Likely channels in first dimension (C, H, W)
+                            print(f"Detected multi-channel TIFF with {img_full.shape[0]} channels. Using first channel (phase contrast) for preprocessing.")
+                            original_image = img_full[0, :, :]  # Extract first channel (phase contrast)
+                        else:
+                            # Assume 2D + depth, use first slice
+                            original_image = img_full[:, :, 0] if img_full.shape[2] < img_full.shape[0] else img_full[0, :, :]
+                    elif img_full.ndim == 4:
+                        # 4D: could be (Z, H, W, C) or (C, Z, H, W)
+                        print(f"Detected 4D TIFF. Using first channel of first slice (phase contrast) for preprocessing.")
+                        if img_full.shape[3] <= 4:  # (Z, H, W, C)
+                            original_image = img_full[0, :, :, 0]
+                        else:  # (C, Z, H, W)
+                            original_image = img_full[0, 0, :, :]
+                    else:
+                        # 2D grayscale
+                        original_image = img_full
+                    
+                    # Ensure image is uint8 for processing
+                    if original_image.dtype != np.uint8:
+                        # Normalize to 0-255 range if needed
+                        if original_image.dtype == np.uint16:
+                            original_image = (original_image / 65535.0 * 255).astype(np.uint8)
+                        else:
+                            original_image = cv2.normalize(original_image, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+                except Exception as tiff_error:
+                    print(f"Warning: Failed to load TIFF with tifffile: {tiff_error}, trying cv2")
+                    original_image = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
+            else:
+                # For non-TIFF files, use cv2
+                original_image = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
+            
             if original_image is None:
                 raise ValueError(f"Cannot read image: {img_path}. Please check if the file is a valid image format.")
             
@@ -300,6 +348,7 @@ class Image_Preprocessor_Tool(BaseTool):
                 vis_config,
                 group=group,
                 image_identifier=image_identifier,
+                query_cache_dir=query_cache_dir,
             )
 
             # Build result in FBagent_250627 compatible format (flat structure)
