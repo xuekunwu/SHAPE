@@ -89,7 +89,26 @@ class Python_Code_Generator_Tool(BaseTool):
         Returns:
             str: The extracted code snippet.
         """
-        code = re.search(r"```python(.*)```", code, re.DOTALL).group(1).strip()
+        # Ensure code is a string
+        if not isinstance(code, str):
+            if code is None:
+                raise ValueError("Code is None. LLM engine may not have returned a valid response.")
+            code = str(code)
+        
+        # Try to extract code from markdown code blocks
+        match = re.search(r"```python(.*?)```", code, re.DOTALL)
+        if match:
+            code = match.group(1).strip()
+        else:
+            # If no code block found, try to find code without markdown
+            # Check if the response looks like code (contains common Python keywords)
+            if any(keyword in code for keyword in ['import ', 'def ', 'print(', 'if ', 'for ', '=']):
+                # Assume the entire response is code
+                code = code.strip()
+            else:
+                # If it doesn't look like code, return as-is (might be an error message)
+                code = code.strip()
+        
         return code
 
     @contextlib.contextmanager
@@ -118,13 +137,23 @@ class Python_Code_Generator_Tool(BaseTool):
         Returns:
             dict: A dictionary containing the printed output and local variables.
         """
+        # Ensure code is a string
+        if not isinstance(code, str):
+            if code is None:
+                return {"error": "Code is None. LLM engine may not have returned a valid response."}
+            code = str(code)
+        
         # Check for dangerous functions and remove them
         dangerous_functions = ['exit', 'quit', 'sys.exit']
         for func in dangerous_functions:
             if func in code:
                 print(f"Warning: Removing unsafe '{func}' call from code")
                 # Use regex to remove function calls with any arguments
-                code = re.sub(rf'{func}\s*\([^)]*\)', 'break', code)
+                try:
+                    code = re.sub(rf'{func}\s*\([^)]*\)', 'break', code)
+                except (TypeError, AttributeError) as e:
+                    print(f"Warning: Failed to remove unsafe function '{func}': {e}")
+                    continue
 
         try:
             execution_code = self.preprocess_code(code)
@@ -184,9 +213,20 @@ class Python_Code_Generator_Tool(BaseTool):
         task_description = task_description.strip()
         full_prompt = f"Task:\n{task_description}\n\nQuery:\n{query}"
 
-        response = self.llm_engine(full_prompt)
-        result_or_error = self.execute_code_snippet(response)
-        return result_or_error
+        try:
+            response = self.llm_engine(full_prompt)
+            # Ensure response is a string
+            if not isinstance(response, str):
+                if response is None:
+                    return {"error": "LLM engine returned None. Please check API key and model configuration."}
+                response = str(response)
+            
+            result_or_error = self.execute_code_snippet(response)
+            return result_or_error
+        except Exception as e:
+            error_msg = f"Error in LLM engine or code execution: {str(e)}"
+            print(error_msg)
+            return {"error": error_msg}
 
     def get_metadata(self):
         """
