@@ -17,3 +17,4 @@ examples/d6_fc_1.tiff filter=lfs diff=lfs merge=lfs -text
 examples/d6_fc_2.tiff filter=lfs diff=lfs merge=lfs -text
 examples/d6_fc_3.tiff filter=lfs diff=lfs merge=lfs -text
 examples/d6_fc_4.tiff filter=lfs diff=lfs merge=lfs -text
+examples/iPSC-CO.tiff filter=lfs diff=lfs merge=lfs -text
