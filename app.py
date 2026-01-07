@@ -35,6 +35,7 @@ from datetime import datetime
 from octotools.models.utils import make_json_serializable, normalize_tool_name
 from dataclasses import dataclass, field
 import pandas as pd
+import tifffile
 
 _AVAILABLE_TOOLS_CACHE = None
 
@@ -785,56 +786,190 @@ def _collect_visual_outputs(result, visual_outputs_list, downloadable_files_list
                 # (fall through to image processing below)
             
             # Handle image files (including visualization images that are also downloadable)
-            try:
-                image = Image.open(file_path)
-                if image.size[0] == 0 or image.size[1] == 0:
-                    continue
-                
-                if image.mode not in ['RGB', 'L', 'RGBA']:
-                    image = image.convert('RGB')
-                
-                img_array = np.array(image)
-                if img_array.size == 0 or np.isnan(img_array).any():
-                    continue
-            except Exception as e:
-                print(f"Warning: Failed to load image {file_path}: {e}")
-                continue
-            
             filename = os.path.basename(file_path)
             filename_lower = filename.lower()
             
-            # Extract image identifier from filename (consistent naming: tool_type_imageid.ext)
-            # Patterns: nuclei_overlay_<image_id>.png, nuclei_mask_<image_id>.png, <image_id>_default_processed.png
-            image_id = None
-            if "_overlay_" in filename_lower or "_mask_" in filename_lower:
-                # Pattern: nuclei_overlay_<image_id>.png
-                parts = filename.rsplit(".", 1)[0].split("_")
-                if len(parts) >= 3:
-                    image_id = "_".join(parts[2:])  # Everything after tool_type
-            elif "_processed" in filename_lower:
-                # Pattern: <image_id>_default_processed.png
-                parts = filename.split("_")
-                if len(parts) >= 2:
-                    image_id = parts[0]
+            # Check if it's a multi-channel TIFF file
+            is_tiff = filename_lower.endswith('.tif') or filename_lower.endswith('.tiff')
+            is_multi_channel = False
             
-            # Format label with image identifier
-            image_id_display = f" ({image_id[:8]}...)" if image_id and len(image_id) > 8 else (f" ({image_id})" if image_id else "")
+            if is_tiff:
+                try:
+                    # Try loading with tifffile to check if multi-channel
+                    img_full = tifffile.imread(file_path)
+                    # Check if multi-channel (shape: (H, W, C) or (C, H, W))
+                    if img_full.ndim == 3:
+                        if img_full.shape[2] > 1 and img_full.shape[2] <= 4:  # (H, W, C) with multiple channels
+                            is_multi_channel = True
+                        elif img_full.shape[0] > 1 and img_full.shape[0] <= 4:  # (C, H, W) with multiple channels
+                            is_multi_channel = True
+                    elif img_full.ndim == 4:
+                        # 4D: could be (Z, H, W, C) or (C, Z, H, W)
+                        if img_full.shape[3] > 1 and img_full.shape[3] <= 4:  # (Z, H, W, C)
+                            is_multi_channel = True
+                        elif img_full.shape[0] > 1 and img_full.shape[0] <= 4:  # (C, Z, H, W)
+                            is_multi_channel = True
+                except Exception as tiff_error:
+                    print(f"Warning: Failed to check TIFF channels for {file_path}: {tiff_error}")
             
-            # Generate descriptive label
-            if "overlay" in filename_lower:
-                label = f"Segmentation Overlay{image_id_display}"
-            elif "mask" in filename_lower and "viz" not in filename_lower:
-                label = f"Segmentation Mask{image_id_display}"
-            elif "processed" in filename_lower:
-                label = f"Processed Image{image_id_display}"
-            elif "comparison" in filename_lower or "bar" in filename_lower:
-                label = f"Comparison Chart: {filename}"
-            elif "loss_curve" in filename_lower or "loss" in filename_lower:
-                label = f"Training Loss Curve: {filename}"
+            if is_multi_channel:
+                # Split multi-channel TIFF into individual channels for display
+                try:
+                    img_full = tifffile.imread(file_path)
+                    num_channels = 0
+                    channel_names = ["Phase Contrast", "GFP", "DAPI", "Channel 4"]
+                    
+                    if img_full.ndim == 3:
+                        if img_full.shape[2] > 1 and img_full.shape[2] <= 4:  # (H, W, C)
+                            num_channels = img_full.shape[2]
+                            for ch_idx in range(num_channels):
+                                channel_img = img_full[:, :, ch_idx]
+                                # Normalize to 0-255 if needed
+                                if channel_img.dtype == np.uint16:
+                                    channel_img = (channel_img / 65535.0 * 255).astype(np.uint8)
+                                elif channel_img.dtype != np.uint8:
+                                    channel_img = np.clip(channel_img, 0, 255).astype(np.uint8)
+                                # Convert to PIL Image
+                                channel_pil = Image.fromarray(channel_img, mode='L')
+                                # Generate label
+                                base_label = os.path.splitext(filename)[0]
+                                label = f"{base_label} - {channel_names[ch_idx] if ch_idx < len(channel_names) else f'Channel {ch_idx+1}'}"
+                                visual_outputs_list.append((channel_pil, label))
+                        elif img_full.shape[0] > 1 and img_full.shape[0] <= 4:  # (C, H, W)
+                            num_channels = img_full.shape[0]
+                            for ch_idx in range(num_channels):
+                                channel_img = img_full[ch_idx, :, :]
+                                # Normalize to 0-255 if needed
+                                if channel_img.dtype == np.uint16:
+                                    channel_img = (channel_img / 65535.0 * 255).astype(np.uint8)
+                                elif channel_img.dtype != np.uint8:
+                                    channel_img = np.clip(channel_img, 0, 255).astype(np.uint8)
+                                # Convert to PIL Image
+                                channel_pil = Image.fromarray(channel_img, mode='L')
+                                # Generate label
+                                base_label = os.path.splitext(filename)[0]
+                                label = f"{base_label} - {channel_names[ch_idx] if ch_idx < len(channel_names) else f'Channel {ch_idx+1}'}"
+                                visual_outputs_list.append((channel_pil, label))
+                    elif img_full.ndim == 4:
+                        # Use first slice for 4D images
+                        if img_full.shape[3] > 1 and img_full.shape[3] <= 4:  # (Z, H, W, C)
+                            num_channels = img_full.shape[3]
+                            for ch_idx in range(num_channels):
+                                channel_img = img_full[0, :, :, ch_idx]
+                                # Normalize to 0-255 if needed
+                                if channel_img.dtype == np.uint16:
+                                    channel_img = (channel_img / 65535.0 * 255).astype(np.uint8)
+                                elif channel_img.dtype != np.uint8:
+                                    channel_img = np.clip(channel_img, 0, 255).astype(np.uint8)
+                                # Convert to PIL Image
+                                channel_pil = Image.fromarray(channel_img, mode='L')
+                                # Generate label
+                                base_label = os.path.splitext(filename)[0]
+                                label = f"{base_label} - {channel_names[ch_idx] if ch_idx < len(channel_names) else f'Channel {ch_idx+1}'}"
+                                visual_outputs_list.append((channel_pil, label))
+                        elif img_full.shape[0] > 1 and img_full.shape[0] <= 4:  # (C, Z, H, W)
+                            num_channels = img_full.shape[0]
+                            for ch_idx in range(num_channels):
+                                channel_img = img_full[ch_idx, 0, :, :]
+                                # Normalize to 0-255 if needed
+                                if channel_img.dtype == np.uint16:
+                                    channel_img = (channel_img / 65535.0 * 255).astype(np.uint8)
+                                elif channel_img.dtype != np.uint8:
+                                    channel_img = np.clip(channel_img, 0, 255).astype(np.uint8)
+                                # Convert to PIL Image
+                                channel_pil = Image.fromarray(channel_img, mode='L')
+                                # Generate label
+                                base_label = os.path.splitext(filename)[0]
+                                label = f"{base_label} - {channel_names[ch_idx] if ch_idx < len(channel_names) else f'Channel {ch_idx+1}'}"
+                                visual_outputs_list.append((channel_pil, label))
+                except Exception as e:
+                    print(f"Warning: Failed to split multi-channel TIFF {file_path}: {e}, falling back to regular loading")
+                    # Fall back to regular image loading
+                    try:
+                        image = Image.open(file_path)
+                        if image.size[0] == 0 or image.size[1] == 0:
+                            continue
+                        if image.mode not in ['RGB', 'L', 'RGBA']:
+                            image = image.convert('RGB')
+                        img_array = np.array(image)
+                        if img_array.size == 0 or np.isnan(img_array).any():
+                            continue
+                        # Extract image identifier and generate label
+                        image_id = None
+                        if "_overlay_" in filename_lower or "_mask_" in filename_lower:
+                            parts = filename.rsplit(".", 1)[0].split("_")
+                            if len(parts) >= 3:
+                                image_id = "_".join(parts[2:])
+                        elif "_processed" in filename_lower:
+                            parts = filename.split("_")
+                            if len(parts) >= 2:
+                                image_id = parts[0]
+                        image_id_display = f" ({image_id[:8]}...)" if image_id and len(image_id) > 8 else (f" ({image_id})" if image_id else "")
+                        if "overlay" in filename_lower:
+                            label = f"Segmentation Overlay{image_id_display}"
+                        elif "mask" in filename_lower and "viz" not in filename_lower:
+                            label = f"Segmentation Mask{image_id_display}"
+                        elif "processed" in filename_lower:
+                            label = f"Processed Image{image_id_display}"
+                        elif "comparison" in filename_lower or "bar" in filename_lower:
+                            label = f"Comparison Chart: {filename}"
+                        elif "loss_curve" in filename_lower or "loss" in filename_lower:
+                            label = f"Training Loss Curve: {filename}"
+                        else:
+                            label = f"Analysis Result{image_id_display}" if image_id_display else f"Analysis Result: {filename}"
+                        visual_outputs_list.append((image, label))
+                    except Exception as e2:
+                        print(f"Warning: Failed to load image {file_path}: {e2}")
+                        continue
             else:
-                label = f"Analysis Result{image_id_display}" if image_id_display else f"Analysis Result: {filename}"
-            
-            visual_outputs_list.append((image, label))
+                # Regular image loading (non-multi-channel TIFF or other formats)
+                try:
+                    image = Image.open(file_path)
+                    if image.size[0] == 0 or image.size[1] == 0:
+                        continue
+                    
+                    if image.mode not in ['RGB', 'L', 'RGBA']:
+                        image = image.convert('RGB')
+                    
+                    img_array = np.array(image)
+                    if img_array.size == 0 or np.isnan(img_array).any():
+                        continue
+                except Exception as e:
+                    print(f"Warning: Failed to load image {file_path}: {e}")
+                    continue
+                
+                # Extract image identifier from filename (consistent naming: tool_type_imageid.ext)
+                # Patterns: nuclei_overlay_<image_id>.png, nuclei_mask_<image_id>.png, <image_id>_default_processed.png
+                image_id = None
+                if "_overlay_" in filename_lower or "_mask_" in filename_lower:
+                    # Pattern: nuclei_overlay_<image_id>.png
+                    parts = filename.rsplit(".", 1)[0].split("_")
+                    if len(parts) >= 3:
+                        image_id = "_".join(parts[2:])  # Everything after tool_type
+                elif "_processed" in filename_lower:
+                    # Pattern: <image_id>_default_processed.png
+                    parts = filename.split("_")
+                    if len(parts) >= 2:
+                        image_id = parts[0]
+                
+                # Format label with image identifier
+                image_id_display = f" ({image_id[:8]}...)" if image_id and len(image_id) > 8 else (f" ({image_id})" if image_id else "")
+                
+                # Generate descriptive label
+                if "overlay" in filename_lower:
+                    label = f"Segmentation Overlay{image_id_display}"
+                elif "mask" in filename_lower and "viz" not in filename_lower:
+                    label = f"Segmentation Mask{image_id_display}"
+                elif "processed" in filename_lower:
+                    label = f"Processed Image{image_id_display}"
+                elif "comparison" in filename_lower or "bar" in filename_lower:
+                    label = f"Comparison Chart: {filename}"
+                elif "loss_curve" in filename_lower or "loss" in filename_lower:
+                    label = f"Training Loss Curve: {filename}"
+                else:
+                    label = f"Analysis Result{image_id_display}" if image_id_display else f"Analysis Result: {filename}"
+                
+                visual_outputs_list.append((image, label))
         except Exception as e:
             print(f"Warning: Failed to load image {file_path}: {e}")
             continue
@@ -2532,7 +2667,7 @@ def main(args):
                     ["Cell counting", ["examples/iPSC-fibroblast.jpg"], "How many cells in the image?", "Image_Preprocessor_Tool, Cell_Segmenter_Tool", "Cell count. The system preprocesses the image and segments cells to provide an accurate cell count."],
                     ["Single image phenotyping", ["examples/iPSC-cardiomyocyte.tif"], "How many morphological cell states in the image?", "Image_Preprocessor_Tool, Cell_Segmenter_Tool, Single_Cell_Cropper_Tool, Cell_State_Analyzer_Tool, Analysis_Visualizer_Tool", "Cell count, Cell clustering, UMAP embedding. Complete phenotypic analysis with state classification and visualization."],
                     ["Organoid segmentation", ["examples/d6_fc_2.tiff"], "Identify the organoid in the image.", "Organoid_Segmenter_Tool", "Organoid segmentation."],
-                    ["Multi-channel organoid cohort", ["examples/Baseline_fc_1.tiff", "examples/Baseline_fc_2.tiff", "examples/Baseline_fc_3.tiff", "examples/Baseline_fc_4.tiff", "examples/d2_fc_1.tiff", "examples/d2_fc_2.tiff", "examples/d2_fc_3.tiff", "examples/d2_fc_4.tiff", "examples/d4_fc_1.tiff", "examples/d4_fc_2.tiff", "examples/d4_fc_3.tiff", "examples/d4_fc_4.tiff", "examples/d6_fc_1.tiff", "examples/d6_fc_2.tiff", "examples/d6_fc_3.tiff", "examples/d6_fc_4.tiff"], "What changes of organoid morphology among different treatment groups?", "Organoid_Segmenter_Tool, Single_Cell_Cropper_Tool, Cell_State_Analyzer_Tool, Analysis_Visualizer_Tool", "Organoid clustering, UMAP embedding, Group comparison. Comparative analysis across treatment groups with statistical testing."],
+                    ["Multi-channel organoid cohort", [["examples/Baseline_fc_1.tiff", "examples/Baseline_fc_2.tiff", "examples/Baseline_fc_3.tiff", "examples/Baseline_fc_4.tiff"], ["examples/d2_fc_1.tiff", "examples/d2_fc_2.tiff", "examples/d2_fc_3.tiff", "examples/d2_fc_4.tiff"], ["examples/d4_fc_1.tiff", "examples/d4_fc_2.tiff", "examples/d4_fc_3.tiff", "examples/d4_fc_4.tiff"], ["examples/d6_fc_1.tiff", "examples/d6_fc_2.tiff", "examples/d6_fc_3.tiff", "examples/d6_fc_4.tiff"]], "What changes of organoid morphology among different treatment groups?", "Organoid_Segmenter_Tool, Single_Cell_Cropper_Tool, Cell_State_Analyzer_Tool, Analysis_Visualizer_Tool", "Organoid clustering, UMAP embedding, Group comparison. Comparative analysis across treatment groups with statistical testing."],
                     ["Multiple image comparison", ["examples/Hela_Control.png", "examples/Hela_AdOx 0.25 mM.png", "examples/Hela_AdOx 1 mM.png"], "What difference of these images at the cell state level?", "Image_Preprocessor_Tool, Cell_Segmenter_Tool, Single_Cell_Cropper_Tool, Cell_State_Analyzer_Tool, Analysis_Visualizer_Tool", "Cell count, Cell clustering, UMAP embedding, Group comparison. Comparative analysis across treatment groups with statistical testing."]
                 ]
                 def distribute_tools(category, img, q, tools_str, ans):
@@ -2542,7 +2677,13 @@ def main(args):
                     if img is None:
                         img_list = []
                     elif isinstance(img, list):
-                        img_list = img
+                        # Flatten nested lists (for Multi-channel organoid cohort example with rows)
+                        img_list = []
+                        for item in img:
+                            if isinstance(item, list):
+                                img_list.extend(item)
+                            else:
+                                img_list.append(item)
                     else:
                         img_list = [img]
                     # For multiple image comparison example, add enhanced instruction to group_prompt
