@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 from skimage.measure import label, regionprops
 from pathlib import Path
 import json
+import zipfile
 from octotools.models.utils import VisualizationConfig
 from octotools.models.task_state import CellCrop
 import tifffile
@@ -354,6 +355,40 @@ class Single_Cell_Cropper_Tool(BaseTool):
             summary_parts.append(f"All paths and metadata are saved in '{Path(metadata_path).name}'.")
             summary_parts.append(stats_text)
             
+            # Create zip archive of all crop files for download
+            crops_zip_path = None
+            deliverables = []
+            if cell_crops and len(cell_crops) > 0:
+                try:
+                    # Create zip filename with image identifier and group
+                    image_name_safe = "".join(c for c in (source_image_id if source_image_id else "crops") if c.isalnum() or c in ('_', '-'))[:50]
+                    group_safe = "".join(c for c in group if c.isalnum() or c in ('_', '-'))[:30] if group else "default"
+                    zip_filename = f"{image_name_safe}_{group_safe}_crops.zip"
+                    crops_zip_path = os.path.join(tool_cache_dir, zip_filename)
+                    
+                    # Create zip file with all crop files
+                    with zipfile.ZipFile(crops_zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                        # Add all crop files
+                        for crop_path in cell_crops:
+                            if os.path.exists(crop_path):
+                                # Add file with relative path (just filename) to keep zip structure clean
+                                zipf.write(crop_path, os.path.basename(crop_path))
+                        
+                        # Also add metadata file to zip
+                        if os.path.exists(metadata_path):
+                            zipf.write(metadata_path, os.path.basename(metadata_path))
+                    
+                    # Verify zip file was created
+                    if os.path.exists(crops_zip_path) and os.path.getsize(crops_zip_path) > 0:
+                        deliverables.append(crops_zip_path)
+                        print(f"✅ Created crops zip archive: {crops_zip_path} ({os.path.getsize(crops_zip_path)} bytes)")
+                    else:
+                        print(f"⚠️ Warning: Failed to create crops zip archive")
+                except Exception as zip_error:
+                    print(f"⚠️ Warning: Failed to create crops zip archive: {zip_error}")
+                    import traceback
+                    traceback.print_exc()
+            
             return {
                 "summary": " ".join(summary_parts),
                 "cell_count": stats['final_cell_count'],
@@ -364,6 +399,7 @@ class Single_Cell_Cropper_Tool(BaseTool):
                 "cell_crops_metadata_path": metadata_path,
                 "cell_crop_objects": cell_crop_objects,  # Return CellCrop objects for Stage 2 tools
                 "visual_outputs": [],  # No summary visualization
+                "deliverables": deliverables,  # Include zip file for download
                 "processing_statistics": stats  # Include processing statistics in result
             }
             
