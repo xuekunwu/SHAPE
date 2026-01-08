@@ -842,7 +842,7 @@ def _collect_visual_outputs(result, visual_outputs_list, downloadable_files_list
             
             # Check if this is a multi-channel visualization file (from Image_Preprocessor_Tool)
             # If it has "multi_channel_" in the filename, display it directly without splitting
-            if "multi_channel_" in filename.lower() and is_multi_channel:
+            if "multi_channel_" in filename.lower():
                 # This is already a multi-channel visualization, display as-is
                 try:
                     img_pil = Image.open(file_path)
