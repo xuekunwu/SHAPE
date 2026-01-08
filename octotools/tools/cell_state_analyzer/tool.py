@@ -90,11 +90,33 @@ class CellCropDataset(Dataset):
             # Use ImageProcessor to load and handle multi-channel images correctly
             img_data = ImageProcessor.load_image(path)
             
-            # Create merged RGB view that preserves all channel information
-            # For 2-channel (BF+GFP): BF->gray, GFP->green
-            # For 3-channel: use first 3 channels as RGB
-            # For single-channel: grayscale->RGB
-            merged_rgb = ImageProcessor.create_merged_rgb_for_display(img_data)
+            # Use raw image data without normalization - preserve original intensity values
+            # Convert to uint8 if needed, but keep original intensity distribution
+            if img_data.is_single_channel:
+                # Single-channel: convert to RGB by repeating channel
+                channel_uint8 = img_data.to_uint8(0)  # Convert to uint8 without normalization
+                merged_rgb = np.stack([channel_uint8, channel_uint8, channel_uint8], axis=2)
+            elif img_data.num_channels == 2:
+                # 2-channel (BF+GFP): BF->R/G/B, GFP->G
+                bf_uint8 = img_data.to_uint8(0)  # Bright-field
+                gfp_uint8 = img_data.to_uint8(1)  # GFP
+                # Merge: R=BF, G=BF+GFP (clipped), B=BF
+                merged_rgb = np.stack([
+                    bf_uint8,
+                    np.clip(bf_uint8.astype(np.uint16) + gfp_uint8.astype(np.uint16), 0, 255).astype(np.uint8),
+                    bf_uint8
+                ], axis=2)
+            elif img_data.num_channels >= 3:
+                # 3+ channels: use first 3 channels as RGB
+                merged_rgb = np.stack([
+                    img_data.to_uint8(0),
+                    img_data.to_uint8(1),
+                    img_data.to_uint8(2)
+                ], axis=2)
+            else:
+                # Fallback: use first channel
+                channel_uint8 = img_data.to_uint8(0)
+                merged_rgb = np.stack([channel_uint8, channel_uint8, channel_uint8], axis=2)
             
             # Convert to PIL Image for transforms
             img = Image.fromarray(merged_rgb, mode='RGB')
@@ -103,23 +125,27 @@ class CellCropDataset(Dataset):
             # Fallback to legacy loading for backward compatibility
             logger.warning(f"Failed to load with ImageProcessor: {load_error}, using legacy method")
             if SKIMAGE_AVAILABLE and (path.lower().endswith('.tif') or path.lower().endswith('.tiff')):
-                img = io.imread(path).astype(np.float32)
+                img = io.imread(path)
+                # Preserve original data - only convert dtype if needed for PIL
                 if img.dtype == np.uint16:
-                    img = img / 65535.0
-                else:
-                    img = img / 255.0
+                    # Linear scaling to uint8 (preserves relative intensity distribution)
+                    img = (img / 65535.0 * 255).astype(np.uint8)
+                elif img.dtype != np.uint8:
+                    img = np.clip(img, 0, 255).astype(np.uint8)
+                
                 if img.ndim == 2:
-                    img = np.repeat(img[..., None], 3, axis=-1)
+                    img = np.repeat(img[..., None], 3, axis=2)
                 elif img.ndim == 3 and img.shape[2] == 2:
-                    # Handle 2-channel image: BF -> gray, GFP -> green
+                    # Handle 2-channel image: BF -> R/G/B, GFP -> G
                     bf = img[:, :, 0]
                     gfp = img[:, :, 1] if img.shape[2] > 1 else bf
-                    img = np.stack([bf, bf + gfp, bf], axis=2)  # R=BF, G=BF+GFP, B=BF
-                    img = np.clip(img, 0, 1)
-                elif img.ndim == 3 and img.shape[2] > 3:
-                    # Use first 3 channels
+                    # Merge: R=BF, G=BF+GFP (clipped), B=BF
+                    merged_g = np.clip(bf.astype(np.uint16) + gfp.astype(np.uint16), 0, 255).astype(np.uint8)
+                    img = np.stack([bf, merged_g, bf], axis=2)
+                elif img.ndim == 3 and img.shape[2] >= 3:
+                    # Use first 3 channels as RGB
                     img = img[:, :, :3]
-                img = Image.fromarray((img * 255).astype(np.uint8)).convert("RGB")
+                img = Image.fromarray(img, mode='RGB')
             else:
                 img = Image.open(path).convert("RGB")
         

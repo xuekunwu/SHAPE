@@ -216,14 +216,35 @@ class ImageData:
         - Single-channel: grayscale -> RGB
         - Multi-channel: merge according to channel_mapping
         """
-        def normalize_channel(x):
-            """Normalize channel to [0, 1] range"""
+        def normalize_channel(x, method='percentile'):
+            """
+            Normalize channel to [0, 1] range
+            
+            Args:
+                x: Channel data (numpy array)
+                method: Normalization method
+                    - 'percentile': Use 1st and 99th percentiles (robust to outliers, better for training)
+                    - 'minmax': Use min/max (original method, better for display)
+            """
             x = x.astype(np.float32)
-            x_min = x.min()
-            x_max = x.max()
-            if x_max > x_min:
-                return (x - x_min) / (x_max - x_min + 1e-8)
-            return x
+            
+            if method == 'percentile':
+                # Use percentile normalization for better training stability
+                # This reduces the impact of outliers and provides more consistent contrast
+                p1, p99 = np.percentile(x, [1, 99])
+                if p99 > p1:
+                    normalized = np.clip(x, p1, p99)
+                    normalized = (normalized - p1) / (p99 - p1 + 1e-8)
+                else:
+                    normalized = x * 0  # All zeros if no variation
+                return normalized
+            else:
+                # Original min-max normalization (better for display)
+                x_min = x.min()
+                x_max = x.max()
+                if x_max > x_min:
+                    return (x - x_min) / (x_max - x_min + 1e-8)
+                return x
         
         if self.is_single_channel:
             # Single-channel: grayscale -> RGB
@@ -234,9 +255,10 @@ class ImageData:
             merged = np.zeros((self.height, self.width, 3), dtype=np.float32)
             
             # Normalize all channels
+            # Use percentile normalization for better training stability (robust to outliers)
             normalized_channels = []
             for c in range(self.num_channels):
-                normalized_channels.append(normalize_channel(self.get_channel(c)))
+                normalized_channels.append(normalize_channel(self.get_channel(c), method='percentile'))
             
             # Default mapping: bright-field -> gray, GFP -> green, DAPI -> blue
             if channel_mapping is None:
