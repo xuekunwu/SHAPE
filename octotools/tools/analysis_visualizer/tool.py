@@ -1080,9 +1080,17 @@ class Analysis_Visualizer_Tool(BaseTool):
             if len(cluster_indices) == 0:
                 continue
             
-            # Randomly sample cells
+            # Randomly sample cells (ensure we get different samples each time)
             n_samples = min(crops_per_cluster, len(cluster_indices))
-            sampled_indices = random.sample(list(cluster_indices), n_samples)
+            if n_samples > 0:
+                # Use different seed per cluster to ensure variety
+                cluster_seed = 42 + hash(str(cluster)) % 1000
+                random.seed(cluster_seed)
+                sampled_indices = random.sample(list(cluster_indices), n_samples)
+                # Reset to default seed after sampling
+                random.seed(42)
+            else:
+                sampled_indices = []
             
             for col_idx in range(n_cols):
                 ax = axes[row_idx, col_idx]
@@ -1116,7 +1124,9 @@ class Analysis_Visualizer_Tool(BaseTool):
                                     spine.set_visible(True)
                                     spine.set_color(cluster_colors[cluster])
                                     spine.set_linewidth(2)
-                        except Exception:
+                        except Exception as e:
+                            # Debug: print error for troubleshooting
+                            print(f"Warning: Failed to load crop for cluster {cluster}, idx {idx}: {e}")
                             pass
                 
                 # Add cluster label on first column (adjusted position for tighter layout)

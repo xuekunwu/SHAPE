@@ -82,9 +82,9 @@ class Single_Cell_Cropper_Tool(BaseTool):
                     auto_detected = True
                     print(f"Auto-detected cell_mask - using min_area={auto_min_area}, margin={auto_margin}")
                 elif "organoid_mask" in mask_filename_lower:
-                    # Organoid mask: min_area=200, margin=50
-                    auto_min_area = 200
-                    auto_margin = 50
+                    # Organoid mask: min_area=1000, margin=10
+                    auto_min_area = 1000
+                    auto_margin = 10
                     auto_detected = True
                     print(f"Auto-detected organoid_mask - using min_area={auto_min_area}, margin={auto_margin}")
                 elif "nuclei_mask" in mask_filename_lower:
@@ -488,12 +488,14 @@ class Single_Cell_Cropper_Tool(BaseTool):
             center_row = (minr + maxr) // 2
             center_col = (minc + maxc) // 2
             
-            # Determine half sizes and enforce square crops (with margin)
-            half_height = height // 2 + margin
-            half_width = width // 2 + margin
-            half_side = max(half_height, half_width)
+            # Determine half_side to ensure entire mask is included with margin on all sides
+            # Reference: 251031_CO_inference_Mydgf.py - half_side = max(h//2, w//2) + margin
+            # This ensures the entire bounding box is preserved with margin on all four sides
+            half_side = max(height // 2, width // 2) + margin
             
-            # Define new square bounding box
+            # Define new bounding box (with margin on all sides)
+            # Reference: 251031_CO_inference_Mydgf.py - ensures entire mask is included with margin
+            # Allow non-square crops at image borders to preserve entire mask
             img_height = original_img.shape[0]
             img_width = original_img.shape[1]
             new_minr = max(center_row - half_side, 0)
@@ -501,8 +503,11 @@ class Single_Cell_Cropper_Tool(BaseTool):
             new_minc = max(center_col - half_side, 0)
             new_maxc = min(center_col + half_side, img_width)
             
-            # Skip if the crop is not square (i.e., at the border)
-            if (new_maxr - new_minr) != (new_maxc - new_minc):
+            # Verify that the entire mask is included in the crop
+            # At borders, margin may be reduced, but mask must be fully contained
+            # Only skip if crop doesn't fully contain the mask (with at least some margin)
+            if new_minr > minr or new_maxr < maxr or new_minc > minc or new_maxc < maxc:
+                # Crop doesn't fully contain the mask
                 filtered_by_border += 1
                 continue
                 
