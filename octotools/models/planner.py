@@ -32,6 +32,10 @@ class Planner:
         self.query_analysis = None
         self.detected_domain = 'general'  # Track detected task domain
         
+        # Pipeline requirements tracking (set during query analysis)
+        self.requires_full_pipeline = False  # Whether query requires full cell state analysis pipeline
+        self.current_question = None  # Store current question for pipeline requirement checks
+        
         # Initialize token usage tracking
         self.last_usage = {}
     
@@ -283,6 +287,14 @@ IMPORTANT: Do NOT suggest tools for analysis that is not explicitly requested in
         else:
             analysis_text = str(self.query_analysis).strip()
 
+        # Determine and store pipeline requirements for this query
+        self.current_question = question
+        self.requires_full_pipeline = self._requires_full_cell_state_analysis(question)
+        if self.requires_full_pipeline:
+            logger.info(f"✅ Query requires full cell state analysis pipeline: {question[:100]}...")
+        else:
+            logger.info(f"ℹ️ Query does not require full pipeline: {question[:100]}...")
+
         return analysis_text
 
     def extract_context_subgoal_and_tool(self, response) -> Tuple[str, str, str]:
@@ -319,6 +331,192 @@ IMPORTANT: Do NOT suggest tools for analysis that is not explicitly requested in
                 return True
         
         return False
+    
+    def _get_pipeline_state(self, used_tools: List[str]) -> Dict[str, Any]:
+        """
+        Unified method to check pipeline state and determine what's needed next.
+        
+        Returns a dict with:
+        - requires_full_pipeline: bool - Whether query requires full pipeline
+        - has_segmentation: bool - Whether segmentation has been done
+        - has_cropping: bool - Whether cropping has been done
+        - has_cell_state_analysis: bool - Whether cell state analysis has been done
+        - has_visualization: bool - Whether visualization has been done
+        - next_required_tool: str or None - What tool should be executed next (if pipeline incomplete)
+        - pipeline_complete: bool - Whether full pipeline is complete
+        """
+        segmentation_tools = ["Cell_Segmenter_Tool", "Nuclei_Segmenter_Tool", "Organoid_Segmenter_Tool"]
+        
+        has_segmentation = any(tool in used_tools for tool in segmentation_tools)
+        has_cropping = 'Single_Cell_Cropper_Tool' in used_tools
+        has_cell_state_analysis = 'Cell_State_Analyzer_Tool' in used_tools
+        has_visualization = 'Analysis_Visualizer_Tool' in used_tools
+        
+        # Use stored pipeline requirement if available, otherwise check from current question
+        requires_full_pipeline = self.requires_full_pipeline
+        if not hasattr(self, 'requires_full_pipeline') or self.current_question is None:
+            # Fallback: check from question if available
+            if hasattr(self, 'current_question') and self.current_question:
+                requires_full_pipeline = self._requires_full_cell_state_analysis(self.current_question)
+            else:
+                requires_full_pipeline = False
+        
+        # Determine next required tool if pipeline is incomplete
+        next_required_tool = None
+        pipeline_complete = False
+        
+        if requires_full_pipeline:
+            if not has_segmentation:
+                # Need segmentation first
+                next_required_tool = None  # Let LLM choose appropriate segmenter
+            elif not has_cropping:
+                next_required_tool = 'Single_Cell_Cropper_Tool'
+            elif not has_cell_state_analysis:
+                next_required_tool = 'Cell_State_Analyzer_Tool'
+            elif not has_visualization:
+                next_required_tool = 'Analysis_Visualizer_Tool'
+            else:
+                pipeline_complete = True
+        else:
+            # For non-full pipeline queries, pipeline is "complete" when query is answered
+            pipeline_complete = True
+        
+        return {
+            'requires_full_pipeline': requires_full_pipeline,
+            'has_segmentation': has_segmentation,
+            'has_cropping': has_cropping,
+            'has_cell_state_analysis': has_cell_state_analysis,
+            'has_visualization': has_visualization,
+            'next_required_tool': next_required_tool,
+            'pipeline_complete': pipeline_complete
+        }
+    
+    def _check_and_enforce_pipeline_state(
+        self, 
+        question: str, 
+        used_tools: List[str], 
+        available_tools: List[str], 
+        memory: Memory, 
+        next_step: Any
+    ) -> Optional[NextStep]:
+        """
+        Unified pipeline state checking and enforcement.
+        
+        This method replaces the scattered enforcement logic with a single, clear check.
+        It ensures the pipeline progresses correctly based on query requirements.
+        
+        Returns:
+            NextStep if enforcement is needed, None otherwise
+        """
+        if not used_tools:
+            return None
+        
+        # Get current pipeline state
+        pipeline_state = self._get_pipeline_state(used_tools)
+        last_tool = used_tools[-1]
+        
+        # Extract selected tool from next_step
+        selected_tool = getattr(next_step, 'tool_name', '') if hasattr(next_step, 'tool_name') else ''
+        if not selected_tool and isinstance(next_step, str):
+            from octotools.utils.response_parser import ResponseParser
+            _, _, selected_tool = ResponseParser.parse_next_step(next_step, available_tools)
+        
+        # If pipeline is complete, no enforcement needed
+        if pipeline_state['pipeline_complete']:
+            # Only check for Image_Captioner_Tool recommendation after Analysis_Visualizer_Tool
+            if last_tool == "Analysis_Visualizer_Tool":
+                if 'Image_Captioner_Tool' not in used_tools and selected_tool != 'Image_Captioner_Tool' and 'Image_Captioner_Tool' in available_tools:
+                    logger.info(f"💡 RECOMMENDATION: Pipeline complete. Suggesting Image_Captioner_Tool for final summary.")
+                    forced_context = self._format_memory_for_prompt(memory)
+                    return NextStep(
+                        justification=f"RECOMMENDED: Full analysis pipeline is complete. "
+                                    f"Image_Captioner_Tool is recommended to generate a final summary and interpretation.",
+                        context=forced_context,
+                        sub_goal="Generate a final summary and interpretation of the analysis visualizations using Image_Captioner_Tool.",
+                        tool_name="Image_Captioner_Tool"
+                    )
+            return None
+        
+        # Pipeline is incomplete - enforce next required tool
+        if not pipeline_state['requires_full_pipeline']:
+            return None  # No enforcement needed for non-full pipeline queries
+        
+        next_required = pipeline_state['next_required_tool']
+        
+        # Enforce Single_Cell_Cropper_Tool after segmentation
+        if last_tool in ["Cell_Segmenter_Tool", "Nuclei_Segmenter_Tool", "Organoid_Segmenter_Tool"]:
+            if next_required == 'Single_Cell_Cropper_Tool' and selected_tool != 'Single_Cell_Cropper_Tool':
+                if 'Single_Cell_Cropper_Tool' in available_tools:
+                    logger.warning(f"⚠️ PIPELINE ENFORCEMENT: After {last_tool}, need Single_Cell_Cropper_Tool. "
+                                 f"LLM selected '{selected_tool}', overriding.")
+                    forced_context = self._format_memory_for_prompt(memory)
+                    return NextStep(
+                        justification=f"MANDATORY: After segmentation, Single_Cell_Cropper_Tool is required for cell state analysis pipeline.",
+                        context=forced_context,
+                        sub_goal="Crop individual cells/organoids from segmentation masks using Single_Cell_Cropper_Tool.",
+                        tool_name="Single_Cell_Cropper_Tool"
+                    )
+        
+        # Enforce Cell_State_Analyzer_Tool after Single_Cell_Cropper_Tool
+        if last_tool == "Single_Cell_Cropper_Tool":
+            if next_required == 'Cell_State_Analyzer_Tool' and selected_tool != 'Cell_State_Analyzer_Tool':
+                if 'Cell_State_Analyzer_Tool' in available_tools:
+                    logger.warning(f"⚠️ PIPELINE ENFORCEMENT: After Single_Cell_Cropper_Tool, need Cell_State_Analyzer_Tool. "
+                                 f"LLM selected '{selected_tool}', overriding.")
+                    forced_context = self._format_memory_for_prompt(memory)
+                    return NextStep(
+                        justification=f"MANDATORY: After cropping, Cell_State_Analyzer_Tool is required for self-supervised learning and cell state analysis.",
+                        context=forced_context,
+                        sub_goal="Perform self-supervised learning on single-cell crops. Extract features and generate UMAP embeddings with clustering.",
+                        tool_name="Cell_State_Analyzer_Tool"
+                    )
+        
+        # Enforce Analysis_Visualizer_Tool after Cell_State_Analyzer_Tool
+        if last_tool == "Cell_State_Analyzer_Tool":
+            if next_required == 'Analysis_Visualizer_Tool' and selected_tool != 'Analysis_Visualizer_Tool':
+                if 'Analysis_Visualizer_Tool' in available_tools:
+                    logger.warning(f"⚠️ PIPELINE ENFORCEMENT: After Cell_State_Analyzer_Tool, need Analysis_Visualizer_Tool. "
+                                 f"LLM selected '{selected_tool}', overriding.")
+                    forced_context = self._format_memory_for_prompt(memory)
+                    return NextStep(
+                        justification=f"MANDATORY: After cell state analysis, Analysis_Visualizer_Tool is required to visualize results.",
+                        context=forced_context,
+                        sub_goal="Visualize cell state analysis results. Generate UMAP plots, cluster composition charts, and exemplar montages.",
+                        tool_name="Analysis_Visualizer_Tool"
+                    )
+        
+        # Special case: Analysis_Visualizer_Tool executed but pipeline incomplete
+        # This handles the case where Analysis_Visualizer_Tool was executed prematurely
+        if last_tool == "Analysis_Visualizer_Tool" and not pipeline_state['pipeline_complete']:
+            if not pipeline_state['has_cell_state_analysis']:
+                # Missing Cell_State_Analyzer_Tool - need to go back
+                if not pipeline_state['has_cropping']:
+                    # Need cropping first
+                    if 'Single_Cell_Cropper_Tool' in available_tools:
+                        logger.warning(f"⚠️ PIPELINE ENFORCEMENT: Analysis_Visualizer_Tool executed but pipeline incomplete. "
+                                     f"Need Single_Cell_Cropper_Tool → Cell_State_Analyzer_Tool. "
+                                     f"LLM selected '{selected_tool}', overriding to Single_Cell_Cropper_Tool.")
+                        forced_context = self._format_memory_for_prompt(memory)
+                        return NextStep(
+                            justification=f"MANDATORY: Pipeline incomplete. Need Single_Cell_Cropper_Tool before Cell_State_Analyzer_Tool.",
+                            context=forced_context,
+                            sub_goal="Crop individual cells/organoids from segmentation masks using Single_Cell_Cropper_Tool.",
+                            tool_name="Single_Cell_Cropper_Tool"
+                        )
+                else:
+                    # Has cropping but missing Cell_State_Analyzer_Tool
+                    if 'Cell_State_Analyzer_Tool' in available_tools:
+                        logger.warning(f"⚠️ PIPELINE ENFORCEMENT: Analysis_Visualizer_Tool executed but Cell_State_Analyzer_Tool missing. "
+                                     f"LLM selected '{selected_tool}', overriding to Cell_State_Analyzer_Tool.")
+                        forced_context = self._format_memory_for_prompt(memory)
+                        return NextStep(
+                            justification=f"MANDATORY: Pipeline incomplete. Cell_State_Analyzer_Tool is required for cell state analysis.",
+                            context=forced_context,
+                            sub_goal="Perform self-supervised learning on single-cell crops. Extract features and generate UMAP embeddings.",
+                            tool_name="Cell_State_Analyzer_Tool"
+                        )
+        
+        return None
     
     def _requires_full_cell_state_analysis(self, question: str) -> bool:
         """
@@ -521,7 +719,11 @@ MULTI-IMAGE PROCESSING CONTEXT:
         # - Simple counting: Segmentation → STOP
         # - Basic morphology: Segmentation → (optional cropping) → Analysis_Visualizer
         # - Cell state analysis: Segmentation → Cropping → Cell_State_Analyzer → Analysis_Visualizer
+        # - Comparison queries (e.g., "compare groups", "what changes"): Typically need full pipeline
+        #   Segmentation → Cropping → Cell_State_Analyzer → Analysis_Visualizer
         # Let the LLM make this decision based on query requirements.
+        # IMPORTANT: If query asks for comparison or cell state analysis, DO NOT skip to Analysis_Visualizer_Tool
+        # directly after segmentation. You MUST execute Single_Cell_Cropper_Tool and Cell_State_Analyzer_Tool first.
         recommended_tools = self.priority_manager.get_recommended_next_tools(
             available_tools, used_tools, self.detected_domain
         )
@@ -675,9 +877,11 @@ Instructions:
    
    **Decision Guidelines:**
    - If query asks for clustering, UMAP, cell types, or state comparison → Use Level 3 (full chain)
+   - If query asks for comparison between groups (e.g., "compare groups", "what changes") → Use Level 3 (full chain)
    - If query asks for basic measurements or distributions → Use Level 2 (may skip cropping)
    - If query asks for counts only → Use Level 1 (stop after segmentation)
    - Let the query requirements guide the tool selection, not rigid rules
+   - CRITICAL: Do NOT skip Single_Cell_Cropper_Tool and Cell_State_Analyzer_Tool if query requires cell state analysis
 
 5. Check Tool Dependencies:
    Some tools require other tools to run first:
@@ -730,100 +934,13 @@ Example (do not copy, use only as reference):
             next_step = llm_response
             self.last_usage = {}
         
-        # CRITICAL: Code-level enforcement for tool chain dependencies
-        # We only enforce dependencies AFTER a tool has been selected, not before.
-        # This allows the LLM to intelligently decide analysis depth based on the query.
-        if used_tools:
-            last_tool = used_tools[-1]
-            
-            # CRITICAL: Code-level enforcement for Cell_State_Analyzer_Tool after Single_Cell_Cropper_Tool
-            # This is MANDATORY for cell state analysis - Cell_State_Analyzer_Tool performs self-supervised learning
-            # which is essential for determining cell/organoid states
-            if last_tool == "Single_Cell_Cropper_Tool":
-                # Check if query requires full cell state analysis
-                requires_full_analysis = self._requires_full_cell_state_analysis(question)
-                
-                if requires_full_analysis:
-                    # Extract tool name from next_step
-                    selected_tool = getattr(next_step, 'tool_name', '') if hasattr(next_step, 'tool_name') else ''
-                    # Parse from string if needed
-                    if not selected_tool and isinstance(next_step, str):
-                        from octotools.utils.response_parser import ResponseParser
-                        _, _, selected_tool = ResponseParser.parse_next_step(next_step, available_tools)
-                    
-                    # Enforce: If LLM didn't select Cell_State_Analyzer_Tool, override it
-                    if selected_tool != 'Cell_State_Analyzer_Tool' and 'Cell_State_Analyzer_Tool' in available_tools:
-                        logger.warning(f"⚠️ CODE ENFORCEMENT: LLM selected '{selected_tool}' after Single_Cell_Cropper_Tool, "
-                                     f"overriding to Cell_State_Analyzer_Tool (MANDATORY for cell state analysis)")
-                        # Override: Create forced next step
-                        forced_context = self._format_memory_for_prompt(memory)
-                        forced_next_step = NextStep(
-                            justification=f"MANDATORY ENFORCEMENT: Previous tool 'Single_Cell_Cropper_Tool' completed cell cropping. "
-                                        f"Cell_State_Analyzer_Tool MUST be called next to perform self-supervised learning and analyze cell states. "
-                                        f"This tool is CRITICAL for determining cell/organoid states using contrastive learning. "
-                                        f"LLM selected '{selected_tool}' which was overridden by code-level enforcement.",
-                            context=forced_context,
-                            sub_goal="Perform self-supervised learning (contrastive learning) on the single-cell crops from Single_Cell_Cropper_Tool. "
-                                   "Train a DINOv3 model to extract morphological features and generate UMAP embeddings with clustering for cell state analysis.",
-                            tool_name="Cell_State_Analyzer_Tool"
-                        )
-                        return forced_next_step
-            
-            # CRITICAL: Code-level enforcement for Analysis_Visualizer_Tool after Cell_State_Analyzer_Tool
-            if last_tool == "Cell_State_Analyzer_Tool":
-                # Extract tool name from next_step
-                selected_tool = getattr(next_step, 'tool_name', '') if hasattr(next_step, 'tool_name') else ''
-                # Parse from string if needed
-                if not selected_tool and isinstance(next_step, str):
-                    from octotools.utils.response_parser import ResponseParser
-                    _, _, selected_tool = ResponseParser.parse_next_step(next_step, available_tools)
-                
-                # Enforce: If LLM didn't select Analysis_Visualizer_Tool, override it
-                if selected_tool != 'Analysis_Visualizer_Tool' and 'Analysis_Visualizer_Tool' in available_tools:
-                    logger.warning(f"⚠️ CODE ENFORCEMENT: LLM selected '{selected_tool}' after Cell_State_Analyzer_Tool, "
-                                 f"overriding to Analysis_Visualizer_Tool")
-                    # Override: Create forced next step
-                    forced_context = self._format_memory_for_prompt(memory)
-                    forced_next_step = NextStep(
-                        justification=f"MANDATORY ENFORCEMENT: Previous tool 'Cell_State_Analyzer_Tool' completed cell state analysis. "
-                                    f"Analysis_Visualizer_Tool MUST be called next to visualize the analysis results (UMAP, clusters, exemplars). "
-                                    f"LLM selected '{selected_tool}' which was overridden by code-level enforcement.",
-                        context=forced_context,
-                        sub_goal="Visualize cell state analysis results from Cell_State_Analyzer_Tool. "
-                               "Generate publication-quality UMAP plots, cluster composition charts, and exemplar cell montages.",
-                        tool_name="Analysis_Visualizer_Tool"
-                    )
-                    return forced_next_step
-            
-            # RECOMMENDATION: Suggest Image_Captioner_Tool after Analysis_Visualizer_Tool (if not already used)
-            if last_tool == "Analysis_Visualizer_Tool":
-                # Extract tool name from next_step
-                selected_tool = getattr(next_step, 'tool_name', '') if hasattr(next_step, 'tool_name') else ''
-                # Parse from string if needed
-                if not selected_tool and isinstance(next_step, str):
-                    from octotools.utils.response_parser import ResponseParser
-                    _, _, selected_tool = ResponseParser.parse_next_step(next_step, available_tools)
-                
-                # Check if Image_Captioner_Tool has been used
-                used_tools = [action.get('tool_name') for action in memory.get_actions(llm_safe=True) if 'tool_name' in action]
-                
-                # If Image_Captioner_Tool hasn't been used and LLM didn't select it, suggest it
-                if 'Image_Captioner_Tool' not in used_tools and selected_tool != 'Image_Captioner_Tool' and 'Image_Captioner_Tool' in available_tools:
-                    logger.info(f"💡 RECOMMENDATION: Analysis_Visualizer_Tool completed. Suggesting Image_Captioner_Tool for final summary. "
-                              f"LLM selected '{selected_tool}', but Image_Captioner_Tool is recommended.")
-                    # Override: Create recommended next step
-                    forced_context = self._format_memory_for_prompt(memory)
-                    forced_next_step = NextStep(
-                        justification=f"RECOMMENDED: Previous tool 'Analysis_Visualizer_Tool' completed visualization generation. "
-                                    f"Image_Captioner_Tool is recommended to generate a final summary and interpretation of the visualizations "
-                                    f"to provide a comprehensive answer to the user's query. "
-                                    f"LLM selected '{selected_tool}' which was overridden by recommendation.",
-                        context=forced_context,
-                        sub_goal="Generate a final summary and interpretation of the analysis visualizations using Image_Captioner_Tool. "
-                               "Provide a comprehensive answer to the user's query based on the generated visualizations.",
-                        tool_name="Image_Captioner_Tool"
-                    )
-                    return forced_next_step
+        # Unified pipeline state management and enforcement
+        # This replaces all scattered enforcement logic with a single, clear check
+        enforced_step = self._check_and_enforce_pipeline_state(
+            question, used_tools, available_tools, memory, next_step
+        )
+        if enforced_step is not None:
+            return enforced_step
         
         # Validate the selected tool
         if hasattr(next_step, 'tool_name') and next_step.tool_name:
