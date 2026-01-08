@@ -281,8 +281,10 @@ class ImageData:
         
         if self.is_multi_channel and format.lower() in ('tif', 'tiff'):
             # Save as multi-channel TIFF
-            # Use imagej=True to ensure ImageJ correctly interprets channels (not as Z-stack)
-            tifffile.imwrite(path, self.data, imagej=True)
+            # Convert (H, W, C) to (C, H, W) format for ImageJ compatibility
+            # This ensures ImageJ correctly interprets channels (not as Z-stack)
+            data_chw = np.moveaxis(self.data, -1, 0)  # Move channel dimension to first
+            tifffile.imwrite(path, data_chw, imagej=True)
         else:
             # Save as single-channel or RGB image
             if self.is_single_channel:
