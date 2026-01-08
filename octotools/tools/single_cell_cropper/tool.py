@@ -544,13 +544,20 @@ class Single_Cell_Cropper_Tool(BaseTool):
             if cell_crop.dtype == np.float32 or cell_crop.dtype == np.float64:
                 cell_crop = np.clip(cell_crop, 0, 255).astype(np.uint8)
             
+            # Extract image name for unique crop filename (to avoid conflicts when processing multiple images)
+            # Use source_image_id if provided, otherwise extract from original_image_path
+            image_name = source_image_id if source_image_id else Path(original_image_path).stem
+            # Sanitize image_name for use in filename (remove special characters)
+            image_name_safe = "".join(c for c in image_name if c.isalnum() or c in ('_', '-'))[:50]  # Limit length
+            
             # Save crop with enhanced error handling
             # For multi-channel images, always use TIFF to preserve all channel information
             # For single-channel images, use the specified output_format
+            # Include image_name in filename to ensure uniqueness across different source images
             if is_multi_channel and cell_crop.ndim == 3:
-                crop_filename = f"cell_{idx:04d}_crop.tiff"
+                crop_filename = f"{image_name_safe}_cell_{idx:04d}_crop.tiff"
             else:
-                crop_filename = f"cell_{idx:04d}_crop.{output_format}"
+                crop_filename = f"{image_name_safe}_cell_{idx:04d}_crop.{output_format}"
             crop_path = os.path.join(output_dir, crop_filename)
             
             try:
@@ -604,9 +611,8 @@ class Single_Cell_Cropper_Tool(BaseTool):
             
             # Create cell ID in format: {group}_{image_name}_{crop_id}
             # This allows tracing back to group and image_name from cell_id
+            # Note: image_name was already extracted above for crop filename
             crop_id = f"cell_{idx:04d}"
-            # Use source_image_id as image_name (extracted from path if not provided)
-            image_name = source_image_id if source_image_id else Path(original_image_path).stem
             # Create cell_id in format: group_image_name_crop_id (e.g., "control_image1_cell_0001")
             cell_id = f"{group}_{image_name}_{crop_id}"
             
