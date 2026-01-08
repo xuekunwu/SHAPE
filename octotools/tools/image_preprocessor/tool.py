@@ -445,6 +445,9 @@ class Image_Preprocessor_Tool(BaseTool):
             if img_data.is_multi_channel and multi_channel_images is not None and len(multi_channel_images) > 1:
                 print(f"Extracting and saving {len(multi_channel_images)} channels separately...")
                 
+                # Initialize list for normalized channels for visualization
+                normalized_channels_for_vis = []
+                
                 # Normalize function for visualization (independent normalization per channel)
                 def normalize_channel(x):
                     """Normalize channel to [0, 1] range for visualization"""
