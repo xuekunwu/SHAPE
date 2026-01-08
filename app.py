@@ -21,7 +21,7 @@ import logging
 import tempfile
 from PIL import Image
 import numpy as np
-from typing import List, Dict, Any, Iterator
+from typing import List, Dict, Any, Iterator, Optional
 import matplotlib.pyplot as plt
 import gradio as gr
 from gradio import ChatMessage
@@ -798,6 +798,127 @@ def _load_image_for_display(image_path: str) -> Optional[Image.Image]:
         return None
 
 
+def _create_unified_crops_zip(per_image_results: List[Dict[str, Any]], tool_cache_dir: str) -> Optional[str]:
+    """
+    Create a unified zip file containing all crops from multiple images, organized by group/image_id.
+    
+    Args:
+        per_image_results: List of per-image results from Single_Cell_Cropper_Tool
+        tool_cache_dir: Directory to save the unified zip file
+        
+    Returns:
+        Path to unified zip file, or None if failed
+    """
+    import zipfile
+    from pathlib import Path
+    
+    try:
+        # Collect all crop files and metadata from all images
+        all_crops = []
+        all_metadata = []
+        groups_used = set()
+        
+        for img_result in per_image_results:
+            if not isinstance(img_result, dict) or "error" in img_result:
+                continue
+            
+            # Get crop files from cell_crops_metadata_path or crops_zip_path
+            metadata_path = img_result.get("cell_crops_metadata_path")
+            crops_zip_path = img_result.get("crops_zip_path")
+            
+            # Prefer reading from metadata file (more reliable, contains group/image_id info)
+            # Fallback to extracting from zip if metadata not available
+            group = 'default'
+            image_id = 'unknown'
+            crops_from_metadata = []
+            
+            if metadata_path and os.path.exists(metadata_path):
+                try:
+                    with open(metadata_path, 'r') as f:
+                        metadata = json.load(f)
+                    crop_paths = metadata.get('cell_crops_paths', [])
+                    group = metadata.get('group', 'default')
+                    groups_used.add(group)
+                    image_id = metadata.get('source_image_id', 'unknown')
+                    
+                    for crop_path in crop_paths:
+                        if os.path.exists(crop_path):
+                            # Organize by group/image_id in zip
+                            crop_filename = os.path.basename(crop_path)
+                            zip_path = f"{group}/{image_id}/{crop_filename}"
+                            crops_from_metadata.append((crop_path, zip_path))
+                    
+                    # Add metadata file to zip
+                    all_metadata.append(metadata_path)
+                except Exception as e:
+                    print(f"Warning: Failed to read metadata {metadata_path}: {e}")
+            
+            # If we got crops from metadata, use those; otherwise try extracting from zip
+            if crops_from_metadata:
+                all_crops.extend(crops_from_metadata)
+            elif crops_zip_path and os.path.exists(crops_zip_path):
+                # Fallback: Extract from existing zip (less ideal, no group/image_id info)
+                temp_dir = os.path.join(tool_cache_dir, "temp_crops")
+                os.makedirs(temp_dir, exist_ok=True)
+                try:
+                    with zipfile.ZipFile(crops_zip_path, 'r') as existing_zip:
+                        for file_info in existing_zip.filelist:
+                            if file_info.filename.endswith(('.tiff', '.tif', '.png', '.jpg')):
+                                # Extract to temp location
+                                existing_zip.extract(file_info.filename, temp_dir)
+                                crop_path = os.path.join(temp_dir, file_info.filename)
+                                if os.path.exists(crop_path):
+                                    # Use filename as zip path (no group/image_id structure)
+                                    all_crops.append((crop_path, file_info.filename))
+                            elif file_info.filename.endswith('.json') and not all_metadata:
+                                # Extract metadata if we don't have one
+                                existing_zip.extract(file_info.filename, temp_dir)
+                                extracted_metadata = os.path.join(temp_dir, file_info.filename)
+                                if os.path.exists(extracted_metadata):
+                                    all_metadata.append(extracted_metadata)
+                except Exception as zip_error:
+                    print(f"Warning: Failed to extract from zip {crops_zip_path}: {zip_error}")
+        
+        if not all_crops:
+            print("⚠️ No crops found to create unified zip")
+            return None
+        
+        # Create unified zip file
+        groups_str = "_".join(sorted(groups_used)) if groups_used else "all"
+        unified_zip_path = os.path.join(tool_cache_dir, f"unified_crops_{groups_str}.zip")
+        
+        with zipfile.ZipFile(unified_zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            # Add all crops organized by group/image_id
+            for crop_path, zip_path in all_crops:
+                if os.path.exists(crop_path):
+                    zipf.write(crop_path, zip_path)
+            
+            # Add all metadata files
+            for metadata_path in all_metadata:
+                if os.path.exists(metadata_path):
+                    metadata_filename = os.path.basename(metadata_path)
+                    zipf.write(metadata_path, f"metadata/{metadata_filename}")
+        
+        # Clean up temp directory
+        temp_dir = os.path.join(tool_cache_dir, "temp_crops")
+        if os.path.exists(temp_dir):
+            import shutil
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        
+        if os.path.exists(unified_zip_path) and os.path.getsize(unified_zip_path) > 0:
+            print(f"✅ Created unified crops zip: {unified_zip_path} ({os.path.getsize(unified_zip_path)} bytes, {len(all_crops)} crops)")
+            return unified_zip_path
+        else:
+            print("⚠️ Failed to create unified crops zip")
+            return None
+            
+    except Exception as e:
+        print(f"⚠️ Error creating unified crops zip: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+
 def _collect_visual_outputs(result, visual_outputs_list, downloadable_files_list=None):
     """
     Collect visual outputs from tool result and add to visual_outputs_list.
@@ -814,6 +935,40 @@ def _collect_visual_outputs(result, visual_outputs_list, downloadable_files_list
             seen_paths.add(path)
     
     if isinstance(result, dict):
+        # Special handling for Single_Cell_Cropper_Tool: create unified zip for multi-image results
+        if "per_image" in result and len(result["per_image"]) > 1:
+            # Check if this is Single_Cell_Cropper_Tool results
+            is_cropper_tool = any(
+                "crops_zip_path" in img_result or "cell_crops_metadata_path" in img_result
+                for img_result in result["per_image"]
+                if isinstance(img_result, dict)
+            )
+            
+            if is_cropper_tool and downloadable_files_list is not None:
+                # Get tool_cache_dir from first result (all should be in same cache dir)
+                first_result = result["per_image"][0]
+                if isinstance(first_result, dict):
+                    # Try to extract tool_cache_dir from metadata path
+                    metadata_path = first_result.get("cell_crops_metadata_path")
+                    if metadata_path:
+                        tool_cache_dir = os.path.dirname(metadata_path)
+                    else:
+                        # Fallback: use crops_zip_path directory
+                        crops_zip_path = first_result.get("crops_zip_path")
+                        if crops_zip_path:
+                            tool_cache_dir = os.path.dirname(crops_zip_path)
+                        else:
+                            tool_cache_dir = None
+                    
+                    if tool_cache_dir:
+                        unified_zip = _create_unified_crops_zip(result["per_image"], tool_cache_dir)
+                        if unified_zip and os.path.exists(unified_zip):
+                            downloadable_files_list.append(unified_zip)
+                            print(f"✅ Added unified crops zip to downloadable files: {unified_zip}")
+                            # Don't add individual zip files for multi-image case
+                            return
+        
+        # Single image or non-cropper tool: use original logic
         # Special handling for Single_Cell_Cropper_Tool: collect crops_zip_path directly to downloadable_files
         if "crops_zip_path" in result and result["crops_zip_path"]:
             zip_path = result["crops_zip_path"]
@@ -821,12 +976,14 @@ def _collect_visual_outputs(result, visual_outputs_list, downloadable_files_list
                 downloadable_files_list.append(zip_path)
                 print(f"✅ Added crops zip to downloadable files: {zip_path}")
         
-        # Handle per_image structure (multi-image results)
+        # Handle per_image structure (multi-image results) - for non-cropper tools
         if "per_image" in result:
             for img_result in result["per_image"]:
                 if isinstance(img_result, dict):
+                    # Skip crops_zip_path for cropper tool (handled above)
                     # Special handling for Single_Cell_Cropper_Tool: collect crops_zip_path directly to downloadable_files
                     if "crops_zip_path" in img_result and img_result["crops_zip_path"]:
+                        # Only add if not already handled by unified zip
                         zip_path = img_result["crops_zip_path"]
                         if os.path.exists(zip_path) and downloadable_files_list is not None:
                             downloadable_files_list.append(zip_path)
