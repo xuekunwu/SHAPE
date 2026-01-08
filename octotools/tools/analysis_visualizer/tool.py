@@ -1037,31 +1037,45 @@ class Analysis_Visualizer_Tool(BaseTool):
             if len(cluster_indices) == 0:
                 continue
             
-            # Randomly sample cells (ensure we get different samples each time)
-            n_samples = min(crops_per_cluster, len(cluster_indices))
+            # Collect unique crop paths for this cluster (avoid duplicates)
+            unique_crop_paths = {}
+            for idx in cluster_indices:
+                crop_path = adata.obs.iloc[idx]['crop_path']
+                
+                # Handle path format
+                if isinstance(crop_path, (list, np.ndarray)) and len(crop_path) > 0:
+                    crop_path = crop_path[0] if isinstance(crop_path[0], str) else str(crop_path[0])
+                elif not isinstance(crop_path, str):
+                    crop_path = str(crop_path) if crop_path is not None else None
+                
+                # Normalize path (resolve relative paths, etc.)
+                if crop_path:
+                    crop_path = os.path.normpath(crop_path) if os.path.isabs(crop_path) or os.path.exists(crop_path) else crop_path
+                    # Only add if path exists and is unique
+                    if crop_path not in unique_crop_paths and (os.path.exists(crop_path) or crop_path.startswith('/')):
+                        unique_crop_paths[crop_path] = idx
+            
+            # Randomly sample from unique crop paths (ensure we get different images)
+            unique_paths_list = list(unique_crop_paths.keys())
+            n_samples = min(crops_per_cluster, len(unique_paths_list))
+            
             if n_samples > 0:
                 # Use different seed per cluster to ensure variety
                 cluster_seed = 42 + hash(str(cluster)) % 1000
                 random.seed(cluster_seed)
-                sampled_indices = random.sample(list(cluster_indices), n_samples)
+                # Sample unique crop paths (not indices)
+                sampled_paths = random.sample(unique_paths_list, n_samples)
                 # Reset to default seed after sampling
                 random.seed(42)
             else:
-                sampled_indices = []
+                sampled_paths = []
             
             for col_idx in range(n_cols):
                 ax = axes[row_idx, col_idx]
                 ax.axis('off')
                 
-                if col_idx < len(sampled_indices):
-                    idx = sampled_indices[col_idx]
-                    crop_path = adata.obs.iloc[idx]['crop_path']
-                    
-                    # Handle path format
-                    if isinstance(crop_path, (list, np.ndarray)) and len(crop_path) > 0:
-                        crop_path = crop_path[0] if isinstance(crop_path[0], str) else str(crop_path[0])
-                    elif not isinstance(crop_path, str):
-                        crop_path = str(crop_path) if crop_path is not None else None
+                if col_idx < len(sampled_paths):
+                    crop_path = sampled_paths[col_idx]
                     
                     if crop_path and os.path.exists(crop_path):
                         try:
@@ -1083,7 +1097,7 @@ class Analysis_Visualizer_Tool(BaseTool):
                                     spine.set_linewidth(2)
                         except Exception as e:
                             # Debug: print error for troubleshooting
-                            print(f"Warning: Failed to load crop for cluster {cluster}, idx {idx}: {e}")
+                            print(f"Warning: Failed to load crop for cluster {cluster}, path {crop_path}: {e}")
                             pass
                 
                 # Add cluster label on first column (adjusted position for tighter layout)
