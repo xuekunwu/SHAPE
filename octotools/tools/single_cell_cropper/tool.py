@@ -399,7 +399,7 @@ class Single_Cell_Cropper_Tool(BaseTool):
                 "cell_crops_metadata_path": metadata_path,
                 "cell_crop_objects": cell_crop_objects,  # Return CellCrop objects for Stage 2 tools
                 "visual_outputs": [],  # No summary visualization
-                "deliverables": deliverables,  # Include zip file for download
+                "crops_zip_path": crops_zip_path if crops_zip_path and os.path.exists(crops_zip_path) else None,  # Zip file path for download (not in deliverables)
                 "processing_statistics": stats  # Include processing statistics in result
             }
             

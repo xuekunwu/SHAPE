@@ -141,9 +141,24 @@ class Planner:
         return self.base_response
 
 
-    def analyze_query(self, question: str, image: str, bytes_mode: bool = False, conversation_context: str = "", **kwargs) -> str:
+    def analyze_query(self, question: str, image: str, bytes_mode: bool = False, conversation_context: str = "", group_images: List[Dict[str, Any]] = None, **kwargs) -> str:
+        """
+        Enhanced query analysis with multi-image and group comparison awareness.
+        
+        Inspired by Biomni's task decomposition approach, this method:
+        1. Identifies query type (counting vs. full analysis vs. comparison)
+        2. Detects multi-image and group comparison scenarios
+        3. Plans appropriate tool chain with group comparison support
+        """
         image_info = self.get_image_info(image)
         logger.debug(f"image_info: {image_info}")
+        
+        # Detect multi-image and group comparison scenarios
+        num_images = len(group_images) if group_images else 1
+        groups_used = set()
+        if group_images:
+            groups_used = {img.get("group", "default") for img in group_images if img.get("group")}
+        is_group_comparison = len(groups_used) > 1 if groups_used else False
         
         # Detect task domain using priority manager
         self.detected_domain = self.priority_manager.detect_task_domain(question, "")
@@ -166,6 +181,22 @@ class Planner:
             logger.info(f"Task domain detected: {self.detected_domain}")
             logger.debug(f"Excluded tools for this domain: {excluded_tools}")
             logger.debug(f"Available tools after filtering: {available_tools}")
+        
+        # Build multi-image context information
+        multi_image_context = ""
+        if num_images > 1:
+            groups_summary = ", ".join(sorted(groups_used)) if groups_used else "default"
+            multi_image_context = f"""
+MULTI-IMAGE CONTEXT:
+- Number of images: {num_images}
+- Groups detected: {len(groups_used)} ({groups_summary})
+- Group comparison: {'YES' if is_group_comparison else 'NO (all images in same group)'}
+
+IMPORTANT FOR MULTI-IMAGE PROCESSING:
+- Tools that process each image independently (segmenters, croppers) will process all {num_images} images in batch
+- Tools that merge all images (Cell_State_Analyzer_Tool, Analysis_Visualizer_Tool) will execute once, merging data from all images and groups
+- For group comparison queries, ensure tools are aware of group assignments for proper statistical comparison
+"""
 
         query_prompt = f"""
 Task: Analyze the given query with accompanying inputs and determine the MINIMUM necessary skills and tools needed to address it directly and precisely.
@@ -178,6 +209,7 @@ Available tools: {available_tools}
 Metadata for the tools: {toolbox_metadata}
 
 Image: {image_info}
+{multi_image_context}
 
 Query: {question}
 
@@ -187,31 +219,37 @@ CRITICAL INSTRUCTIONS - READ CAREFULLY:
 2. **Identify the core objective**: Determine the SINGLE main objective or task. If the query asks for:
    - "How many cells" → ONLY cell counting is needed (segmentation + counting)
    - "What cell states" or "analyze cell states" → Full cell state analysis is needed (preprocessing → segmentation → cropping → clustering → visualization)
-   - "Compare images" → Comparison analysis is needed (may require cell state analysis if comparing at cell state level)
+   - "Compare images" or "compare groups" → Comparison analysis is needed (requires cell state analysis for meaningful comparison)
    - "Detect objects" → Object detection is needed (NOT cell state analysis)
    
-3. **DO NOT over-extend**: 
+3. **Multi-image and Group Comparison Awareness**:
+   - If multiple images are present ({num_images} images): All independent processing tools (segmenters, croppers) will process each image, but merge-all tools (Cell_State_Analyzer_Tool, Analysis_Visualizer_Tool) will execute once
+   - If multiple groups are detected ({len(groups_used)} groups): The system supports group comparison - ensure tools are group-aware
+   - For group comparison queries: Full pipeline is typically needed to compare cell states across groups statistically
+   
+4. **DO NOT over-extend**: 
    - If the query asks for cell count, DO NOT suggest cell state analysis tools
    - If the query asks for cell state analysis, DO NOT suggest additional validation or biological interpretation tools
    - Only include tools that are DIRECTLY necessary to answer the query
    - Do NOT add "nice-to-have" or "comprehensive" analysis steps that are not explicitly requested
 
-4. **Select MINIMUM necessary tools**: 
+5. **Select MINIMUM necessary tools**: 
    - For "how many cells": Image_Preprocessor_Tool (if needed) → Cell_Segmenter_Tool → STOP (count is in segmentation result)
    - For "what cell states": Full pipeline (preprocessing → segmentation → cropping → clustering → visualization)
-   - For "compare cell states": Full pipeline + group comparison
+   - For "compare cell states" or "compare groups": Full pipeline + group comparison (Cell_State_Analyzer_Tool merges all groups, Analysis_Visualizer_Tool visualizes group differences)
    - Only add tools that are REQUIRED, not optional enhancements
 
-5. **Match query type to tool chain**:
+6. **Match query type to tool chain**:
    - Simple counting/detection queries → Minimal tool chain (preprocessing → segmentation)
    - State analysis queries → Full analysis chain (preprocessing → segmentation → cropping → clustering → visualization)
-   - Comparison queries → Full chain + comparison analysis
+   - Comparison queries → Full chain + group comparison (merge-all tools handle group comparison automatically)
 
 Your response should include:
 1. A precise summary of what the query is asking for (EXACTLY, without additions).
 2. A list of MINIMUM required skills (only what is necessary to answer the query).
 3. A list of MINIMUM necessary tools (only tools directly required to answer the query, no optional enhancements).
 4. A clear explanation of why each tool is necessary (must directly contribute to answering the query).
+5. If multiple images/groups are present, mention how group comparison will be handled.
 
 IMPORTANT: Do NOT suggest tools for analysis that is not explicitly requested in the query.
 """
@@ -407,8 +445,23 @@ IMPORTANT: Do NOT suggest tools for analysis that is not explicitly requested in
         # No rule matched - return None to proceed with LLM-based planning
         return None
     
-    def generate_next_step(self, question: str, image: str, query_analysis: str, memory: Memory, step_count: int, max_step_count: int, bytes_mode: bool = False, conversation_context: str = "", **kwargs) -> NextStep:
+    def generate_next_step(self, question: str, image: str, query_analysis: str, memory: Memory, step_count: int, max_step_count: int, bytes_mode: bool = False, conversation_context: str = "", group_images: List[Dict[str, Any]] = None, **kwargs) -> NextStep:
+        """
+        Enhanced next step generation with multi-image and group comparison awareness.
+        
+        This method now considers:
+        1. Multi-image scenarios (batch processing vs. merge-all tools)
+        2. Group comparison requirements
+        3. Tool execution mode (per-image vs. merge-all)
+        """
         image_info = self.get_image_info(image) if not bytes_mode else self.get_image_info_bytes(image)
+        
+        # Detect multi-image and group comparison scenarios
+        num_images = len(group_images) if group_images else 1
+        groups_used = set()
+        if group_images:
+            groups_used = {img.get("group", "default") for img in group_images if img.get("group")}
+        is_group_comparison = len(groups_used) > 1 if groups_used else False
         
         # Detect domain if not already detected (fallback to detection)
         if not hasattr(self, 'detected_domain') or not self.detected_domain:
@@ -446,6 +499,21 @@ IMPORTANT: Do NOT suggest tools for analysis that is not explicitly requested in
         # Get used tools from memory for dependency checking (use llm_safe to avoid loading full results)
         actions_for_tools = memory.get_actions(llm_safe=True)
         used_tools = [action.get('tool_name', '') for action in actions_for_tools if 'tool_name' in action]
+        
+        # Build multi-image context for prompt
+        multi_image_prompt_section = ""
+        if num_images > 1:
+            groups_summary = ", ".join(sorted(groups_used)) if groups_used else "default"
+            multi_image_prompt_section = f"""
+
+MULTI-IMAGE PROCESSING CONTEXT:
+- Processing {num_images} image(s) across {len(groups_used)} group(s): {groups_summary}
+- Group comparison enabled: {'YES - tools should compare groups statistically' if is_group_comparison else 'NO - all images in same group'}
+- Tool execution modes:
+  * Per-image tools (segmenters, croppers): Will process each of {num_images} images independently
+  * Merge-all tools (Cell_State_Analyzer_Tool, Analysis_Visualizer_Tool): Will execute ONCE, merging all {num_images} images with group labels for comparison
+- For group comparison queries: Ensure using merge-all tools after per-image processing to enable statistical group comparison
+"""
         
         # Note: We do NOT force Single_Cell_Cropper_Tool after segmentation.
         # The LLM should intelligently decide based on the query whether cropping is needed.
@@ -488,6 +556,7 @@ Query: {question}
 Image: {image if not bytes_mode else 'image.jpg'}
 Query Analysis: {query_analysis}
 Detected Task Domain: {self.detected_domain}
+{multi_image_prompt_section}
 
 Available Tools (organized by priority):
 {tools_by_priority}

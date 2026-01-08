@@ -15,6 +15,7 @@ class Image_Captioner_Tool(BaseTool):
                 "image": "str - The path to the image file.",
                 "prompt": "str - Optional custom prompt to guide the image captioning (default: 'Describe this image in detail.'). For cluster exemplars, a specialized prompt is automatically used unless overridden.",
                 "analysis_type": "str - Type of analysis to perform. Options: 'general' (default), 'cluster_exemplars' (for cluster exemplar montages), 'cell_morphology' (for cell morphological analysis).",
+                "query_cache_dir": "str - Optional directory for caching results (for consistency with other tools, not used).",
             },
             output_type="str - The generated caption for the image, with specialized analysis for cluster exemplars or cell morphology if requested.",
             demo_commands=[
@@ -38,7 +39,7 @@ class Image_Captioner_Tool(BaseTool):
         print(f"\nInitializing Image Captioner Tool with model: {model_string}")
         self.llm_engine = ChatOpenAI(model_string=model_string, is_multimodal=True, api_key=api_key) if model_string else None
 
-    def execute(self, image, prompt="Describe this image in detail.", analysis_type="general"):
+    def execute(self, image, prompt="Describe this image in detail.", analysis_type="general", query_cache_dir=None):
         """
         Execute image captioning.
         
@@ -49,6 +50,7 @@ class Image_Captioner_Tool(BaseTool):
                 - "general": General image description (default)
                 - "cluster_exemplars": Specialized analysis for cluster exemplar montages
                 - "cell_morphology": Focused analysis on cell morphological features
+            query_cache_dir: Optional directory for caching results (for consistency with other tools, not used)
         
         Returns:
             str: Generated caption

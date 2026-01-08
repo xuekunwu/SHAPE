@@ -720,6 +720,84 @@ def _check_tool_execution_error(result, tool_name: str) -> tuple[bool, str]:
     return False, ""  # No error detected
 
 
+def _collect_group_info(image_items: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Unified function to collect group information from image items.
+    Returns dict with: groups_info (count dict), groups_summary (formatted string), groups_used (set)
+    """
+    groups_info = {}
+    for img in image_items:
+        g = img.get("group", "default")
+        groups_info[g] = groups_info.get(g, 0) + 1
+    groups_used = set(groups_info.keys())
+    groups_summary = ", ".join([f"{g}({c})" for g, c in sorted(groups_info.items())])
+    return {
+        "groups_info": groups_info,
+        "groups_summary": groups_summary,
+        "groups_used": groups_used,
+        "num_groups": len(groups_used)
+    }
+
+
+def _load_image_for_display(image_path: str) -> Optional[Image.Image]:
+    """
+    Unified function to load and prepare image for display.
+    Handles format conversion and validation.
+    Returns PIL Image or None if failed.
+    """
+    if not image_path or not os.path.exists(image_path):
+        return None
+    
+    try:
+        original_image = Image.open(image_path)
+        supported_formats = ['PNG', 'JPEG', 'JPG', 'GIF', 'WEBP']
+        file_ext = os.path.splitext(image_path)[1].upper().lstrip('.')
+        
+        # Convert mode if needed
+        if original_image.mode not in ['RGB', 'L', 'RGBA']:
+            try:
+                original_image = original_image.convert('RGB')
+            except Exception as e:
+                print(f"Warning: Failed to convert image {image_path} to RGB: {e}")
+                return None
+        
+        # Convert unsupported formats to PNG
+        if file_ext not in supported_formats:
+            from io import BytesIO
+            png_buffer = BytesIO()
+            if original_image.mode in ('RGBA', 'LA', 'P'):
+                rgb_image = Image.new('RGB', original_image.size, (255, 255, 255))
+                if original_image.mode == 'P':
+                    original_image = original_image.convert('RGBA')
+                rgb_image.paste(original_image, mask=original_image.split()[-1] if original_image.mode in ('RGBA', 'LA') else None)
+                original_image = rgb_image
+            elif original_image.mode != 'RGB':
+                original_image = original_image.convert('RGB')
+            original_image.save(png_buffer, format='PNG')
+            png_buffer.seek(0)
+            original_image = Image.open(png_buffer)
+        
+        # Validate image size
+        if original_image.size[0] == 0 or original_image.size[1] == 0:
+            print(f"Warning: Invalid image size: {image_path}")
+            return None
+        
+        # Validate image data
+        try:
+            img_array = np.array(original_image)
+            if img_array.size == 0 or np.isnan(img_array).any():
+                print(f"Warning: Invalid image data in {image_path}")
+                return None
+        except Exception as e:
+            print(f"Warning: Failed to validate image data for {image_path}: {e}")
+            return None
+        
+        return original_image
+    except Exception as e:
+        print(f"Warning: Failed to load image {image_path} for display. Error: {e}")
+        return None
+
+
 def _collect_visual_outputs(result, visual_outputs_list, downloadable_files_list=None):
     """
     Collect visual outputs from tool result and add to visual_outputs_list.
@@ -736,14 +814,30 @@ def _collect_visual_outputs(result, visual_outputs_list, downloadable_files_list
             seen_paths.add(path)
     
     if isinstance(result, dict):
+        # Special handling for Single_Cell_Cropper_Tool: collect crops_zip_path directly to downloadable_files
+        if "crops_zip_path" in result and result["crops_zip_path"]:
+            zip_path = result["crops_zip_path"]
+            if os.path.exists(zip_path) and downloadable_files_list is not None:
+                downloadable_files_list.append(zip_path)
+                print(f"✅ Added crops zip to downloadable files: {zip_path}")
+        
         # Handle per_image structure (multi-image results)
         if "per_image" in result:
             for img_result in result["per_image"]:
                 if isinstance(img_result, dict):
+                    # Special handling for Single_Cell_Cropper_Tool: collect crops_zip_path directly to downloadable_files
+                    if "crops_zip_path" in img_result and img_result["crops_zip_path"]:
+                        zip_path = img_result["crops_zip_path"]
+                        if os.path.exists(zip_path) and downloadable_files_list is not None:
+                            downloadable_files_list.append(zip_path)
+                            print(f"✅ Added crops zip to downloadable files: {zip_path}")
+                    
                     # Collect from deliverables (preferred) or visual_outputs list
                     if "deliverables" in img_result:
                         for path in img_result["deliverables"]:
-                            add_path(path)
+                            # Skip zip files from deliverables (handled separately above)
+                            if not (isinstance(path, str) and path.lower().endswith('.zip')):
+                                add_path(path)
                     elif "visual_outputs" in img_result:
                         for path in img_result["visual_outputs"]:
                             add_path(path)
@@ -754,6 +848,7 @@ def _collect_visual_outputs(result, visual_outputs_list, downloadable_files_list
         else:
             # Single image result: collect from top level
             # Check deliverables first (preferred), then visual_outputs for backward compatibility
+            # Skip zip files from deliverables (handled separately above)
             if "deliverables" in result:
                 for path in result["deliverables"]:
                     add_path(path)
@@ -1201,14 +1296,12 @@ class Solver:
         
         if image_context and img_path_for_tools:
             if len(image_items) > 1:
-                # Enhanced group comparison information
-                groups_used = set(img.get("group", "") for img in image_items if img.get("group"))
-                group_counts = {}
-                for img in image_items:
-                    g = img.get("group", "default")
-                    group_counts[g] = group_counts.get(g, 0) + 1
+                # Enhanced group comparison information using unified function
+                group_data = _collect_group_info(image_items)
+                groups_used = group_data["groups_used"]
+                group_counts = group_data["groups_info"]
                 
-                if groups_used and len(groups_used) > 1:
+                if len(groups_used) > 1:
                     # Multiple groups detected - highlight comparison capability
                     group_summary = ", ".join([f"{g} ({group_counts[g]})" for g in sorted(groups_used)])
                     group_label = f" ({len(image_items)} images from {len(groups_used)} groups: {group_summary})"
@@ -1234,7 +1327,13 @@ class Solver:
         query_analysis_start = time.time()
         try:
             conversation_text = self._format_conversation_history()
-            query_analysis = self.planner.analyze_query(user_query, analysis_img_ref, conversation_text)
+            # Pass group_images to planner for multi-image and group comparison awareness
+            query_analysis = self.planner.analyze_query(
+                user_query, 
+                analysis_img_ref, 
+                conversation_context=conversation_text,
+                group_images=image_items  # Pass all images for multi-image planning
+            )
             query_analysis_end = time.time()
             query_analysis_time = query_analysis_end - query_analysis_start
             
@@ -1313,62 +1412,16 @@ class Solver:
             yield messages, error_msg, [], visual_description, "**Progress**: ⚠️ Query analysis error"
             return
 
+        # Load original images for display using unified function
         if image_items and len(image_items) > 0:
             for img_item in image_items:
                 original_img_path = img_item.get("image_path")
-                if original_img_path and os.path.exists(original_img_path):
-                    try:
-                        original_image = Image.open(original_img_path)
-                        
-                        supported_formats = ['PNG', 'JPEG', 'JPG', 'GIF', 'WEBP']
-                        file_ext = os.path.splitext(original_img_path)[1].upper().lstrip('.')
-                        
-                        if original_image.mode not in ['RGB', 'L', 'RGBA']:
-                            try:
-                                original_image = original_image.convert('RGB')
-                            except Exception as e:
-                                print(f"Warning: Failed to convert image {original_img_path} to RGB: {e}")
-                                continue
-                        
-                        if file_ext not in supported_formats:
-                            print(f"Converting unsupported format {file_ext} to PNG for display")
-                            from io import BytesIO
-                            png_buffer = BytesIO()
-                            if original_image.mode in ('RGBA', 'LA', 'P'):
-                                rgb_image = Image.new('RGB', original_image.size, (255, 255, 255))
-                                if original_image.mode == 'P':
-                                    original_image = original_image.convert('RGBA')
-                                rgb_image.paste(original_image, mask=original_image.split()[-1] if original_image.mode in ('RGBA', 'LA') else None)
-                                original_image = rgb_image
-                            elif original_image.mode != 'RGB':
-                                original_image = original_image.convert('RGB')
-                            original_image.save(png_buffer, format='PNG')
-                            png_buffer.seek(0)
-                            original_image = Image.open(png_buffer)
-                        
-                        if original_image.size[0] == 0 or original_image.size[1] == 0:
-                            print(f"Warning: Invalid image size: {original_img_path}")
-                            continue
-                        
-                        try:
-                            img_array = np.array(original_image)
-                            if img_array.size == 0 or np.isnan(img_array).any():
-                                print(f"Warning: Invalid image data in {original_img_path}")
-                                continue
-                        except Exception as e:
-                            print(f"Warning: Failed to validate image data for {original_img_path}: {e}")
-                            continue
-                        
-                        filename = os.path.basename(original_img_path)
-                        label = f"Original Image: {filename}"
-                        self.visual_outputs_for_gradio.insert(0, (original_image, label))
-                        print(f"Successfully added original image to visual outputs: {filename}")
-                        
-                    except Exception as e:
-                        print(f"Warning: Failed to load original image {original_img_path} for display. Error: {e}")
-                        import traceback
-                        print(f"Full traceback: {traceback.format_exc()}")
-                        continue
+                original_image = _load_image_for_display(original_img_path)
+                if original_image:
+                    filename = os.path.basename(original_img_path)
+                    label = f"Original Image: {filename}"
+                    self.visual_outputs_for_gradio.insert(0, (original_image, label))
+                    print(f"Successfully added original image to visual outputs: {filename}")
         
         # Update visual description after adding original images
         if self.visual_outputs_for_gradio:
@@ -1395,7 +1448,17 @@ class Solver:
             yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, progress_msg
 
             conversation_text = self._format_conversation_history()
-            next_step = self.planner.generate_next_step(user_query, analysis_img_ref, query_analysis, self.memory, step_count, self.max_steps, conversation_context=conversation_text)
+            # Pass group_images to planner for multi-image and group comparison awareness
+            next_step = self.planner.generate_next_step(
+                user_query, 
+                analysis_img_ref, 
+                query_analysis, 
+                self.memory, 
+                step_count, 
+                self.max_steps, 
+                conversation_context=conversation_text,
+                group_images=image_items  # Pass all images for multi-image planning
+            )
             context, sub_goal, tool_name = self.planner.extract_context_subgoal_and_tool(next_step)
             context = context or self.agent_state.last_context or ""
             sub_goal = sub_goal or self.agent_state.last_sub_goal or ""
@@ -1464,14 +1527,10 @@ class Solver:
             
             if should_merge_all_images:
                 # For tools that merge all images, execute once outside the loop
-                # Enhanced logging for group comparison
-                groups_info = {}
-                for img in image_items:
-                    g = img.get("group", "default")
-                    groups_info[g] = groups_info.get(g, 0) + 1
-                groups_summary = ", ".join([f"{g}({c})" for g, c in sorted(groups_info.items())])
+                # Enhanced logging for group comparison using unified function
+                group_data = _collect_group_info(image_items)
                 print(f"🔍 Processing {len(image_items)} image(s) with {tool_name} (merge-all mode - single execution)")
-                print(f"   Groups: {groups_summary}")
+                print(f"   Groups: {group_data['groups_summary']}")
                 
                 # Use the first image's path and ID for command generation (tool will merge all data internally)
                 first_img_item = image_items[0] if image_items else {}
@@ -1523,14 +1582,10 @@ class Solver:
                 
             else:
                 # For tools that process each image separately, execute in loop
-                # Enhanced logging for batch processing with group information
-                groups_info = {}
-                for img in image_items:
-                    g = img.get("group", "default")
-                    groups_info[g] = groups_info.get(g, 0) + 1
-                groups_summary = ", ".join([f"{g}({c})" for g, c in sorted(groups_info.items())])
+                # Enhanced logging for batch processing with group information using unified function
+                group_data = _collect_group_info(image_items)
                 print(f"🔍 Processing {len(image_items)} image(s) with {tool_name} (batch processing mode)")
-                print(f"   Groups: {groups_summary}")
+                print(f"   Groups: {group_data['groups_summary']}")
                 
                 for img_idx, img_item in enumerate(image_items):
                     img_group = img_item.get('group', 'unknown')
@@ -2508,11 +2563,10 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
         yield new_history, "", [], "**Progress**: Waiting for image upload", [], state
         return
     
-    # Enhanced group context for multi-group comparison
-    num_groups = len(group_summary)
-    if num_groups > 1:
-        groups_info = ", ".join([f"{g}({c})" for g, c in sorted(group_summary.items())])
-        print(f"📊 Multi-group analysis: {num_groups} groups detected ({groups_info})")
+    # Enhanced group context for multi-group comparison using unified function
+    if len(group_summary) > 1:
+        group_data = _collect_group_info(all_group_images)
+        print(f"📊 Multi-group analysis: {group_data['num_groups']} groups detected ({group_data['groups_summary']})")
     
     # Use first image as representative for context
     representative = all_group_images[0]
