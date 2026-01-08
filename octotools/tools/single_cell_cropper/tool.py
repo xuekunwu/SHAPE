@@ -11,6 +11,8 @@ import json
 from octotools.models.utils import VisualizationConfig
 from octotools.models.task_state import CellCrop
 import tifffile
+from octotools.models.image_data import ImageData
+from octotools.utils.image_processor import ImageProcessor
 
 class Single_Cell_Cropper_Tool(BaseTool):
     def __init__(self):
@@ -112,51 +114,62 @@ class Single_Cell_Cropper_Tool(BaseTool):
                 original_img = cv2.imread(processed_image_path, cv2.IMREAD_GRAYSCALE)
                 is_multi_channel = False
             else:
-                # Load original image - check if it's a multi-channel TIFF
-                original_image_lower = original_image.lower()
-                is_tiff = original_image_lower.endswith('.tif') or original_image_lower.endswith('.tiff')
-                
-                if is_tiff:
-                    # Try loading with tifffile to handle multi-channel TIFF
-                    try:
-                        original_img_full = tifffile.imread(original_image)
-                        # Check if multi-channel
-                        if original_img_full.ndim == 3:
-                            if original_img_full.shape[2] <= 4:  # Likely (H, W, C)
-                                print(f"Detected multi-channel TIFF with {original_img_full.shape[2]} channels. Will preserve all channels in crops.")
-                                original_img = original_img_full  # Keep full multi-channel image
-                                is_multi_channel = True
-                            elif original_img_full.shape[0] <= 4:  # Likely (C, H, W)
-                                print(f"Detected multi-channel TIFF with {original_img_full.shape[0]} channels. Will preserve all channels in crops.")
-                                # Convert (C, H, W) to (H, W, C) for easier cropping
-                                original_img = np.transpose(original_img_full, (1, 2, 0))
+                # Load original image using unified abstraction layer
+                try:
+                    img_data = ImageProcessor.load_image(original_image)
+                    print(f"Loaded image: {img_data.shape}, channels: {img_data.num_channels}")
+                    
+                    # Get image data in (H, W, C) format
+                    original_img = img_data.data
+                    is_multi_channel = img_data.is_multi_channel
+                    
+                    if is_multi_channel:
+                        print(f"Detected multi-channel image with {img_data.num_channels} channels. Will preserve all channels in crops.")
+                except Exception as load_error:
+                    # Fallback to legacy loading for backward compatibility
+                    print(f"Warning: Failed to load with ImageProcessor: {load_error}, trying legacy method")
+                    original_image_lower = original_image.lower()
+                    is_tiff = original_image_lower.endswith('.tif') or original_image_lower.endswith('.tiff')
+                    
+                    if is_tiff:
+                        try:
+                            original_img_full = tifffile.imread(original_image)
+                            if original_img_full.ndim == 2:
+                                original_img = original_img_full
+                                is_multi_channel = False
+                            elif original_img_full.ndim == 3:
+                                if original_img_full.shape[2] <= 4:  # (H, W, C)
+                                    original_img = original_img_full
+                                    is_multi_channel = True
+                                elif original_img_full.shape[0] <= 4:  # (C, H, W)
+                                    original_img = np.transpose(original_img_full, (1, 2, 0))
+                                    is_multi_channel = True
+                                else:
+                                    original_img = original_img_full[:, :, 0] if original_img_full.shape[2] < original_img_full.shape[0] else original_img_full[0, :, :]
+                                    is_multi_channel = False
+                            elif original_img_full.ndim == 4:
+                                if original_img_full.shape[3] <= 4:  # (Z, H, W, C)
+                                    original_img = original_img_full[0, :, :, :]
+                                else:  # (C, Z, H, W)
+                                    original_img = np.transpose(original_img_full[:, 0, :, :], (1, 2, 0))
                                 is_multi_channel = True
                             else:
-                                # Assume 2D + depth, use first slice
-                                original_img = original_img_full[:, :, 0] if original_img_full.shape[2] < original_img_full.shape[0] else original_img_full[0, :, :]
+                                original_img = original_img_full
                                 is_multi_channel = False
-                        elif original_img_full.ndim == 4:
-                            # 4D: use first slice, check channels
-                            if original_img_full.shape[3] <= 4:  # (Z, H, W, C)
-                                print(f"Detected 4D multi-channel TIFF. Using first slice with {original_img_full.shape[3]} channels.")
-                                original_img = original_img_full[0, :, :, :]  # (H, W, C)
-                                is_multi_channel = True
-                            else:  # (C, Z, H, W)
-                                print(f"Detected 4D multi-channel TIFF. Using first slice with {original_img_full.shape[0]} channels.")
-                                original_img = np.transpose(original_img_full[:, 0, :, :], (1, 2, 0))  # (H, W, C)
-                                is_multi_channel = True
-                        else:
-                            # 2D grayscale
-                            original_img = original_img_full
+                        except Exception as tiff_error:
+                            print(f"Warning: Failed to load TIFF: {tiff_error}, trying cv2")
+                            original_img = cv2.imread(original_image, cv2.IMREAD_GRAYSCALE)
                             is_multi_channel = False
-                    except Exception as tiff_error:
-                        print(f"Warning: Failed to load TIFF with tifffile: {tiff_error}, trying cv2")
+                    else:
                         original_img = cv2.imread(original_image, cv2.IMREAD_GRAYSCALE)
                         is_multi_channel = False
-                else:
-                    # For non-TIFF files, use cv2
-                    original_img = cv2.imread(original_image, cv2.IMREAD_GRAYSCALE)
-                    is_multi_channel = False
+                    
+                    if original_img is None:
+                        raise ValueError(f"Cannot read image: {original_image}")
+                    
+                    # Ensure (H, W, C) format for legacy loading
+                    if original_img.ndim == 2:
+                        original_img = original_img[:, :, np.newaxis]  # Add channel dimension
             
             # Setup output directory early, so we can save metadata even on errors
             if query_cache_dir is None:
@@ -512,10 +525,14 @@ class Single_Cell_Cropper_Tool(BaseTool):
                 continue
                 
             # Crop from original image (preserve all channels if multi-channel)
-            if is_multi_channel and original_img.ndim == 3:
+            # original_img is already in (H, W, C) format from ImageData
+            if original_img.ndim == 3:
                 cell_crop = original_img[new_minr:new_maxr, new_minc:new_maxc, :]  # Preserve all channels
             else:
+                # Should not happen if using ImageData, but handle for backward compatibility
                 cell_crop = original_img[new_minr:new_maxr, new_minc:new_maxc]
+                if cell_crop.ndim == 2:
+                    cell_crop = cell_crop[:, :, np.newaxis]  # Add channel dimension
             
             # Validate crop data
             if cell_crop.size == 0 or np.isnan(cell_crop).any() or np.isinf(cell_crop).any():

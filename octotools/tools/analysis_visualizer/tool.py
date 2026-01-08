@@ -18,6 +18,8 @@ from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 from PIL import Image
 import cv2
 import tifffile
+from octotools.models.image_data import ImageData
+from octotools.utils.image_processor import ImageProcessor
 
 # Add the project root to the Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -751,82 +753,37 @@ class Analysis_Visualizer_Tool(BaseTool):
     def _load_and_resize_crop(self, crop_path: str, size: tuple = (60, 60)) -> Optional[np.ndarray]:
         """Load and resize cell crop image for display in UMAP plot. Supports multi-channel TIFF with merged RGB view."""
         try:
-            # Try to load with PIL first (handles various formats)
             if os.path.exists(crop_path):
-                # Check if it's a multi-channel TIFF that needs merging
-                crop_path_lower = crop_path.lower()
-                is_tiff = crop_path_lower.endswith('.tif') or crop_path_lower.endswith('.tiff')
-                
-                if is_tiff:
-                    # Try loading with tifffile to check if multi-channel
-                    try:
-                        img_full = tifffile.imread(crop_path)
-                        
-                        # Check if multi-channel
-                        if img_full.ndim == 3 and img_full.shape[2] > 1:
-                            # Multi-channel TIFF: create merged RGB view
-                            def normalize_channel(x):
-                                x = x.astype(np.float32)
-                                x_min = x.min()
-                                x_max = x.max()
-                                if x_max > x_min:
-                                    return (x - x_min) / (x_max - x_min + 1e-8)
-                                return x
-                            
-                            num_channels = img_full.shape[2]
-                            # Normalize all channels
-                            normalized_channels = []
-                            for c in range(num_channels):
-                                normalized_channels.append(normalize_channel(img_full[:, :, c]))
-                            
-                            # Create merged RGB: Bright-field -> gray, GFP -> green
-                            merged = np.zeros((img_full.shape[0], img_full.shape[1], 3), dtype=np.float32)
-                            
-                            if num_channels >= 1:
-                                bf_n = normalized_channels[0]  # Bright-field
-                                merged[:, :, 0] = bf_n  # Red
-                                merged[:, :, 1] = bf_n  # Green (gray component)
-                                merged[:, :, 2] = bf_n  # Blue (gray component)
-                            
-                            if num_channels >= 2:
-                                gfp_n = normalized_channels[1]  # GFP
-                                merged[:, :, 1] = bf_n + gfp_n  # Green = BF + GFP
-                            
-                            if num_channels >= 3:
-                                # If there's a third channel (e.g., DAPI), add to blue
-                                dapi_n = normalized_channels[2]
-                                merged[:, :, 2] = bf_n + dapi_n  # Blue = BF + DAPI
-                            
-                            # Clip and convert to uint8
-                            merged = np.clip(merged, 0, 1)
-                            merged_uint8 = (merged * 255).astype(np.uint8)
-                            
-                            # Resize
-                            img_pil = Image.fromarray(merged_uint8, mode='RGB')
-                            img_pil = img_pil.resize(size, Image.Resampling.LANCZOS)
-                            return np.array(img_pil)
-                    except Exception:
-                        # Fall through to PIL loading if tifffile fails
-                        pass
-                
-                # Try PIL for single-channel or already-merged images
+                # Use unified ImageProcessor to load and create merged RGB view
                 try:
-                    img = Image.open(crop_path)
-                    if img.mode != 'RGB':
-                        img = img.convert('RGB')
-                    img = img.resize(size, Image.Resampling.LANCZOS)
-                    return np.array(img)
-                except Exception:
-                    # Fallback to cv2
+                    img_data = ImageProcessor.load_image(crop_path)
+                    
+                    # Create merged RGB view for display
+                    merged_rgb = ImageProcessor.create_merged_rgb_for_display(img_data)
+                    
+                    # Resize
+                    img_pil = Image.fromarray(merged_rgb, mode='RGB')
+                    img_pil = img_pil.resize(size, Image.Resampling.LANCZOS)
+                    return np.array(img_pil)
+                except Exception as load_error:
+                    # Fallback to PIL loading for backward compatibility
                     try:
-                        img = cv2.imread(crop_path, cv2.IMREAD_GRAYSCALE)
-                        if img is not None:
-                            # Convert grayscale to RGB
-                            img_rgb = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
-                            img_resized = cv2.resize(img_rgb, size, interpolation=cv2.INTER_LANCZOS4)
-                            return img_resized
+                        img = Image.open(crop_path)
+                        if img.mode != 'RGB':
+                            img = img.convert('RGB')
+                        img = img.resize(size, Image.Resampling.LANCZOS)
+                        return np.array(img)
                     except Exception:
-                        pass
+                        # Fallback to cv2
+                        try:
+                            img = cv2.imread(crop_path, cv2.IMREAD_GRAYSCALE)
+                            if img is not None:
+                                # Convert grayscale to RGB
+                                img_rgb = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
+                                img_resized = cv2.resize(img_rgb, size, interpolation=cv2.INTER_LANCZOS4)
+                                return img_resized
+                        except Exception:
+                            pass
             return None
         except Exception:
             return None

@@ -2,7 +2,7 @@ import os
 import re
 from PIL import Image
 from io import BytesIO
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Tuple, Optional
 
 from octotools.engine.openai import ChatOpenAI
 from octotools.models.memory import Memory
@@ -10,6 +10,8 @@ from octotools.models.formatters import QueryAnalysis, NextStep, MemoryVerificat
 from octotools.models.utils import normalize_tool_name
 from octotools.models.tool_priority import ToolPriorityManager, ToolPriority, TOOL_DEPENDENCIES
 from octotools.utils import logger, ResponseParser
+from octotools.utils.image_processor import ImageProcessor
+from octotools.models.image_data import ImageData
 
 class Planner:
     def __init__(self, llm_engine_name: str, toolbox_metadata: dict = None, available_tools: List = None, api_key: str = None):
@@ -79,16 +81,37 @@ class Planner:
         return "\n\n".join(formatted)
 
     def get_image_info(self, image_path: str) -> Dict[str, Any]:
+        """
+        Enhanced image info extraction using unified ImageProcessor.
+        Extracts comprehensive metadata including channel information for better planning.
+        """
         image_info = {}
         if image_path and os.path.isfile(image_path):
             image_info["image_path"] = image_path
             try:
-                with Image.open(image_path) as img:
-                    width, height = img.size
-                image_info.update({
-                    "width": width,
-                    "height": height
-                })
+                # Use unified ImageProcessor for comprehensive metadata
+                try:
+                    img_data = ImageProcessor.load_image(image_path)
+                    image_info.update({
+                        "width": img_data.shape[1],
+                        "height": img_data.shape[0],
+                        "num_channels": img_data.num_channels,
+                        "is_multi_channel": img_data.is_multi_channel,
+                        "channel_names": img_data.channel_names,
+                        "dtype": str(img_data.dtype),
+                        "format": "multi-channel TIFF" if img_data.is_multi_channel else "single-channel"
+                    })
+                except Exception as img_proc_error:
+                    # Fallback to basic PIL info if ImageProcessor fails
+                    logger.debug(f"ImageProcessor failed, using PIL fallback: {img_proc_error}")
+                    with Image.open(image_path) as img:
+                        width, height = img.size
+                    image_info.update({
+                        "width": width,
+                        "height": height,
+                        "num_channels": 1,  # Default assumption
+                        "is_multi_channel": False
+                    })
             except Exception as e:
                 logger.error(f"Error processing image file: {str(e)}")
         return image_info
@@ -299,6 +322,71 @@ IMPORTANT: Do NOT suggest tools for analysis that is not explicitly requested in
         # Default: if unclear, don't force full analysis (let LLM decide)
         return False
     
+    def _try_rule_based_decision(self, question: str, image: str, memory: Memory, available_tools: List[str]) -> Optional[NextStep]:
+        """
+        Rule-based decision making for common scenarios to avoid LLM calls.
+        Returns NextStep if a rule matches, None otherwise.
+        
+        This improves planning efficiency by handling simple, well-defined cases directly.
+        """
+        question_lower = question.lower()
+        actions = memory.get_actions(llm_safe=True)
+        used_tools = [action.get('tool_name', '') for action in actions if 'tool_name' in action]
+        
+        # Rule 1: Simple counting query with no steps taken
+        # Pattern: "how many cells" + no tools used -> Image_Preprocessor_Tool or Segmenter
+        if not used_tools:
+            if any(kw in question_lower for kw in ['how many', 'count', 'number of']):
+                # Check image type to select appropriate segmenter
+                image_info = self.get_image_info(image) if image else {}
+                is_multi_channel = image_info.get('is_multi_channel', False)
+                
+                # Select segmenter based on query keywords
+                if 'organoid' in question_lower and 'Organoid_Segmenter_Tool' in available_tools:
+                    return NextStep(
+                        justification="Rule-based: Simple counting query for organoids. Starting with Organoid_Segmenter_Tool.",
+                        context="No previous steps. Image ready for segmentation.",
+                        sub_goal="Segment organoids in the image and count them.",
+                        tool_name="Organoid_Segmenter_Tool"
+                    )
+                elif 'nuclei' in question_lower and 'Nuclei_Segmenter_Tool' in available_tools:
+                    return NextStep(
+                        justification="Rule-based: Simple counting query for nuclei. Starting with Nuclei_Segmenter_Tool.",
+                        context="No previous steps. Image ready for segmentation.",
+                        sub_goal="Segment nuclei in the image and count them.",
+                        tool_name="Nuclei_Segmenter_Tool"
+                    )
+                elif 'Cell_Segmenter_Tool' in available_tools:
+                    return NextStep(
+                        justification="Rule-based: Simple counting query for cells. Starting with Cell_Segmenter_Tool.",
+                        context="No previous steps. Image ready for segmentation.",
+                        sub_goal="Segment cells in the image and count them.",
+                        tool_name="Cell_Segmenter_Tool"
+                    )
+        
+        # Rule 2: Counting query after segmentation -> STOP (count is in result)
+        # Pattern: "how many" + segmentation tool used -> No next step needed
+        if used_tools:
+            last_tool = used_tools[-1]
+            segmentation_tools = ["Cell_Segmenter_Tool", "Nuclei_Segmenter_Tool", "Organoid_Segmenter_Tool"]
+            if last_tool in segmentation_tools:
+                if any(kw in question_lower for kw in ['how many', 'count', 'number of']):
+                    # Check if it's about cell states (needs full analysis)
+                    if not any(state_kw in question_lower for state_kw in ['cell state', 'cell states', 'state', 'cluster', 'umap']):
+                        logger.info("Rule-based: Counting query completed after segmentation. Count available in result.")
+                        # Return None to signal completion (handled by caller)
+                        return None
+        
+        # Rule 3: Multi-channel image detection -> Pre-select multi-channel aware tools
+        # This is informational, not a direct decision, but helps in planning
+        image_info = self.get_image_info(image) if image else {}
+        if image_info.get('is_multi_channel', False):
+            num_channels = image_info.get('num_channels', 1)
+            logger.debug(f"Rule-based: Detected multi-channel image ({num_channels} channels). Planning will prioritize multi-channel aware tools.")
+        
+        # No rule matched - return None to proceed with LLM-based planning
+        return None
+    
     def generate_next_step(self, question: str, image: str, query_analysis: str, memory: Memory, step_count: int, max_step_count: int, bytes_mode: bool = False, conversation_context: str = "", **kwargs) -> NextStep:
         image_info = self.get_image_info(image) if not bytes_mode else self.get_image_info_bytes(image)
         
@@ -312,6 +400,15 @@ IMPORTANT: Do NOT suggest tools for analysis that is not explicitly requested in
             self.detected_domain,
             exclude_excluded=True
         )
+        
+        # Try rule-based decision first (efficiency optimization)
+        rule_decision = self._try_rule_based_decision(question, image, memory, available_tools)
+        if rule_decision is not None:
+            # Rule matched - return rule-based decision (saves LLM call)
+            logger.info(f"✅ Rule-based decision applied: {rule_decision.tool_name}")
+            return rule_decision
+        # If rule_decision is None but we want to signal completion, handle it here
+        # (For now, continue with LLM-based planning)
         
         # Filter metadata to match filtered tools
         toolbox_metadata = {

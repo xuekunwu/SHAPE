@@ -12,6 +12,8 @@ from octotools.models.utils import VisualizationConfig
 import traceback
 import tifffile
 import tempfile
+from octotools.models.image_data import ImageData
+from octotools.utils.image_processor import ImageProcessor
 
 def check_image_quality(img, min_brightness=50, max_brightness=200, max_cv_threshold=0.3):
     """
@@ -237,66 +239,59 @@ class Cell_Segmenter_Tool(BaseTool):
                     "summary": "Image file does not exist"
                 }
             
-            # Load and preprocess image
-            # Check if it's a multi-channel TIFF file
-            image_path_lower = image_path.lower()
-            is_tiff = image_path_lower.endswith('.tif') or image_path_lower.endswith('.tiff')
-            
-            if is_tiff:
-                # Try loading with tifffile first to handle multi-channel TIFF
-                try:
-                    img_full = tifffile.imread(image_path)
-                    # Check if multi-channel (shape: (H, W, C) or (C, H, W) or (Z, H, W, C))
-                    if img_full.ndim == 2:
-                        # Single channel 2D image - use directly
-                        print(f"Detected single-channel 2D TIFF. Using directly for segmentation.")
-                        img = img_full
-                    elif img_full.ndim == 3:
-                        # 3D: could be (H, W, C) or (C, H, W) or (H, W, 1) single channel
-                        if img_full.shape[2] > 1 and img_full.shape[2] <= 4:  # Multi-channel in last dimension (H, W, C)
-                            print(f"Detected multi-channel TIFF with {img_full.shape[2]} channels. Using first channel (bright-field) for segmentation.")
-                            img = img_full[:, :, 0]  # Extract first channel (bright-field)
-                        elif img_full.shape[0] > 1 and img_full.shape[0] <= 4:  # Multi-channel in first dimension (C, H, W)
-                            print(f"Detected multi-channel TIFF with {img_full.shape[0]} channels. Using first channel (bright-field) for segmentation.")
-                            img = img_full[0, :, :]  # Extract first channel (bright-field)
+            # Load image using unified abstraction layer
+            try:
+                img_data = ImageProcessor.load_image(image_path)
+                print(f"Loaded image: {img_data.shape}, channels: {img_data.num_channels}")
+                
+                # Extract first channel for segmentation (bright-field/phase contrast)
+                # Convert to float32 format required by Cellpose
+                img = img_data.to_segmentation_input(channel_idx=0)
+                
+                if img_data.is_multi_channel:
+                    print(f"Detected multi-channel image with {img_data.num_channels} channels. Using first channel ({img_data.channel_names[0] if img_data.channel_names else 'channel 0'}) for segmentation.")
+            except Exception as load_error:
+                # Fallback to legacy loading for backward compatibility
+                print(f"Warning: Failed to load with ImageProcessor: {load_error}, trying legacy method")
+                image_path_lower = image_path.lower()
+                is_tiff = image_path_lower.endswith('.tif') or image_path_lower.endswith('.tiff')
+                
+                if is_tiff:
+                    try:
+                        img_full = tifffile.imread(image_path)
+                        if img_full.ndim == 2:
+                            img = img_full.astype(np.float32)
+                        elif img_full.ndim == 3:
+                            img = img_full[:, :, 0] if img_full.shape[2] <= 4 else img_full[0, :, :]
+                            img = img.astype(np.float32)
+                        elif img_full.ndim == 4:
+                            img = img_full[0, :, :, 0] if img_full.shape[3] <= 4 else img_full[0, 0, :, :]
+                            img = img.astype(np.float32)
                         else:
-                            # Single channel 3D (H, W, 1) or ambiguous - squeeze to 2D
-                            print(f"Detected single-channel 3D TIFF. Squeezing to 2D for segmentation.")
-                            img = np.squeeze(img_full)
-                            if img.ndim != 2:
-                                # If still not 2D, use first slice
-                                img = img_full[:, :, 0] if img_full.shape[2] < img_full.shape[0] else img_full[0, :, :]
-                    elif img_full.ndim == 4:
-                        # 4D: could be (Z, H, W, C) or (C, Z, H, W)
-                        print(f"Detected 4D multi-channel TIFF. Using first channel of first slice for segmentation.")
-                        if img_full.shape[3] > 1 and img_full.shape[3] <= 4:  # (Z, H, W, C)
-                            img = img_full[0, :, :, 0]
-                        else:  # (C, Z, H, W)
-                            img = img_full[0, 0, :, :]
-                    else:
-                        # Unexpected dimensions - try to use as-is
-                        print(f"Warning: Unexpected TIFF dimensions {img_full.shape}. Attempting to use directly.")
-                        img = img_full
-                except Exception as tiff_error:
-                    print(f"Warning: Failed to load TIFF with tifffile: {tiff_error}, trying cv2")
+                            img = img_full.astype(np.float32)
+                    except Exception as tiff_error:
+                        print(f"Warning: Failed to load TIFF: {tiff_error}, trying cv2")
+                        img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+                        if img is not None:
+                            img = img.astype(np.float32)
+                else:
                     img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
-            else:
-                # For non-TIFF files, use cv2
-                img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
-            
-            if img is None:
-                # Try alternative: use PIL to load and convert
-                try:
-                    pil_img = Image.open(image_path)
-                    if pil_img.mode != 'L':
-                        pil_img = pil_img.convert('L')
-                    img = np.array(pil_img)
-                    print(f"Loaded image using PIL: {image_path}")
-                except Exception as pil_error:
-                    return {
-                        "error": f"Failed to load image: {image_path}. All loading methods failed: {str(pil_error)}",
-                        "summary": "Image loading failed with all methods"
-                    }
+                    if img is not None:
+                        img = img.astype(np.float32)
+                
+                if img is None:
+                    # Try alternative: use PIL to load and convert
+                    try:
+                        pil_img = Image.open(image_path)
+                        if pil_img.mode != 'L':
+                            pil_img = pil_img.convert('L')
+                        img = np.array(pil_img, dtype=np.float32)
+                        print(f"Loaded image using PIL: {image_path}")
+                    except Exception as pil_error:
+                        return {
+                            "error": f"Failed to load image: {image_path}. All loading methods failed: {str(pil_error)}",
+                            "summary": "Image loading failed with all methods"
+                        }
             
             # Ensure img is uint8 for quality check
             img_uint8 = img.copy()
