@@ -544,20 +544,6 @@ class Organoid_Segmenter_Tool(BaseTool):
             # Setup output directory using centralized configuration
             output_dir = VisualizationConfig.get_output_dir(query_cache_dir)
             
-            # Save phase contrast image before segmentation for display
-            phase_contrast_for_display = phase_contrast_img.copy()
-            if phase_contrast_for_display.dtype != np.uint8:
-                phase_contrast_for_display = np.clip(phase_contrast_for_display, 0, 255).astype(np.uint8)
-            
-            phase_contrast_path = os.path.join(output_dir, f"phase_contrast_{image_identifier}.png")
-            try:
-                phase_contrast_pil = Image.fromarray(phase_contrast_for_display, mode='L')
-                phase_contrast_pil.save(phase_contrast_path)
-                print(f"Saved phase contrast image to: {phase_contrast_path}")
-            except Exception as e:
-                print(f"Warning: Failed to save phase contrast image: {e}")
-                phase_contrast_path = None
-            
             # Use phase contrast image for overlay (ensure it's uint8)
             phase_contrast_for_overlay = phase_contrast_img.copy()
             if phase_contrast_for_overlay.dtype != np.uint8:
@@ -566,21 +552,21 @@ class Organoid_Segmenter_Tool(BaseTool):
             # Create overlay on phase contrast image
             overlay = plot.mask_overlay(phase_contrast_for_overlay, mask)
             
+            # Count organoids (unique mask values, excluding background 0)
+            n_organoids = len(np.unique(mask)) - 1 if mask is not None else 0
+            
             # Save overlay visualization with professional styling using image identifier
-            output_path = os.path.join(output_dir, f"organoid_overlay_{image_identifier}.png")
+            overlay_path = os.path.join(output_dir, f"organoid_overlay_{image_identifier}.png")
             fig, ax = VisualizationConfig.create_professional_figure(figsize=(12, 8))
             # Ensure overlay has same brightness as original phase contrast image
             overlay_normalized = overlay.astype(np.float32) / 255.0
             ax.imshow(overlay_normalized, vmin=0, vmax=1)
             ax.axis('off')
             VisualizationConfig.apply_professional_styling(
-                ax, title=f"Organoid Segmentation - {len(np.unique(mask))-1} organoids detected"
+                ax, title=f"Organoid Segmentation - {n_organoids} organoids detected"
             )
-            VisualizationConfig.save_professional_figure(fig, output_path)
+            VisualizationConfig.save_professional_figure(fig, overlay_path)
             plt.close(fig)
-            
-            # Count organoids (unique mask values, excluding background 0)
-            n_organoids = len(np.unique(mask)) - 1 if mask is not None else 0
             
             # Save mask as separate visualization with professional styling using image identifier
             # Use .tif format with 16-bit depth to preserve all label values (supports up to 65535 organoids)
@@ -591,39 +577,32 @@ class Organoid_Segmenter_Tool(BaseTool):
             mask_uint16 = mask.astype(np.uint16)
             tifffile.imwrite(mask_path, mask_uint16)
             
-            # Also save a visualization version for display with professional styling
-            viz_mask_path = os.path.join(output_dir, f"organoid_mask_viz_{image_identifier}.png")
-            fig, ax = VisualizationConfig.create_professional_figure(figsize=(12, 8))
-            ax.imshow(mask, cmap='tab20')
-            ax.axis('off')
-            VisualizationConfig.apply_professional_styling(
-                ax, title=f"Organoid Masks - {n_organoids} organoids"
-            )
-            VisualizationConfig.save_professional_figure(fig, viz_mask_path)
-            plt.close(fig)
-            
             # Clear CUDA cache if using GPU
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
                 
-            # Build visual outputs list - include phase contrast image first, then overlay and mask
-            visual_outputs_list = []
-            if phase_contrast_path and os.path.exists(phase_contrast_path):
-                visual_outputs_list.append(phase_contrast_path)
-            visual_outputs_list.extend([output_path, mask_path])
+            # Build visual outputs list - only overlay and mask (no phase contrast)
+            # Overlay is included in deliverables
+            visual_outputs_list = [overlay_path, mask_path]
             
             return {
                 "summary": f"{n_organoids} organoids identified and segmented successfully.",
                 "organoid_count": n_organoids,
                 "cell_count": n_organoids,  # For compatibility with other tools that expect cell_count
                 "visual_outputs": visual_outputs_list,
+                "deliverables": [overlay_path],  # Segmentation overlay in deliverables
                 "model_used": f"CellposeModel (organoid model from {self.model_path})",
                 "parameters": {
                     "diameter": diameter,
                     "flow_threshold": flow_threshold,
                     "cellprob_threshold": cellprob_threshold,
                     "model_path": self.model_path
-                }
+                },
+                "mask_path": mask_path,  # For compatibility with Single_Cell_Cropper_Tool
+                "organoid_mask_path": mask_path,  # Explicit name for organoid masks
+                "overlay_path": overlay_path,  # Segmentation overlay path
+                "image_id": image_identifier,  # Add image_id for matching
+                "image_identifier": image_identifier  # Alias for compatibility
             }
             
         except Exception as e:

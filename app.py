@@ -840,8 +840,27 @@ def _collect_visual_outputs(result, visual_outputs_list, downloadable_files_list
                 except Exception as tiff_error:
                     print(f"Warning: Failed to check TIFF channels for {file_path}: {tiff_error}")
             
+            # Check if this is a multi-channel visualization file (from Image_Preprocessor_Tool)
+            # If it has "multi_channel_" in the filename, display it directly without splitting
+            if "multi_channel_" in filename.lower() and is_multi_channel:
+                # This is already a multi-channel visualization, display as-is
+                try:
+                    img_pil = Image.open(file_path)
+                    visual_outputs_list.append((img_pil, filename))
+                    continue  # Skip default processing
+                except Exception as e:
+                    print(f"Warning: Failed to load multi-channel visualization {file_path}: {e}")
+                    # Fall through to default processing
+                    
+            # For other multi-channel TIFFs (not visualizations), skip splitting
+            # They should be handled by tools that create multi_channel_ visualizations
             if is_multi_channel:
-                # Split multi-channel TIFF into individual channels for display
+                # Skip splitting - tools should create multi_channel_ visualizations if needed
+                continue
+                
+            # Legacy code for backward compatibility (should not be reached for multi-channel)
+            if False and is_multi_channel:
+                # Split multi-channel TIFF into individual channels for display (DISABLED)
                 try:
                     img_full = tifffile.imread(file_path)
                     num_channels = 0
