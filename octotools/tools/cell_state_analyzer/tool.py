@@ -67,6 +67,8 @@ sys.path.insert(0, project_root)
 
 from octotools.tools.base import BaseTool
 from octotools.models.utils import VisualizationConfig
+from octotools.models.image_data import ImageData
+from octotools.utils.image_processor import ImageProcessor
 
 
 class CellCropDataset(Dataset):
@@ -83,18 +85,43 @@ class CellCropDataset(Dataset):
         path = self.image_paths[idx]
         group = self.groups[idx]
         
-        # Load image
-        if SKIMAGE_AVAILABLE and (path.lower().endswith('.tif') or path.lower().endswith('.tiff')):
-            img = io.imread(path).astype(np.float32)
-            if img.dtype == np.uint16:
-                img = img / 65535.0
+        # Load image using unified ImageProcessor to preserve multi-channel information
+        try:
+            # Use ImageProcessor to load and handle multi-channel images correctly
+            img_data = ImageProcessor.load_image(path)
+            
+            # Create merged RGB view that preserves all channel information
+            # For 2-channel (BF+GFP): BF->gray, GFP->green
+            # For 3-channel: use first 3 channels as RGB
+            # For single-channel: grayscale->RGB
+            merged_rgb = ImageProcessor.create_merged_rgb_for_display(img_data)
+            
+            # Convert to PIL Image for transforms
+            img = Image.fromarray(merged_rgb, mode='RGB')
+            
+        except Exception as load_error:
+            # Fallback to legacy loading for backward compatibility
+            logger.warning(f"Failed to load with ImageProcessor: {load_error}, using legacy method")
+            if SKIMAGE_AVAILABLE and (path.lower().endswith('.tif') or path.lower().endswith('.tiff')):
+                img = io.imread(path).astype(np.float32)
+                if img.dtype == np.uint16:
+                    img = img / 65535.0
+                else:
+                    img = img / 255.0
+                if img.ndim == 2:
+                    img = np.repeat(img[..., None], 3, axis=-1)
+                elif img.ndim == 3 and img.shape[2] == 2:
+                    # Handle 2-channel image: BF -> gray, GFP -> green
+                    bf = img[:, :, 0]
+                    gfp = img[:, :, 1] if img.shape[2] > 1 else bf
+                    img = np.stack([bf, bf + gfp, bf], axis=2)  # R=BF, G=BF+GFP, B=BF
+                    img = np.clip(img, 0, 1)
+                elif img.ndim == 3 and img.shape[2] > 3:
+                    # Use first 3 channels
+                    img = img[:, :, :3]
+                img = Image.fromarray((img * 255).astype(np.uint8)).convert("RGB")
             else:
-                img = img / 255.0
-            if img.ndim == 2:
-                img = np.repeat(img[..., None], 3, axis=-1)
-            img = Image.fromarray((img * 255).astype(np.uint8)).convert("RGB")
-        else:
-            img = Image.open(path).convert("RGB")
+                img = Image.open(path).convert("RGB")
         
         # Apply transforms (two augmented views for contrastive learning)
         if self.transform:

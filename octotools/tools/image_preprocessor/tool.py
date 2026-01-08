@@ -29,7 +29,8 @@ class Image_Preprocessor_Tool(BaseTool):
                 "gaussian_kernel_size": "int - Size of Gaussian kernel for illumination correction (default: 151).",
                 "output_format": "str - Output format: Always use 'png' for Visual Outputs display compatibility (default: 'png', will be forced to 'png' regardless of input).",
                 "save_intermediate": "bool - Whether to save intermediate processing steps (default: False).",
-                "image_id": "str - Optional image identifier for consistent file naming and tracking."
+                "image_id": "str - Optional image identifier for consistent file naming and tracking.",
+                "skip_illumination_correction": "bool - If True, skip illumination correction and only adjust brightness. Use for organoid images (default: False)."
             },
             output_type="dict - A dictionary containing processed image paths and processing statistics.",
             demo_commands=[
@@ -319,7 +320,7 @@ class Image_Preprocessor_Tool(BaseTool):
             return mapping
         raise ValueError("Unsupported groups format.")
 
-    def execute(self, image, target_brightness=120, gaussian_kernel_size=151, output_format='png', save_intermediate=False, groups=None, image_id=None, query_cache_dir=None):
+    def execute(self, image, target_brightness=120, gaussian_kernel_size=151, output_format='png', save_intermediate=False, groups=None, image_id=None, query_cache_dir=None, skip_illumination_correction=False):
         """
         Execute the image preprocessing pipeline.
         
@@ -332,6 +333,8 @@ class Image_Preprocessor_Tool(BaseTool):
             groups: Optional grouping for images
             image_id: Optional image identifier for consistent file naming and tracking
             query_cache_dir: Optional directory for caching results
+            skip_illumination_correction: If True, skip illumination correction (only adjust brightness). 
+                                        Use for organoid images (default: False)
             
         Returns:
             Dictionary containing processing results and file paths
@@ -413,8 +416,16 @@ class Image_Preprocessor_Tool(BaseTool):
                 image_identifier = os.path.splitext(filename)[0]
             
             base_name = image_identifier
-            corrected_image = self.global_illumination_correction(original_image, gaussian_kernel_size)
-            normalized_image = self.adjust_brightness(corrected_image, target_brightness)
+            
+            # For organoid images: skip illumination correction, only adjust brightness
+            if skip_illumination_correction:
+                print(f"⚠️ Skipping illumination correction (organoid mode). Only adjusting brightness...")
+                corrected_image = original_image  # Use original image without illumination correction
+                normalized_image = self.adjust_brightness(corrected_image, target_brightness)
+            else:
+                # Standard preprocessing: illumination correction + brightness adjustment
+                corrected_image = self.global_illumination_correction(original_image, gaussian_kernel_size)
+                normalized_image = self.adjust_brightness(corrected_image, target_brightness)
 
             group_dir = os.path.join(self.output_dir, group)
             os.makedirs(group_dir, exist_ok=True)
@@ -466,13 +477,19 @@ class Image_Preprocessor_Tool(BaseTool):
                     is_brightfield = 'bright' in channel_name.lower() or 'field' in channel_name.lower() or idx == 0
                     
                     if is_brightfield:
-                        # Apply careful preprocessing to bright-field only
-                        # Use smaller kernel size for more conservative correction
-                        careful_kernel_size = min(gaussian_kernel_size, 101)  # Cap at 101 for bright-field
-                        channel_corrected = self.global_illumination_correction(channel_img, careful_kernel_size)
-                        # Use more conservative brightness adjustment for bright-field
-                        channel_normalized = self.adjust_brightness(channel_corrected, target_brightness)
-                        print(f"Applied careful preprocessing to {channel_name} channel")
+                        # For organoid images: skip illumination correction, only adjust brightness
+                        if skip_illumination_correction:
+                            print(f"⚠️ Skipping illumination correction for {channel_name} channel (organoid mode). Only adjusting brightness...")
+                            channel_corrected = channel_img  # Use original channel without illumination correction
+                            channel_normalized = self.adjust_brightness(channel_corrected, target_brightness)
+                        else:
+                            # Apply careful preprocessing to bright-field only
+                            # Use smaller kernel size for more conservative correction
+                            careful_kernel_size = min(gaussian_kernel_size, 101)  # Cap at 101 for bright-field
+                            channel_corrected = self.global_illumination_correction(channel_img, careful_kernel_size)
+                            # Use more conservative brightness adjustment for bright-field
+                            channel_normalized = self.adjust_brightness(channel_corrected, target_brightness)
+                        print(f"Applied preprocessing to {channel_name} channel")
                     else:
                         # For GFP and other channels: only normalize, preserve original characteristics
                         # Just normalize to uint8 for saving, but keep original for visualization
