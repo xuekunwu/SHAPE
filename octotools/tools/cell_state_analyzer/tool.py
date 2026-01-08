@@ -815,6 +815,82 @@ class Cell_State_Analyzer_Tool(BaseTool):
         
         return all_cell_crops, all_cell_metadata
     
+    def _recommend_hyperparameters(self, num_crops: int, batch_size: int = None, 
+                                   learning_rate: float = None, max_epochs: int = None) -> dict:
+        """
+        Intelligently recommend hyperparameters based on number of crops.
+        
+        Strategy:
+        - Very few crops (<10): Lower LR, smaller batch, more epochs
+        - Few crops (10-50): Moderate LR, adjust batch size
+        - Medium crops (50-200): Default settings
+        - Many crops (>200): Can use higher LR, larger batch
+        
+        Args:
+            num_crops: Number of cell crops
+            batch_size: User-specified batch size (None to auto-recommend)
+            learning_rate: User-specified learning rate (None to auto-recommend)
+            max_epochs: User-specified max epochs (None to auto-recommend)
+            
+        Returns:
+            dict with recommended batch_size, learning_rate, max_epochs
+        """
+        recommendations = {}
+        
+        # Recommend batch_size based on crop count
+        if batch_size is None:
+            if num_crops < 10:
+                # Very few crops: use batch_size = num_crops (or 2 if num_crops < 2)
+                recommendations['batch_size'] = max(2, min(num_crops, 4))
+            elif num_crops < 50:
+                # Few crops: use smaller batch size
+                recommendations['batch_size'] = min(8, num_crops // 2)
+            elif num_crops < 200:
+                # Medium crops: default batch size
+                recommendations['batch_size'] = 16
+            else:
+                # Many crops: can use larger batch
+                recommendations['batch_size'] = 32
+        else:
+            # User specified, but ensure it's not larger than num_crops
+            recommendations['batch_size'] = min(batch_size, num_crops)
+        
+        # Recommend learning_rate based on crop count
+        if learning_rate is None:
+            if num_crops < 5:
+                # Very few crops (<5): Use very small LR to prevent overfitting
+                recommendations['learning_rate'] = 1e-6
+            elif num_crops < 10:
+                # Few crops (5-9): Small LR
+                recommendations['learning_rate'] = 5e-6
+            elif num_crops < 50:
+                # Moderate crops (10-49): Reduced LR
+                recommendations['learning_rate'] = 1e-5
+            elif num_crops < 200:
+                # Medium crops (50-199): Default LR
+                recommendations['learning_rate'] = 3e-5
+            else:
+                # Many crops (>=200): Can use slightly higher LR
+                recommendations['learning_rate'] = 5e-5
+        else:
+            recommendations['learning_rate'] = learning_rate
+        
+        # Recommend max_epochs based on crop count
+        if max_epochs is None:
+            if num_crops < 10:
+                # Very few crops: More epochs needed for learning
+                recommendations['max_epochs'] = 50
+            elif num_crops < 50:
+                # Few crops: Moderate epochs
+                recommendations['max_epochs'] = 35
+            else:
+                # Medium/many crops: Default epochs
+                recommendations['max_epochs'] = 25
+        else:
+            recommendations['max_epochs'] = max_epochs
+        
+        return recommendations
+    
     def execute(self, cell_crops=None, cell_metadata=None, max_epochs=25, early_stop_loss=0.5,
                 batch_size=16, learning_rate=3e-5, cluster_resolution=0.5, query_cache_dir=None):
         """
@@ -823,10 +899,10 @@ class Cell_State_Analyzer_Tool(BaseTool):
         Args:
             cell_crops: List of cell crop image paths
             cell_metadata: List of metadata dictionaries (should include 'group' field)
-            max_epochs: Maximum training epochs (default: 25)
+            max_epochs: Maximum training epochs (default: 25, auto-adjusted based on crop count)
             early_stop_loss: Early stopping loss threshold (default: 0.5)
-            batch_size: Training batch size (default: 16)
-            learning_rate: Learning rate (default: 3e-5)
+            batch_size: Training batch size (default: 16, auto-adjusted based on crop count)
+            learning_rate: Learning rate (default: 3e-5, auto-adjusted based on crop count)
             cluster_resolution: Leiden clustering resolution (default: 0.5)
             query_cache_dir: Directory for outputs
             
@@ -845,7 +921,45 @@ class Cell_State_Analyzer_Tool(BaseTool):
         if not cell_crops or len(cell_crops) == 0:
             return {"error": "No cell crops found for analysis", "status": "failed"}
         
-        logger.info(f"🔬 Processing {len(cell_crops)} cell crops...")
+        num_crops = len(cell_crops)
+        logger.info(f"🔬 Processing {num_crops} cell crops...")
+        
+        # Get intelligent hyperparameter recommendations
+        # Pass None to auto-recommend, or pass user value to use it (but still validate)
+        recommendations = self._recommend_hyperparameters(
+            num_crops, 
+            batch_size=None,  # Always get recommendation, then use user value if provided
+            learning_rate=None,  # Always get recommendation, then use user value if provided
+            max_epochs=None  # Always get recommendation, then use user value if provided
+        )
+        
+        # Use user-specified values if provided (and valid), otherwise use recommendations
+        # For batch_size: ensure it doesn't exceed num_crops
+        final_batch_size = min(batch_size, num_crops) if batch_size is not None else recommendations['batch_size']
+        final_learning_rate = learning_rate if learning_rate is not None else recommendations['learning_rate']
+        final_max_epochs = max_epochs if max_epochs is not None else recommendations['max_epochs']
+        
+        # Log recommendations and final values
+        logger.info(f"📊 Hyperparameter recommendations for {num_crops} crops:")
+        if batch_size is not None and batch_size != recommendations['batch_size']:
+            logger.info(f"   Batch size: {final_batch_size} (user-specified: {batch_size}, recommended: {recommendations['batch_size']})")
+        else:
+            logger.info(f"   Batch size: {final_batch_size} (auto-recommended)")
+        
+        if learning_rate is not None and abs(learning_rate - recommendations['learning_rate']) > 1e-8:
+            logger.info(f"   Learning rate: {final_learning_rate:.2e} (user-specified: {learning_rate:.2e}, recommended: {recommendations['learning_rate']:.2e})")
+        else:
+            logger.info(f"   Learning rate: {final_learning_rate:.2e} (auto-recommended)")
+        
+        if max_epochs is not None and max_epochs != recommendations['max_epochs']:
+            logger.info(f"   Max epochs: {final_max_epochs} (user-specified: {max_epochs}, recommended: {recommendations['max_epochs']})")
+        else:
+            logger.info(f"   Max epochs: {final_max_epochs} (auto-recommended)")
+        
+        # Update variables for use in training
+        batch_size = final_batch_size
+        learning_rate = final_learning_rate
+        max_epochs = final_max_epochs
         
         # Setup output directory
         if query_cache_dir is None:
