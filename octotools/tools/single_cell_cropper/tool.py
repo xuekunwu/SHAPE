@@ -600,7 +600,8 @@ class Single_Cell_Cropper_Tool(BaseTool):
                 # Unified logic: preserve all channel information
                 if is_multi_channel and cell_crop.ndim == 3:
                     # Multi-channel image: save as TIFF to preserve all channels
-                    tifffile.imwrite(crop_path, cell_crop)
+                    # Use imagej=True to ensure ImageJ correctly interprets channels (not as Z-stack)
+                    tifffile.imwrite(crop_path, cell_crop, imagej=True)
                 elif len(cell_crop.shape) == 2:
                     # Grayscale image - convert to PIL and save
                     pil_image = Image.fromarray(cell_crop, mode='L')

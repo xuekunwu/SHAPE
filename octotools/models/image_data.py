@@ -281,7 +281,8 @@ class ImageData:
         
         if self.is_multi_channel and format.lower() in ('tif', 'tiff'):
             # Save as multi-channel TIFF
-            tifffile.imwrite(path, self.data)
+            # Use imagej=True to ensure ImageJ correctly interprets channels (not as Z-stack)
+            tifffile.imwrite(path, self.data, imagej=True)
         else:
             # Save as single-channel or RGB image
             if self.is_single_channel:

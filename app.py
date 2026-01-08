@@ -9,7 +9,6 @@ import argparse
 import time
 import io
 import uuid
-# Progress bar removed per user request
 try:
     import torch
     TORCH_AVAILABLE = True
@@ -17,8 +16,6 @@ except ImportError:
     torch = None
     TORCH_AVAILABLE = False
 import shutil
-import logging
-import tempfile
 from PIL import Image
 import numpy as np
 from typing import List, Dict, Any, Iterator, Optional
@@ -31,8 +28,7 @@ from octotools.models.formatters import ToolCommand
 import traceback
 import psutil
 from model_configs import HF_MODEL_CONFIGS
-from datetime import datetime
-from octotools.models.utils import make_json_serializable, normalize_tool_name
+from octotools.models.utils import normalize_tool_name
 from dataclasses import dataclass, field
 import pandas as pd
 import tifffile
@@ -106,6 +102,7 @@ from octotools.models.memory import Memory
 from octotools.models.executor import Executor
 
 class CustomEncoder(json.JSONEncoder):
+    """Custom JSON encoder for ToolCommand objects."""
     def default(self, obj):
         if isinstance(obj, ToolCommand):
             return str(obj)
@@ -1184,11 +1181,6 @@ class Solver:
         self.planner = planner
         self.memory = memory
         self.executor = executor
-        self.task = task
-        self.task_description = task_description
-        self.output_types = output_types
-        self.index = index
-        self.verbose = verbose
         self.max_steps = max_steps
         self.max_time = max_time
         self.query_cache_dir = query_cache_dir
@@ -2065,11 +2057,9 @@ class Solver:
         if 'final' in self.output_types:
             final_output_start = time.time()
             conversation_text = self._format_conversation_history()
-            final_output = self.planner.generate_final_output(user_query, analysis_img_ref, self.memory, conversation_context=conversation_text) # Disabled visibility for now
+            final_output = self.planner.generate_final_output(user_query, analysis_img_ref, self.memory, conversation_context=conversation_text)
             final_output_end = time.time()
             final_output_time = final_output_end - final_output_start
-            # messages.append(ChatMessage(role="assistant", content=f"🎯 Final Output:\n{final_output}"))
-            # yield messages
 
             planner_usage = self.planner.last_usage if hasattr(self.planner, 'last_usage') else None
             final_input_tokens, final_output_tokens, final_total_tokens, final_output_cost = self._collect_usage_and_cost(planner_usage)
