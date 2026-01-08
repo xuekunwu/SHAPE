@@ -448,6 +448,7 @@ Query Cache Directory: {query_cache_dir_str} (use this for query_cache_dir param
 IMPORTANT: When the tool requires an image parameter, you MUST use the exact image path provided above: "{safe_path}"
 {"IMPORTANT: Nuclei_Segmenter_Tool, Cell_Segmenter_Tool, Organoid_Segmenter_Tool, and Image_Preprocessor_Tool accept the image_id parameter for consistent file naming and tracking. Include image_id parameter when available for these tools." if image_id else ""}
 {f"CRITICAL: Image_Preprocessor_Tool requires the groups parameter when processing images. Use groups='{kwargs.get('group', 'default')}' or groups=['{kwargs.get('group', 'default')}'] in the command." if tool_name == "Image_Preprocessor_Tool" and 'group' in kwargs else ""}
+{"CRITICAL: For Image_Preprocessor_Tool, if the query or context mentions 'organoid' or if Organoid_Segmenter_Tool was used previously, you MUST set skip_illumination_correction=True. Organoid images should NOT have illumination correction, only brightness adjustment." if tool_name == "Image_Preprocessor_Tool" and ('organoid' in question.lower() or 'organoid' in context.lower() or 'Organoid_Segmenter_Tool' in str(previous_outputs_for_llm)) else ""}
 
 CRITICAL TOOL DEPENDENCY RULES:
 - Fibroblast_Activation_Scorer_Tool MUST use the h5ad file output from Cell_State_Analyzer_Tool
