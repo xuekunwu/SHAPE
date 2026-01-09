@@ -527,6 +527,10 @@ class Cell_State_Analyzer_Tool(BaseTool):
     
     def _create_loss_curve(self, history, output_dir):
         """Create and save loss curve plot."""
+        if not history or len(history) == 0:
+            logger.warning("No training history available, skipping loss curve creation")
+            return None
+        
         fig, ax = VisualizationConfig.create_professional_figure(figsize=(10, 6))
         ax.plot(range(1, len(history) + 1), history, 'b-', linewidth=2)
         ax.set_xlabel("Epoch", fontsize=12)
@@ -924,42 +928,51 @@ class Cell_State_Analyzer_Tool(BaseTool):
         num_crops = len(cell_crops)
         logger.info(f"🔬 Processing {num_crops} cell crops...")
         
-        # Get intelligent hyperparameter recommendations
-        # Pass None to auto-recommend, or pass user value to use it (but still validate)
-        recommendations = self._recommend_hyperparameters(
-            num_crops, 
-            batch_size=None,  # Always get recommendation, then use user value if provided
-            learning_rate=None,  # Always get recommendation, then use user value if provided
-            max_epochs=None  # Always get recommendation, then use user value if provided
-        )
+        # Strategy: Use zero-shot inference for small datasets (<50 crops), training for larger datasets
+        use_zero_shot = num_crops < 50
         
-        # Use user-specified values if provided (and valid), otherwise use recommendations
-        # For batch_size: ensure it doesn't exceed num_crops
-        final_batch_size = min(batch_size, num_crops) if batch_size is not None else recommendations['batch_size']
-        final_learning_rate = learning_rate if learning_rate is not None else recommendations['learning_rate']
-        final_max_epochs = max_epochs if max_epochs is not None else recommendations['max_epochs']
-        
-        # Log recommendations and final values
-        logger.info(f"📊 Hyperparameter recommendations for {num_crops} crops:")
-        if batch_size is not None and batch_size != recommendations['batch_size']:
-            logger.info(f"   Batch size: {final_batch_size} (user-specified: {batch_size}, recommended: {recommendations['batch_size']})")
+        if use_zero_shot:
+            logger.info(f"🎯 Using zero-shot inference mode (crops: {num_crops} < 50). Training is skipped for small datasets.")
+            # For zero-shot, we only need eval transform and batch size
+            final_batch_size = min(batch_size, num_crops) if batch_size is not None else min(16, num_crops)
+            logger.info(f"   Batch size: {final_batch_size} (for feature extraction)")
         else:
-            logger.info(f"   Batch size: {final_batch_size} (auto-recommended)")
-        
-        if learning_rate is not None and abs(learning_rate - recommendations['learning_rate']) > 1e-8:
-            logger.info(f"   Learning rate: {final_learning_rate:.2e} (user-specified: {learning_rate:.2e}, recommended: {recommendations['learning_rate']:.2e})")
-        else:
-            logger.info(f"   Learning rate: {final_learning_rate:.2e} (auto-recommended)")
-        
-        if max_epochs is not None and max_epochs != recommendations['max_epochs']:
-            logger.info(f"   Max epochs: {final_max_epochs} (user-specified: {max_epochs}, recommended: {recommendations['max_epochs']})")
-        else:
-            logger.info(f"   Max epochs: {final_max_epochs} (auto-recommended)")
-        
-        # Update variables for use in training
-        batch_size = final_batch_size
-        learning_rate = final_learning_rate
-        max_epochs = final_max_epochs
+            logger.info(f"🎯 Using training mode (crops: {num_crops} >= 50). Model will be fine-tuned.")
+            # Get intelligent hyperparameter recommendations for training
+            recommendations = self._recommend_hyperparameters(
+                num_crops, 
+                batch_size=None,  # Always get recommendation, then use user value if provided
+                learning_rate=None,  # Always get recommendation, then use user value if provided
+                max_epochs=None  # Always get recommendation, then use user value if provided
+            )
+            
+            # Use user-specified values if provided (and valid), otherwise use recommendations
+            # For batch_size: ensure it doesn't exceed num_crops
+            final_batch_size = min(batch_size, num_crops) if batch_size is not None else recommendations['batch_size']
+            final_learning_rate = learning_rate if learning_rate is not None else recommendations['learning_rate']
+            final_max_epochs = max_epochs if max_epochs is not None else recommendations['max_epochs']
+            
+            # Log recommendations and final values
+            logger.info(f"📊 Hyperparameter recommendations for {num_crops} crops:")
+            if batch_size is not None and batch_size != recommendations['batch_size']:
+                logger.info(f"   Batch size: {final_batch_size} (user-specified: {batch_size}, recommended: {recommendations['batch_size']})")
+            else:
+                logger.info(f"   Batch size: {final_batch_size} (auto-recommended)")
+            
+            if learning_rate is not None and abs(learning_rate - recommendations['learning_rate']) > 1e-8:
+                logger.info(f"   Learning rate: {final_learning_rate:.2e} (user-specified: {learning_rate:.2e}, recommended: {recommendations['learning_rate']:.2e})")
+            else:
+                logger.info(f"   Learning rate: {final_learning_rate:.2e} (auto-recommended)")
+            
+            if max_epochs is not None and max_epochs != recommendations['max_epochs']:
+                logger.info(f"   Max epochs: {final_max_epochs} (user-specified: {max_epochs}, recommended: {recommendations['max_epochs']})")
+            else:
+                logger.info(f"   Max epochs: {final_max_epochs} (auto-recommended)")
+            
+            # Update variables for use in training
+            batch_size = final_batch_size
+            learning_rate = final_learning_rate
+            max_epochs = final_max_epochs
         
         # Setup output directory
         if query_cache_dir is None:
@@ -982,39 +995,61 @@ class Cell_State_Analyzer_Tool(BaseTool):
                 image_names.append("unknown")
         
         # Create datasets
-        train_transform = self._get_augmentation_transform()
         eval_transform = self._get_eval_transform()
         
-        train_dataset = CellCropDataset(cell_crops, groups, transform=train_transform)
-        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, 
-                                 num_workers=0, pin_memory=True if torch.cuda.is_available() else False)
-        
-        eval_dataset = CellCropDataset(cell_crops, groups, transform=eval_transform)
-        eval_loader = DataLoader(eval_dataset, batch_size=batch_size, shuffle=False,
-                                num_workers=0, pin_memory=True if torch.cuda.is_available() else False)
-        
-        logger.info(f"✅ Loaded {len(train_dataset)} images")
-        
-        # Initialize model
-        model = DinoV3Projector(backbone_name="dinov3_vits16", proj_dim=256).to(self.device)
-        
-        # Train model
-        logger.info("🎯 Starting training...")
-        training_logs = []  # Collect training progress logs
-        history, best_model_path, training_logs = self._train_model(
-            model, train_loader, max_epochs, early_stop_loss, learning_rate, output_dir, training_logs, patience=5
-        )
-        
-        # Load best model
-        model.load_state_dict(torch.load(best_model_path))
-        logger.info(f"✅ Loaded best model from {best_model_path}")
-        
-        # Extract features
-        logger.info("🔍 Extracting features...")
-        feats, img_names, groups_extracted = self._extract_features(model, eval_loader, self.device)
-        
-        # Create loss curve
-        loss_curve_path = self._create_loss_curve(history, output_dir)
+        if use_zero_shot:
+            # Zero-shot mode: only need eval dataset for feature extraction
+            eval_dataset = CellCropDataset(cell_crops, groups, transform=eval_transform)
+            eval_loader = DataLoader(eval_dataset, batch_size=final_batch_size, shuffle=False,
+                                    num_workers=0, pin_memory=True if torch.cuda.is_available() else False)
+            logger.info(f"✅ Loaded {len(eval_dataset)} images for zero-shot inference")
+            
+            # Initialize model (will use pretrained weights)
+            model = DinoV3Projector(backbone_name="dinov3_vits16", proj_dim=256).to(self.device)
+            logger.info("✅ Using pretrained DINOv3 model (zero-shot mode, no training)")
+            
+            # Extract features directly with pretrained model
+            logger.info("🔍 Extracting features with pretrained model (zero-shot inference)...")
+            feats, img_names, groups_extracted = self._extract_features(model, eval_loader, self.device)
+            
+            # No training history for zero-shot
+            history = []
+            training_logs = []
+            loss_curve_path = None
+        else:
+            # Training mode: create train and eval datasets
+            train_transform = self._get_augmentation_transform()
+            
+            train_dataset = CellCropDataset(cell_crops, groups, transform=train_transform)
+            train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, 
+                                     num_workers=0, pin_memory=True if torch.cuda.is_available() else False)
+            
+            eval_dataset = CellCropDataset(cell_crops, groups, transform=eval_transform)
+            eval_loader = DataLoader(eval_dataset, batch_size=batch_size, shuffle=False,
+                                    num_workers=0, pin_memory=True if torch.cuda.is_available() else False)
+            
+            logger.info(f"✅ Loaded {len(train_dataset)} images")
+            
+            # Initialize model
+            model = DinoV3Projector(backbone_name="dinov3_vits16", proj_dim=256).to(self.device)
+            
+            # Train model
+            logger.info("🎯 Starting training...")
+            training_logs = []  # Collect training progress logs
+            history, best_model_path, training_logs = self._train_model(
+                model, train_loader, max_epochs, early_stop_loss, learning_rate, output_dir, training_logs, patience=5
+            )
+            
+            # Load best model
+            model.load_state_dict(torch.load(best_model_path))
+            logger.info(f"✅ Loaded best model from {best_model_path}")
+            
+            # Extract features
+            logger.info("🔍 Extracting features...")
+            feats, img_names, groups_extracted = self._extract_features(model, eval_loader, self.device)
+            
+            # Create loss curve
+            loss_curve_path = self._create_loss_curve(history, output_dir)
         
         # Create AnnData object
         if not ANNDATA_AVAILABLE:
@@ -1064,31 +1099,57 @@ class Cell_State_Analyzer_Tool(BaseTool):
         logger.info(f"✅ AnnData saved to {adata_path}")
         
         # Prepare deliverables - includes visualizations and data files
-        deliverables = [loss_curve_path, adata_path]  # Include both loss curve and AnnData file
+        deliverables = [adata_path]  # Always include AnnData file
+        if loss_curve_path is not None:
+            deliverables.append(loss_curve_path)  # Only include loss curve if training was performed
         
         # Format training logs for display
         training_logs_text = "\n".join(training_logs) if training_logs else ""
         
-        summary = f"Training completed. Processed {len(cell_crops)} cells in {len(history)} epochs. Final loss: {history[-1]:.4f}"
-        if training_logs_text:
-            summary = f"{summary}\n\n**Training Progress:**\n```\n{training_logs_text}\n```"
-        
-        return {
-            "summary": summary,
-            "cell_count": len(cell_crops),
-            "epochs_trained": len(history),
-            "final_loss": history[-1],
-            "best_loss": min(history),
-            "loss_curve": loss_curve_path,
-            "adata_path": adata_path,  # AnnData file path for Analysis_Visualizer_Tool
-            "deliverables": deliverables,  # Renamed from visual_outputs to deliverables
-            "visual_outputs": deliverables,  # Keep for backward compatibility
-            "training_history": history,
-            "training_logs": training_logs_text,  # Include training logs for display
-            "cluster_key": cluster_key,  # Cluster column name (e.g., "leiden_0.5")
-            "cluster_resolution": cluster_resolution,  # Resolution used for clustering
-            "analysis_type": "cell_state_analysis"  # Flag for Analysis_Visualizer_Tool to detect this output
-        }
+        if use_zero_shot:
+            summary = f"Zero-shot inference completed. Processed {len(cell_crops)} cells using pretrained DINOv3 model (no training)."
+            if training_logs_text:
+                summary = f"{summary}\n\n**Processing Log:**\n```\n{training_logs_text}\n```"
+            
+            return {
+                "summary": summary,
+                "cell_count": len(cell_crops),
+                "mode": "zero-shot",
+                "epochs_trained": 0,
+                "final_loss": None,
+                "best_loss": None,
+                "loss_curve": None,
+                "adata_path": adata_path,  # AnnData file path for Analysis_Visualizer_Tool
+                "deliverables": deliverables,
+                "visual_outputs": deliverables,  # Keep for backward compatibility
+                "training_history": [],
+                "training_logs": training_logs_text,
+                "cluster_key": cluster_key,  # Cluster column name (e.g., "leiden_0.5")
+                "cluster_resolution": cluster_resolution,  # Resolution used for clustering
+                "analysis_type": "cell_state_analysis"  # Flag for Analysis_Visualizer_Tool to detect this output
+            }
+        else:
+            summary = f"Training completed. Processed {len(cell_crops)} cells in {len(history)} epochs. Final loss: {history[-1]:.4f}"
+            if training_logs_text:
+                summary = f"{summary}\n\n**Training Progress:**\n```\n{training_logs_text}\n```"
+            
+            return {
+                "summary": summary,
+                "cell_count": len(cell_crops),
+                "mode": "training",
+                "epochs_trained": len(history),
+                "final_loss": history[-1],
+                "best_loss": min(history),
+                "loss_curve": loss_curve_path,
+                "adata_path": adata_path,  # AnnData file path for Analysis_Visualizer_Tool
+                "deliverables": deliverables,
+                "visual_outputs": deliverables,  # Keep for backward compatibility
+                "training_history": history,
+                "training_logs": training_logs_text,  # Include training logs for display
+                "cluster_key": cluster_key,  # Cluster column name (e.g., "leiden_0.5")
+                "cluster_resolution": cluster_resolution,  # Resolution used for clustering
+                "analysis_type": "cell_state_analysis"  # Flag for Analysis_Visualizer_Tool to detect this output
+            }
 
 
 if __name__ == "__main__":
