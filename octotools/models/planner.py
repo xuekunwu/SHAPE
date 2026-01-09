@@ -423,18 +423,6 @@ IMPORTANT: Do NOT suggest tools for analysis that is not explicitly requested in
         
         # If pipeline is complete, no enforcement needed
         if pipeline_state['pipeline_complete']:
-            # Only check for Image_Captioner_Tool recommendation after Analysis_Visualizer_Tool
-            if last_tool == "Analysis_Visualizer_Tool":
-                if 'Image_Captioner_Tool' not in used_tools and selected_tool != 'Image_Captioner_Tool' and 'Image_Captioner_Tool' in available_tools:
-                    logger.info(f"💡 RECOMMENDATION: Pipeline complete. Suggesting Image_Captioner_Tool for final summary.")
-                    forced_context = self._format_memory_for_prompt(memory)
-                    return NextStep(
-                        justification=f"RECOMMENDED: Full analysis pipeline is complete. "
-                                    f"Image_Captioner_Tool is recommended to generate a final summary and interpretation.",
-                        context=forced_context,
-                        sub_goal="Generate a final summary and interpretation of the analysis visualizations using Image_Captioner_Tool.",
-                        tool_name="Image_Captioner_Tool"
-                    )
             return None
         
         # Pipeline is incomplete - enforce next required tool
@@ -794,8 +782,7 @@ Recommended Next Tools (considering dependencies and priorities):
    If the LAST tool executed was:
    - Analysis_Visualizer_Tool
    
-   Then you SHOULD consider using Image_Captioner_Tool to generate a final summary and interpretation of the visualizations. 
-   This is RECOMMENDED (not mandatory) to provide a comprehensive final answer to the user's query.
+   Then the analysis pipeline is complete. The Analysis_Visualizer_Tool already provides morphological pattern summaries in its output.
 
 Tool Metadata:
 {toolbox_metadata}
@@ -843,7 +830,7 @@ Instructions:
    
    - LOW Priority: Use sparingly, only when necessary
      * Utility tools and code generation tools (use only when no other tool can solve the query)
-     * Examples: Object_Detector_Tool, Advanced_Object_Detector_Tool, Image_Captioner_Tool, Text_Detector_Tool, Python_Code_Generator_Tool
+     * Examples: Object_Detector_Tool, Advanced_Object_Detector_Tool, Text_Detector_Tool, Python_Code_Generator_Tool
    
    IMPORTANT: Always prefer tools from higher priority levels (HIGH > MEDIUM > LOW).
    Do NOT use LOW priority code generation tools if any higher-priority tool can address the query.

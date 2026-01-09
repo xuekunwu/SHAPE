@@ -1900,25 +1900,10 @@ class Solver:
             }
             self.step_info.append(step_info)
 
-            # If conclusion is STOP, check if we should continue for Image_Captioner_Tool
-            # Only continue if the query requires full cell state analysis (not just counting)
+            # If conclusion is STOP, end execution
             if conclusion == 'STOP':
-                # Check if query requires full cell state analysis
-                requires_full_analysis = self.planner._requires_full_cell_state_analysis(user_query) if hasattr(self.planner, '_requires_full_cell_state_analysis') else False
-                
-                # For counting queries, stop immediately
-                if not requires_full_analysis:
-                    execution_successful = True
-                    break
-                
-                # For cell state analysis queries, allow one more step for Image_Captioner_Tool if not already used
-                used_tools = [action.get('tool_name') for action in self.memory.get_actions() if 'tool_name' in action]
-                if 'Image_Captioner_Tool' not in used_tools and step_count < self.max_steps:
-                    # Allow one more step for Image_Captioner_Tool (only for full analysis queries)
-                    continue
-                else:
-                    execution_successful = True
-                    break
+                execution_successful = True
+                break
 
         self.end_time = time.time()
         
@@ -2197,7 +2182,6 @@ class Solver:
         tool_descriptions = {
             "Image_Preprocessor_Tool": f"*Displaying {counts['processed']} processed image(s) from illumination correction and brightness adjustment.*",
             "Object_Detector_Tool": f"*Showing {counts['detected']} detection result(s) with identified objects and regions of interest.*",
-            "Image_Captioner_Tool": "*Displaying image analysis results with detailed morphological descriptions.*",
             "Relevant_Patch_Zoomer_Tool": f"*Showing {counts['zoomed']} zoomed region(s) highlighting key areas of interest.*",
             "Advanced_Object_Detector_Tool": f"*Displaying {counts['detected']} advanced detection result(s) with enhanced object identification.*",
             "Nuclei_Segmenter_Tool": f"*Showing {counts['segmented']} segmentation result(s) with identified nuclei regions.*",

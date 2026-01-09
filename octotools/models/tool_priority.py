@@ -31,7 +31,6 @@ BIOIMAGE_TOOL_PRIORITIES: Dict[str, ToolPriority] = {
     # LOW: Utility tools and code generation tools (use sparingly)
     "Object_Detector_Tool": ToolPriority.LOW,
     "Advanced_Object_Detector_Tool": ToolPriority.LOW,
-    "Image_Captioner_Tool": ToolPriority.LOW,
     "Text_Detector_Tool": ToolPriority.LOW,
     "Python_Code_Generator_Tool": ToolPriority.LOW,
     

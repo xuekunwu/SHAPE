@@ -690,22 +690,35 @@ class Analysis_Visualizer_Tool(BaseTool):
             visual_outputs.append(cluster_pie_path)
         
         # 5. Create cluster exemplar montage (separate from UMAP)
+        # Calculate cluster statistics first to get morphological patterns
+        cluster_stats = self._calculate_cluster_statistics(adata, cluster_key)
+        # Store morphological patterns for use in montage
+        self._morph_patterns = {k: v.get('morphological_pattern', '') for k, v in cluster_stats.items() if 'morphological_pattern' in v}
+        
         exemplar_path = self._create_cluster_exemplar_montage(
             adata, cluster_key, cluster_resolution, output_dir, figure_size, dpi
         )
         if exemplar_path:
             visual_outputs.append(exemplar_path)
         
-        # Calculate cluster statistics
-        cluster_stats = self._calculate_cluster_statistics(adata, cluster_key)
+        # Generate morphological pattern summary
+        morph_summary = []
+        for cluster_id, stats in cluster_stats.items():
+            if 'morphological_pattern' in stats and stats['morphological_pattern']:
+                morph_summary.append(f"Cluster {cluster_id}: {stats['morphological_pattern']}")
+        
+        summary_text = f"Generated {len(visual_outputs)} publication-quality visualizations for cell state analysis"
+        if morph_summary:
+            summary_text += f". Morphological patterns: {'; '.join(morph_summary)}"
         
         return {
-            "summary": f"Generated {len(visual_outputs)} publication-quality visualizations for cell state analysis",
+            "summary": summary_text,
             "visual_outputs": visual_outputs,
             "cell_count": adata.n_obs,
             "num_clusters": adata.obs[cluster_key].nunique() if cluster_key in adata.obs else 0,
             "cluster_key": cluster_key,
-            "cluster_statistics": cluster_stats
+            "cluster_statistics": cluster_stats,
+            "morphological_patterns": {k: v.get('morphological_pattern', '') for k, v in cluster_stats.items() if 'morphological_pattern' in v}
         }
     
     def _create_publication_umap_by_cluster(self, adata, cluster_key: str, resolution: float,
@@ -1102,7 +1115,11 @@ class Analysis_Visualizer_Tool(BaseTool):
                 
                 # Add cluster label on first column (adjusted position for tighter layout)
                 if col_idx == 0:
-                    ax.text(-0.15, 0.5, f'Cluster {cluster}', transform=ax.transAxes,
+                    # Get morphological pattern if available
+                    morph_pattern = ""
+                    if hasattr(self, '_morph_patterns') and str(cluster) in self._morph_patterns:
+                        morph_pattern = f" ({self._morph_patterns[str(cluster)]})"
+                    ax.text(-0.15, 0.5, f'Cluster {cluster}{morph_pattern}', transform=ax.transAxes,
                            fontsize=12, fontweight='normal', va='center', ha='right')
         
         plt.suptitle(f'Cluster Exemplars (resolution={resolution})', 
@@ -1143,6 +1160,75 @@ class Analysis_Visualizer_Tool(BaseTool):
         
         return output_path
     
+    def _analyze_morphological_patterns(self, adata, cluster_key: str) -> Dict[str, str]:
+        """Analyze morphological patterns for each cluster and generate simple descriptions."""
+        if cluster_key not in adata.obs:
+            return {}
+        
+        patterns = {}
+        cluster_counts = adata.obs[cluster_key].value_counts().sort_index()
+        
+        # Collect all available morphological features
+        morph_features = {}
+        for feature in ['area', 'perimeter', 'aspect_ratio', 'circularity', 'solidity', 'eccentricity']:
+            if feature in adata.obs:
+                morph_features[feature] = adata.obs[feature]
+        
+        if not morph_features:
+            # If no morphological features available, return empty patterns
+            return {}
+        
+        # Calculate cluster means for each feature
+        cluster_means = {}
+        for cluster_id in cluster_counts.index:
+            cluster_mask = adata.obs[cluster_key] == cluster_id
+            cluster_means[cluster_id] = {}
+            for feature, values in morph_features.items():
+                cluster_means[cluster_id][feature] = values[cluster_mask].mean()
+        
+        # Generate comparative descriptions
+        for cluster_id in cluster_counts.index:
+            descriptions = []
+            
+            # Size comparison
+            if 'area' in cluster_means[cluster_id]:
+                all_areas = [cluster_means[c]['area'] for c in cluster_means.keys() if 'area' in cluster_means[c]]
+                if all_areas:
+                    cluster_area = cluster_means[cluster_id]['area']
+                    max_area = max(all_areas)
+                    min_area = min(all_areas)
+                    if cluster_area >= max_area * 0.9:
+                        descriptions.append("更大")
+                    elif cluster_area <= min_area * 1.1:
+                        descriptions.append("更小")
+            
+            # Shape comparison
+            if 'circularity' in cluster_means[cluster_id]:
+                all_circularity = [cluster_means[c]['circularity'] for c in cluster_means.keys() if 'circularity' in cluster_means[c]]
+                if all_circularity:
+                    cluster_circ = cluster_means[cluster_id]['circularity']
+                    max_circ = max(all_circularity)
+                    if cluster_circ >= max_circ * 0.95:
+                        descriptions.append("更圆")
+                    elif cluster_circ <= min(all_circularity) * 1.05:
+                        descriptions.append("更不规则")
+            
+            if 'aspect_ratio' in cluster_means[cluster_id]:
+                all_ar = [cluster_means[c]['aspect_ratio'] for c in cluster_means.keys() if 'aspect_ratio' in cluster_means[c]]
+                if all_ar:
+                    cluster_ar = cluster_means[cluster_id]['aspect_ratio']
+                    max_ar = max(all_ar)
+                    if cluster_ar >= max_ar * 0.9:
+                        descriptions.append("更细长")
+            
+            # Combine descriptions
+            if descriptions:
+                patterns[str(cluster_id)] = "、".join(descriptions)
+            else:
+                patterns[str(cluster_id)] = "形态特征中等"
+        
+        return patterns
+    
     def _calculate_cluster_statistics(self, adata, cluster_key: str) -> Dict[str, Any]:
         """Calculate statistics for each cluster."""
         if cluster_key not in adata.obs:
@@ -1166,6 +1252,12 @@ class Analysis_Visualizer_Tool(BaseTool):
                 cluster_areas = adata.obs.loc[cluster_mask, 'area']
                 stats[str(cluster_id)]['mean_area'] = float(cluster_areas.mean())
                 stats[str(cluster_id)]['median_area'] = float(cluster_areas.median())
+        
+        # Add morphological patterns
+        morph_patterns = self._analyze_morphological_patterns(adata, cluster_key)
+        for cluster_id in stats.keys():
+            if cluster_id in morph_patterns:
+                stats[cluster_id]['morphological_pattern'] = morph_patterns[cluster_id]
         
         return stats
     

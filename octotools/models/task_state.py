@@ -181,7 +181,6 @@ TOOL_STAGE_REGISTRY: Dict[str, ToolStage] = {
     "Organoid_Segmenter_Tool": ToolStage.STAGE_1_IMAGE_LEVEL,  # For organoid segmentation
     "Object_Detector_Tool": ToolStage.STAGE_1_IMAGE_LEVEL,
     "Advanced_Object_Detector_Tool": ToolStage.STAGE_1_IMAGE_LEVEL,
-    "Image_Captioner_Tool": ToolStage.STAGE_1_IMAGE_LEVEL,
     "Relevant_Patch_Zoomer_Tool": ToolStage.STAGE_1_IMAGE_LEVEL,
     "Text_Detector_Tool": ToolStage.STAGE_1_IMAGE_LEVEL,
     
