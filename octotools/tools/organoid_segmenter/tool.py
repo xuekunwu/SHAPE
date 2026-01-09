@@ -9,7 +9,6 @@ import matplotlib.pyplot as plt
 import torch
 from huggingface_hub import hf_hub_download
 from octotools.models.utils import VisualizationConfig
-import traceback
 import tifffile
 import tempfile
 from octotools.models.image_data import ImageData
@@ -427,7 +426,7 @@ class Organoid_Segmenter_Tool(BaseTool):
                 
                 if phase_contrast_img is None:
                     return {
-                        "error": f"Cannot read image: {image_path}. Please check if the file is a valid image format.",
+                        "error": f"Cannot read image: {image_path}",
                         "summary": "Image loading failed"
                     }
             
@@ -443,14 +442,24 @@ class Organoid_Segmenter_Tool(BaseTool):
                     phase_contrast_img = adjust_brightness_only(phase_contrast_img, target_brightness=120)
                     print(f"✅ Successfully adjusted brightness. New brightness: {np.mean(phase_contrast_img):.1f}")
                 except Exception as adjust_error:
-                    print(f"⚠️ Error during brightness adjustment: {adjust_error}")
+                    print(f"Warning: Brightness adjustment failed: {adjust_error}, using original image")
                     print(f"   Continuing with original image...")
             else:
                 print(f"✅ Brightness check passed: {brightness_reason}")
                 print(f"   Brightness: {brightness_stats['mean_brightness']:.1f}")
             
             # Convert to float32 for Cellpose segmentation
-            img = phase_contrast_img.astype(np.float32)
+            # Ensure image is 2D (grayscale) for organoid segmentation
+            if phase_contrast_img.ndim == 3:
+                # If somehow we got a 3D image, take first channel
+                print(f"Warning: phase_contrast_img has 3 dimensions {phase_contrast_img.shape}, using first channel")
+                phase_contrast_img = phase_contrast_img[:, :, 0] if phase_contrast_img.shape[2] <= phase_contrast_img.shape[0] else phase_contrast_img[0, :, :]
+            
+            if phase_contrast_img.ndim != 2:
+                return {
+                    "error": f"Invalid image dimensions: {phase_contrast_img.shape}. Expected 2D grayscale image.",
+                    "summary": "Image format error"
+                }
             
             img = phase_contrast_img.astype(np.float32)
             
@@ -469,15 +478,18 @@ class Organoid_Segmenter_Tool(BaseTool):
                 diameter = None
             
             # Run segmentation
-            # For organoids, we typically use grayscale images [0, 0]
-            # But also support RGB if provided
+            # For organoids, we use grayscale images [0, 0]
+            # img should be 2D at this point (already validated above)
             if len(img.shape) == 2:
                 channels = [0, 0]  # Grayscale
-            elif len(img.shape) == 3 and img.shape[2] == 3:
-                channels = [1, 2]  # RGB - use green and red channels
             else:
-                channels = [0, 0]  # Default to grayscale
+                # This should not happen, but handle gracefully
+                print(f"Warning: Unexpected image shape {img.shape}, forcing to grayscale")
+                if len(img.shape) == 3:
+                    img = img[:, :, 0] if img.shape[2] <= img.shape[0] else img[0, :, :]
+                channels = [0, 0]
             
+            # Run segmentation
             masks, flows, styles = self.model.eval(
                 [img],
                 diameter=diameter,
@@ -554,20 +566,12 @@ class Organoid_Segmenter_Tool(BaseTool):
             
         except Exception as e:
             error_msg = str(e)
-            error_traceback = traceback.format_exc()
-            print(f"Organoid_Segmenter_Tool: Error in organoid segmentation: {error_msg}")
-            print(f"Organoid_Segmenter_Tool: Traceback: {error_traceback}")
+            print(f"Organoid_Segmenter_Tool: Error: {error_msg}")
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
             return {
                 "error": f"Error during organoid segmentation: {error_msg}",
-                "summary": "Failed to process image",
-                "error_details": {
-                    "image_path": image_path if 'image_path' in locals() else str(image),
-                    "diameter": diameter if 'diameter' in locals() else "unknown",
-                    "flow_threshold": flow_threshold if 'flow_threshold' in locals() else "unknown",
-                    "cellprob_threshold": cellprob_threshold if 'cellprob_threshold' in locals() else "unknown"
-                }
+                "summary": f"Failed to process image: {error_msg}"
             }
 
     def get_metadata(self):
