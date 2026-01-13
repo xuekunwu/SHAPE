@@ -1308,13 +1308,14 @@ class Solver:
                                  tool_execution_failed, failed_tool_names, successful_tools):
         """
         Process multiple images in parallel for better performance.
-        Returns list of results or None if parallel processing should be skipped.
+        Returns tuple: (list of results, command_info_dict) or None if parallel processing should be skipped.
+        command_info_dict contains: {'analysis': str, 'explanation': str, 'command': str} for display purposes.
         """
         num_images = len(image_items)
         
         # Skip parallel processing for single image or if disabled
         if num_images <= 1:
-            return None
+            return None, None
         
         # Batch cache check first (fast, no need for parallel)
         cache_status = []
@@ -1345,14 +1346,16 @@ class Solver:
                     metadata={"title": f"### 🛠️ Step {step_count}: Cached Execution ({tool_name})"}
                 ))
                 results_per_image.append(result)
-            return results_per_image
+            return results_per_image, None  # No command info needed for cached results
         
         # Generate commands serially (avoid LLM API conflicts), then execute in parallel
         print(f"   🚀 Processing: {need_execution} image(s) need execution")
-        print(f"   📝 Generating commands (serial)...")
+        print(f"   📝 Generating commands (serial, with template reuse)...")
         
-        # Step 1: Generate commands serially
+        # Step 1: Generate commands serially with template reuse for same tool/context
         commands_to_execute = []
+        command_template_cache = {}  # Cache command templates to reduce LLM calls
+        
         for idx, status in enumerate(cache_status):
             if not status["cached"]:
                 img_item = status["img_item"]
@@ -1362,18 +1365,113 @@ class Solver:
                 artifact_key = make_artifact_key(tool_name, safe_path, context, sub_goal, image_id=image_id)
                 image_fingerprint = img_item.get("fingerprint") or (image_context.fingerprint if image_context else None)
                 
+                # Create template key (tool + context + sub_goal + group) - excludes image-specific info
+                template_key = (tool_name, context, sub_goal, group)
+                
                 try:
-                    tool_command = self.executor.generate_tool_command(
-                        user_query, safe_path, context, sub_goal, tool_name,
-                        self.planner.toolbox_metadata[tool_name], self.memory, 
-                        conversation_context=conversation_text, image_id=image_id,
-                        current_image_path=img_item.get("image_path"), group=group
-                    )
-                    _, _, command = self.executor.extract_explanation_and_command(tool_command)
+                    # Check if we can reuse a command template
+                    if template_key in command_template_cache:
+                        # Reuse template: replace placeholders with actual image paths
+                        template = command_template_cache[template_key]
+                        command = template
+                        # Replace image path placeholders (handle both escaped and unescaped paths)
+                        if safe_path:
+                            command = command.replace("{IMAGE_PATH}", safe_path)
+                        if img_item.get("image_path"):
+                            # Replace unescaped path (handle both forward and backslash)
+                            unescaped_path = img_item.get("image_path")
+                            command = command.replace("{IMAGE_PATH_UNESCAPED}", unescaped_path)
+                        if image_id:
+                            command = command.replace("{IMAGE_ID}", image_id)
+                        print(f"   ♻️ Reusing command template for image {idx + 1}/{num_images}")
+                    else:
+                        # Generate new command template via LLM
+                        tool_command = self.executor.generate_tool_command(
+                            user_query, safe_path, context, sub_goal, tool_name,
+                            self.planner.toolbox_metadata[tool_name], self.memory, 
+                            conversation_context=conversation_text, image_id=image_id,
+                            current_image_path=img_item.get("image_path"), group=group
+                        )
+                        _, _, command = self.executor.extract_explanation_and_command(tool_command)
+                        
+                        # Create template by replacing image-specific parts with placeholders
+                        # Use the first image's paths as template placeholders
+                        template = command
+                        if safe_path:
+                            # Replace escaped path (backslashes doubled)
+                            template = template.replace(safe_path, "{IMAGE_PATH}")
+                        if img_item.get("image_path"):
+                            # Replace unescaped path
+                            unescaped_path = img_item.get("image_path")
+                            template = template.replace(unescaped_path, "{IMAGE_PATH_UNESCAPED}")
+                        if image_id:
+                            template = template.replace(image_id, "{IMAGE_ID}")
+                        
+                        # Cache the template for reuse
+                        command_template_cache[template_key] = template
+                        print(f"   ✨ Generated new command template for image {idx + 1}/{num_images}")
+                    
                     commands_to_execute.append((idx, img_item, command, artifact_key, image_fingerprint))
                 except Exception as e:
                     print(f"⚠️ Failed to generate command for image {idx + 1}/{num_images}: {e}")
                     commands_to_execute.append((idx, img_item, None, artifact_key, image_fingerprint))
+        
+        # Log template reuse statistics
+        if command_template_cache:
+            reused_count = need_execution - len(command_template_cache)
+            if reused_count > 0:
+                print(f"   📊 Template reuse: {reused_count}/{need_execution} commands reused (saved {reused_count} LLM calls)")
+        
+        # Save first command info for display (avoid redundant LLM call later)
+        command_info_for_display = None
+        if commands_to_execute:
+            # Get the first command's info from template cache or generate it
+            first_cmd_idx = commands_to_execute[0][0]
+            first_img_item = cache_status[first_cmd_idx]["img_item"]
+            first_safe_path = first_img_item["image_path"].replace("\\", "\\\\") if first_img_item.get("image_path") else None
+            first_image_id = first_img_item.get("image_id")
+            first_group = first_img_item.get("group", "default")
+            first_template_key = (tool_name, context, sub_goal, first_group)
+            
+            if first_template_key in command_template_cache:
+                # Use cached template
+                template = command_template_cache[first_template_key]
+                # Replace placeholders to get actual command
+                display_command = template
+                if first_safe_path:
+                    display_command = display_command.replace("{IMAGE_PATH}", first_safe_path)
+                if first_img_item.get("image_path"):
+                    display_command = display_command.replace("{IMAGE_PATH_UNESCAPED}", first_img_item.get("image_path"))
+                if first_image_id:
+                    display_command = display_command.replace("{IMAGE_ID}", first_image_id)
+                command_info_for_display = {
+                    'analysis': f"Executed {tool_name} for {len(image_items)} image(s) using parallel processing",
+                    'explanation': f"Command template reused for efficient batch processing",
+                    'command': display_command
+                }
+            else:
+                # Generate command info for first image (already done above, extract from tool_command)
+                # This should not happen as we generate template in the loop, but handle it anyway
+                try:
+                    tool_command = self.executor.generate_tool_command(
+                        user_query, first_safe_path, context, sub_goal, tool_name,
+                        self.planner.toolbox_metadata[tool_name], self.memory, 
+                        conversation_context=conversation_text, image_id=first_image_id,
+                        current_image_path=first_img_item.get("image_path"), group=first_group
+                    )
+                    analysis, explanation, command = self.executor.extract_explanation_and_command(tool_command)
+                    command_info_for_display = {
+                        'analysis': analysis,
+                        'explanation': explanation,
+                        'command': command
+                    }
+                except Exception as e:
+                    print(f"⚠️ Failed to generate display command info: {e}")
+                    command_info_for_display = {
+                        'analysis': f"Executed {tool_name} for {len(image_items)} image(s)",
+                        'explanation': "Parallel execution completed",
+                        'command': f"execution = tool.execute(image='...', ...)"
+                    }
         
         # Step 2: Execute in parallel
         max_workers = min(4, len(commands_to_execute))
@@ -1434,7 +1532,7 @@ class Solver:
                         failed_tool_names.append(tool_name)
                     print(f"⚠️ Exception processing image {idx + 1}/{num_images}: {e}")
         
-        return results_per_image
+        return results_per_image, command_info_for_display
 
     def _collect_usage_and_cost(self, planner_usage=None, result=None):
         """
@@ -1828,39 +1926,35 @@ class Solver:
                 # Generate conversation_text once (same for all images in this step)
                 conversation_text = self._format_conversation_history()
                 
-                results_per_image = self._process_images_parallel(
+                parallel_result = self._process_images_parallel(
                     image_items, tool_name, context, sub_goal, user_query, 
                     conversation_text, group_name, image_context, step_count,
                     messages, query_analysis, visual_description, 
                     tool_execution_failed, failed_tool_names, successful_tools
                 )
                 
-                # Extract command/analysis from first non-cached result for display
-                # (parallel processing handles execution, but we need to show command info)
-                if results_per_image is not None:
-                    # Find first result that has command info or generate a representative one
-                    tool_command = None
-                    analysis = ""
-                    explanation = ""
-                    command = ""
-                    
-                    # Try to get command info from executor (generate for first image as representative)
-                    if image_items:
-                        first_img = image_items[0]
-                        safe_path = first_img["image_path"].replace("\\", "\\\\") if first_img.get("image_path") else None
-                        image_id = first_img.get("image_id")
-                        group = first_img.get("group", "default")
-                        tool_command = self.executor.generate_tool_command(
-                            user_query, safe_path, context, sub_goal, tool_name,
-                            self.planner.toolbox_metadata[tool_name], self.memory, 
-                            conversation_context=conversation_text, image_id=image_id,
-                            current_image_path=first_img.get("image_path"),
-                            group=group
-                        )
-                        analysis, explanation, command = self.executor.extract_explanation_and_command(tool_command)
+                # Extract results and command info from parallel processing
+                if parallel_result is not None:
+                    results_per_image, command_info_for_display = parallel_result
+                    # Use saved command info for display (avoids redundant LLM call)
+                    if command_info_for_display:
+                        analysis = command_info_for_display.get('analysis', '')
+                        explanation = command_info_for_display.get('explanation', '')
+                        command = command_info_for_display.get('command', '')
+                    else:
+                        # Fallback if command info not available
+                        analysis = f"Executed {tool_name} for {len(image_items)} image(s)"
+                        explanation = "Parallel execution completed"
+                        command = f"execution = tool.execute(image='...', ...)"
+                else:
+                    results_per_image = None
                 
                 # Legacy sequential processing (fallback for single image or when parallel is disabled)
                 if results_per_image is None:
+                    # Initialize command info for sequential processing
+                    analysis = ""
+                    explanation = ""
+                    command = ""
                     results_per_image = []
                     tool_command = None  # Initialize tool_command outside loop
                     analysis = ""  # Initialize analysis, explanation, command for display
