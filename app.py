@@ -1543,36 +1543,35 @@ class Solver:
                         # Get result with per-task timeout
                         idx_result, result, execution_failed = future.result(timeout=600)  # 10 minute timeout per task
                         results_per_image[idx] = result
-                    if execution_failed:
+                        if execution_failed:
+                            tool_execution_failed = True
+                            if tool_name not in failed_tool_names:
+                                failed_tool_names.append(tool_name)
+                            img_item = cache_status[idx]["img_item"]
+                            error_msg = result.get("error", "Unknown error") if isinstance(result, dict) else "Execution failed"
+                            messages.append(ChatMessage(
+                                role="assistant",
+                                content=f"⚠️ **Tool Execution Failed for image {idx + 1}/{num_images}:** {error_msg}\n\n**Tool:** `{tool_name}`\n**Image ID:** `{img_item.get('image_id')}`\n",
+                                metadata={"title": f"### ❌ Step {step_count}: Tool Execution Failed ({tool_name}) - Image {idx + 1}"}
+                            ))
+                        else:
+                            if tool_name not in successful_tools:
+                                successful_tools.add(tool_name)
+                    except FutureTimeoutError:
+                        print(f"⚠️ Timeout waiting for result from image {idx + 1}/{num_images} (ID: {cache_status[idx]['img_item'].get('image_id') if idx < len(cache_status) else 'unknown'})")
+                        results_per_image[idx] = {"error": "Task execution timeout (10 minutes)", "result": None}
                         tool_execution_failed = True
                         if tool_name not in failed_tool_names:
                             failed_tool_names.append(tool_name)
-                        img_item = cache_status[idx]["img_item"]
-                        error_msg = result.get("error", "Unknown error") if isinstance(result, dict) else "Execution failed"
-                        messages.append(ChatMessage(
-                            role="assistant",
-                            content=f"⚠️ **Tool Execution Failed for image {idx + 1}/{num_images}:** {error_msg}\n\n**Tool:** `{tool_name}`\n**Image ID:** `{img_item.get('image_id')}`\n",
-                            metadata={"title": f"### ❌ Step {step_count}: Tool Execution Failed ({tool_name}) - Image {idx + 1}"}
-                        ))
-                    else:
-                        if tool_name not in successful_tools:
-                            successful_tools.add(tool_name)
-                except Exception as e:
-                    error_msg = str(e)
-                    results_per_image[idx] = {"error": error_msg, "result": None}
-                    tool_execution_failed = True
-                    if tool_name not in failed_tool_names:
-                        failed_tool_names.append(tool_name)
-                    print(f"⚠️ Exception processing image {idx + 1}/{num_images}: {e}")
-                    import traceback
-                    traceback.print_exc()
-                
-                except FutureTimeoutError:
-                    print(f"⚠️ Timeout waiting for result from image {idx + 1}/{num_images} (ID: {cache_status[idx]['img_item'].get('image_id') if idx < len(cache_status) else 'unknown'})")
-                    results_per_image[idx] = {"error": "Task execution timeout (10 minutes)", "result": None}
-                    tool_execution_failed = True
-                    if tool_name not in failed_tool_names:
-                        failed_tool_names.append(tool_name)
+                    except Exception as e:
+                        error_msg = str(e)
+                        results_per_image[idx] = {"error": error_msg, "result": None}
+                        tool_execution_failed = True
+                        if tool_name not in failed_tool_names:
+                            failed_tool_names.append(tool_name)
+                        print(f"⚠️ Exception processing image {idx + 1}/{num_images}: {e}")
+                        import traceback
+                        traceback.print_exc()
             
             except TimeoutError:
                 print(f"⚠️ Total timeout ({max_total_time}s) exceeded for parallel execution")
