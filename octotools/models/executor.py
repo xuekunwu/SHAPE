@@ -727,6 +727,21 @@ Remember: Your <command> field MUST be valid Python code including any necessary
             # Using globals() in exec() matches the approach in octotools_original
             local_context = {"tool": tool}
             
+            # Preprocess command to fix common parameter mismatches
+            # Some tools accept query_cache_dir but LLM may generate output_dir
+            # Fix for Organoid_Segmenter_Tool, Cell_Segmenter_Tool, Nuclei_Segmenter_Tool
+            if tool_name in ["Organoid_Segmenter_Tool", "Cell_Segmenter_Tool", "Nuclei_Segmenter_Tool"]:
+                # Replace output_dir with query_cache_dir if present
+                if "output_dir" in command and "query_cache_dir" not in command:
+                    # Try to extract output_dir value and replace parameter name
+                    import re
+                    # Pattern: output_dir=value or output_dir="value" or output_dir='value'
+                    pattern = r'output_dir\s*=\s*([^,)]+)'
+                    if re.search(pattern, command):
+                        # Replace output_dir with query_cache_dir
+                        command = re.sub(r'output_dir\s*=', 'query_cache_dir=', command)
+                        logger.debug(f"Fixed parameter name: replaced output_dir with query_cache_dir for {tool_name}")
+            
             # Execute the entire command as a single block to preserve variable definitions
             result = execute_with_timeout(command, local_context)
             
