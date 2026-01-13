@@ -629,18 +629,31 @@ Remember: Your <command> field MUST be valid Python code including any necessary
             }
         
         def execute_with_timeout(block: str, local_context: dict) -> Optional[str]:
-            output_file = f"temp_output_{uuid.uuid4()}.txt"
+            # Use absolute path and include thread ID for thread safety in parallel execution
+            import threading
+            thread_id = threading.get_ident()
+            output_file = os.path.join(self.tool_cache_dir, f"temp_output_{thread_id}_{uuid.uuid4().hex}.txt")
             try:
-                with open(output_file, "w", encoding="utf-8") as f, redirect_stdout(f), redirect_stderr(f):
-                    try:
-                        # Use globals() like octotools_original to allow access to global namespace
-                        exec(block, globals(), local_context)
-                    except Exception as e:
-                        # Store error in local_context so it can be retrieved
-                        local_context["_execution_error"] = str(e)
-                        raise e
-                with open(output_file, "r", encoding="utf-8") as f:
-                    output = f.read()
+                # Ensure directory exists
+                os.makedirs(os.path.dirname(output_file), exist_ok=True)
+                
+                # Write and read in separate with blocks to ensure file is properly closed
+                with open(output_file, "w", encoding="utf-8") as f:
+                    with redirect_stdout(f), redirect_stderr(f):
+                        try:
+                            # Use globals() like octotools_original to allow access to global namespace
+                            exec(block, globals(), local_context)
+                        except Exception as e:
+                            # Store error in local_context so it can be retrieved
+                            local_context["_execution_error"] = str(e)
+                            raise e
+                
+                # Read output after file is closed from write
+                output = ""
+                if os.path.exists(output_file):
+                    with open(output_file, "r", encoding="utf-8") as f:
+                        output = f.read()
+                
                 # Check if execution variable exists, otherwise check for error
                 if "execution" in local_context:
                     execution_result = local_context["execution"]
@@ -656,11 +669,15 @@ Remember: Your <command> field MUST be valid Python code including any necessary
                     # If no execution variable and no error, return output or None
                     return output if output.strip() else None
             finally:
-                # Clean up temp file
+                # Clean up temp file - ensure it's closed before deletion
                 if os.path.exists(output_file):
                     try:
+                        # Small delay to ensure file handles are released
+                        import time
+                        time.sleep(0.01)
                         os.remove(output_file)
-                    except Exception:
+                    except (OSError, PermissionError) as e:
+                        # File might be in use or already deleted, ignore
                         pass
 
         # Import the tool module and instantiate it (lazy loading)
