@@ -32,6 +32,8 @@ from octotools.models.utils import normalize_tool_name
 from dataclasses import dataclass, field
 import pandas as pd
 import tifffile
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from functools import partial
 
 _AVAILABLE_TOOLS_CACHE = None
 
@@ -1276,6 +1278,172 @@ class Solver:
         total_tokens = input_tokens + output_tokens
         return total_tokens * self.default_cost_per_token
 
+    def _process_single_image(self, img_item, img_idx, total_images, tool_name, context, sub_goal, 
+                             user_query, conversation_text, group_name, image_context, step_count,
+                             messages, tool_execution_failed, failed_tool_names, successful_tools):
+        """
+        Process a single image with the given tool. Used for parallel processing.
+        Returns: (result, error_msg, execution_failed, cache_source)
+        """
+        img_group = img_item.get('group', 'unknown')
+        img_id = img_item.get('image_id', 'unknown')
+        safe_path = img_item["image_path"].replace("\\", "\\\\") if img_item.get("image_path") else None
+        artifact_key = make_artifact_key(tool_name, safe_path, context, sub_goal, image_id=img_item.get("image_id"))
+        
+        # Get image fingerprint for cross-session caching
+        image_fingerprint = img_item.get("fingerprint") or (image_context.fingerprint if image_context else None)
+        
+        # Check cache (both session and global cross-session)
+        cached_artifact = get_cached_artifact(self.agent_state, group_name, tool_name, artifact_key, image_fingerprint)
+        execution_failed = False
+        error_msg = None
+        cache_source = None
+        
+        if cached_artifact:
+            result = cached_artifact.get("result")
+            cache_source = "previous conversation" if image_fingerprint and cached_artifact.get("fingerprint_key") else "current session"
+            print(f"Reused cached artifact for {tool_name} (key={artifact_key}, source={cache_source})")
+        else:
+            # Generate tool command and execute
+            image_id = img_item.get("image_id")
+            group = img_item.get("group", "default")
+            tool_command = self.executor.generate_tool_command(
+                user_query, safe_path, context, sub_goal, tool_name,
+                self.planner.toolbox_metadata[tool_name], self.memory, 
+                conversation_context=conversation_text, image_id=image_id,
+                current_image_path=img_item.get("image_path"),
+                group=group
+            )
+            _, _, command = self.executor.extract_explanation_and_command(tool_command)
+            result = self.executor.execute_tool_command(tool_name, command)
+            result = make_json_serializable(result)
+            
+            # Check if tool execution failed
+            execution_failed, error_msg = _check_tool_execution_error(result, tool_name)
+            
+            if execution_failed:
+                store_artifact(self.agent_state, group_name, tool_name, artifact_key, 
+                             {"error": error_msg, "result": None}, image_fingerprint)
+                result = {"error": error_msg, "result": None}
+                print(f"⚠️ Tool '{tool_name}' failed for image {img_idx + 1}/{total_images} ({img_id}): {error_msg}")
+            else:
+                store_artifact(self.agent_state, group_name, tool_name, artifact_key, result, image_fingerprint)
+                print(f"Tool '{tool_name}' result for image {img_id}: {result}")
+        
+        return result, error_msg, execution_failed, cache_source
+    
+    def _process_images_parallel(self, image_items, tool_name, context, sub_goal, user_query,
+                                 conversation_text, group_name, image_context, step_count,
+                                 messages, query_analysis, visual_description,
+                                 tool_execution_failed, failed_tool_names, successful_tools):
+        """
+        Process multiple images in parallel for better performance.
+        Returns list of results or None if parallel processing should be skipped.
+        """
+        num_images = len(image_items)
+        
+        # Skip parallel processing for single image or if disabled
+        if num_images <= 1:
+            return None
+        
+        # Batch cache check first (fast, no need for parallel)
+        cache_status = []
+        for img_item in image_items:
+            safe_path = img_item["image_path"].replace("\\", "\\\\") if img_item.get("image_path") else None
+            artifact_key = make_artifact_key(tool_name, safe_path, context, sub_goal, image_id=img_item.get("image_id"))
+            image_fingerprint = img_item.get("fingerprint") or (image_context.fingerprint if image_context else None)
+            cached_artifact = get_cached_artifact(self.agent_state, group_name, tool_name, artifact_key, image_fingerprint)
+            cache_status.append({
+                "cached": cached_artifact is not None,
+                "artifact": cached_artifact,
+                "img_item": img_item
+            })
+        
+        # Count how many need execution
+        need_execution = sum(1 for status in cache_status if not status["cached"])
+        
+        # If all are cached, process sequentially (fast, no need for parallel)
+        if need_execution == 0:
+            results_per_image = []
+            for idx, status in enumerate(cache_status):
+                img_item = status["img_item"]
+                result = status["artifact"].get("result")
+                cache_source = "previous conversation" if status["artifact"].get("fingerprint_key") else "current session"
+                messages.append(ChatMessage(
+                    role="assistant",
+                    content=f"♻️ Reusing cached {tool_name} result for image `{img_item.get('image_id')}` (from {cache_source}).",
+                    metadata={"title": f"### 🛠️ Step {step_count}: Cached Execution ({tool_name})"}
+                ))
+                results_per_image.append(result)
+            return results_per_image
+        
+        # Parallel processing for images that need execution
+        # Use ThreadPoolExecutor for I/O-bound operations (image processing tools)
+        max_workers = min(4, num_images)  # Limit to 4 workers to avoid overwhelming system
+        
+        results_per_image = [None] * num_images
+        execution_results = {}
+        
+        print(f"   🚀 Parallel processing: {need_execution} image(s) need execution (using {max_workers} workers)")
+        
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Submit tasks for images that need execution
+            future_to_idx = {}
+            for idx, status in enumerate(cache_status):
+                if not status["cached"]:
+                    future = executor.submit(
+                        self._process_single_image,
+                        status["img_item"], idx + 1, num_images, tool_name, context, sub_goal,
+                        user_query, conversation_text, group_name, image_context, step_count,
+                        messages, tool_execution_failed, failed_tool_names, successful_tools
+                    )
+                    future_to_idx[future] = idx
+            
+            # Process cached results first (immediate)
+            for idx, status in enumerate(cache_status):
+                if status["cached"]:
+                    img_item = status["img_item"]
+                    result = status["artifact"].get("result")
+                    cache_source = "previous conversation" if status["artifact"].get("fingerprint_key") else "current session"
+                    messages.append(ChatMessage(
+                        role="assistant",
+                        content=f"♻️ Reusing cached {tool_name} result for image `{img_item.get('image_id')}` (from {cache_source}).",
+                        metadata={"title": f"### 🛠️ Step {step_count}: Cached Execution ({tool_name})"}
+                    ))
+                    results_per_image[idx] = result
+            
+            # Collect execution results as they complete
+            for future in as_completed(future_to_idx):
+                idx = future_to_idx[future]
+                try:
+                    result, error_msg, execution_failed, cache_source = future.result()
+                    results_per_image[idx] = result
+                    execution_results[idx] = (result, error_msg, execution_failed)
+                    
+                    if execution_failed:
+                        tool_execution_failed = True
+                        if tool_name not in failed_tool_names:
+                            failed_tool_names.append(tool_name)
+                        img_item = cache_status[idx]["img_item"]
+                        messages.append(ChatMessage(
+                            role="assistant",
+                            content=f"⚠️ **Tool Execution Failed for image {idx + 1}/{num_images}:** {error_msg}\n\n**Tool:** `{tool_name}`\n**Image ID:** `{img_item.get('image_id')}`\n",
+                            metadata={"title": f"### ❌ Step {step_count}: Tool Execution Failed ({tool_name}) - Image {idx + 1}"}
+                        ))
+                    else:
+                        if tool_name not in successful_tools:
+                            successful_tools.add(tool_name)
+                except Exception as e:
+                    error_msg = str(e)
+                    results_per_image[idx] = {"error": error_msg, "result": None}
+                    execution_results[idx] = (results_per_image[idx], error_msg, True)
+                    tool_execution_failed = True
+                    if tool_name not in failed_tool_names:
+                        failed_tool_names.append(tool_name)
+                    print(f"⚠️ Exception processing image {idx + 1}/{num_images}: {e}")
+        
+        return results_per_image
+
     def _collect_usage_and_cost(self, planner_usage=None, result=None):
         """
         Normalize usage stats from planner and executor outputs into input/output tokens
@@ -1471,6 +1639,9 @@ class Solver:
         failed_tool_names = []
         successful_steps = []  # Track successful steps: [{"step": N, "tool": "ToolName", "result": {...}}]
         successful_tools = set()  # Track successfully executed tools
+        tool_selection_history = []  # Track tool selection history to detect loops
+        consecutive_same_tool = 0  # Track consecutive same tool selections
+        last_tool_name = None  # Track last tool name
         
         while step_count < self.max_steps:  # Removed time limit check
             step_count += 1
@@ -1502,6 +1673,42 @@ class Solver:
             sub_goal = sub_goal or self.agent_state.last_sub_goal or ""
             step_data = {"step_count": step_count, "context": context, "sub_goal": sub_goal, "tool_name": tool_name, "time": round(time.time() - self.start_time, 5)}
             save_module_data(QUERY_ID, f"step_{step_count}_action_prediction", step_data)
+            
+            # Detect tool selection loops: if same tool is selected 3+ times consecutively, stop
+            if tool_name == last_tool_name:
+                consecutive_same_tool += 1
+            else:
+                consecutive_same_tool = 1
+                last_tool_name = tool_name
+            
+            tool_selection_history.append(tool_name)
+            
+            # Check for loop: same tool selected 3+ times consecutively
+            if consecutive_same_tool >= 3:
+                messages.append(ChatMessage(
+                    role="assistant",
+                    content=f"⚠️ **Stopping execution:** Tool '{tool_name}' has been selected {consecutive_same_tool} times consecutively. This indicates a potential loop. Stopping to prevent infinite execution.\n\n**Possible reasons:**\n- The tool may not be producing the expected results\n- The verification logic may not be correctly detecting completion\n- The query requirements may be unclear",
+                    metadata={"title": f"### 🛑 Step {step_count}: Stopping due to tool selection loop"}
+                ))
+                progress_msg_loop = f"**Progress**: Stopped (Tool {tool_name} selected repeatedly) 🛑"
+                yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, progress_msg_loop
+                execution_successful = False
+                break
+            
+            # Check for overall loop: if same tool sequence repeats (e.g., ToolA -> ToolB -> ToolA -> ToolB)
+            if len(tool_selection_history) >= 6:
+                recent_history = tool_selection_history[-6:]
+                # Check if last 3 tools match the previous 3 tools
+                if recent_history[:3] == recent_history[3:]:
+                    messages.append(ChatMessage(
+                        role="assistant",
+                        content=f"⚠️ **Stopping execution:** Detected repeating tool sequence: {' → '.join(recent_history[:3])}. This indicates a loop. Stopping to prevent infinite execution.",
+                        metadata={"title": f"### 🛑 Step {step_count}: Stopping due to tool sequence loop"}
+                    ))
+                    progress_msg_seq_loop = f"**Progress**: Stopped (Repeating tool sequence detected) 🛑"
+                    yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, progress_msg_seq_loop
+                    execution_successful = False
+                    break
 
             # Tool name normalization is already done in Planner.extract_context_subgoal_and_tool()
             # which calls ResponseParser.parse_next_step() that normalizes the tool name
@@ -1619,33 +1826,76 @@ class Solver:
                 # No need to wrap in per_image
                 
             else:
-                # For tools that process each image separately, execute in loop
+                # For tools that process each image separately, execute with parallel optimization
                 # Enhanced logging for batch processing with group information using unified function
                 group_data = _collect_group_info(image_items)
                 print(f"🔍 Processing {len(image_items)} image(s) with {tool_name} (batch processing mode)")
                 print(f"   Groups: {group_data['groups_summary']}")
                 
-                for img_idx, img_item in enumerate(image_items):
-                    img_group = img_item.get('group', 'unknown')
-                    img_id = img_item.get('image_id', 'unknown')
-                    print(f"   [{img_idx + 1}/{len(image_items)}] Image {img_id} (group: {img_group})")
-                    safe_path = img_item["image_path"].replace("\\", "\\\\") if img_item.get("image_path") else None
-                    artifact_key = make_artifact_key(tool_name, safe_path, context, sub_goal, image_id=img_item.get("image_id"))
+                # Optimized parallel processing for multiple images
+                # Generate conversation_text once (same for all images in this step)
+                conversation_text = self._format_conversation_history()
+                
+                results_per_image = self._process_images_parallel(
+                    image_items, tool_name, context, sub_goal, user_query, 
+                    conversation_text, group_name, image_context, step_count,
+                    messages, query_analysis, visual_description, 
+                    tool_execution_failed, failed_tool_names, successful_tools
+                )
+                
+                # Extract command/analysis from first non-cached result for display
+                # (parallel processing handles execution, but we need to show command info)
+                if results_per_image is not None:
+                    # Find first result that has command info or generate a representative one
+                    tool_command = None
+                    analysis = ""
+                    explanation = ""
+                    command = ""
                     
-                    # Get image fingerprint for cross-session caching
-                    image_fingerprint = img_item.get("fingerprint") or (image_context.fingerprint if image_context else None)
+                    # Try to get command info from executor (generate for first image as representative)
+                    if image_items:
+                        first_img = image_items[0]
+                        safe_path = first_img["image_path"].replace("\\", "\\\\") if first_img.get("image_path") else None
+                        image_id = first_img.get("image_id")
+                        group = first_img.get("group", "default")
+                        tool_command = self.executor.generate_tool_command(
+                            user_query, safe_path, context, sub_goal, tool_name,
+                            self.planner.toolbox_metadata[tool_name], self.memory, 
+                            conversation_context=conversation_text, image_id=image_id,
+                            current_image_path=first_img.get("image_path"),
+                            group=group
+                        )
+                        analysis, explanation, command = self.executor.extract_explanation_and_command(tool_command)
+                
+                # Legacy sequential processing (fallback for single image or when parallel is disabled)
+                if results_per_image is None:
+                    results_per_image = []
+                    tool_command = None  # Initialize tool_command outside loop
+                    analysis = ""  # Initialize analysis, explanation, command for display
+                    explanation = ""
+                    command = ""
                     
-                    # Check cache (both session and global cross-session)
-                    cached_artifact = get_cached_artifact(self.agent_state, group_name, tool_name, artifact_key, image_fingerprint)
-                    execution_failed = False
-                    error_msg = None
+                    for img_idx, img_item in enumerate(image_items):
+                        img_group = img_item.get('group', 'unknown')
+                        img_id = img_item.get('image_id', 'unknown')
+                        print(f"   [{img_idx + 1}/{len(image_items)}] Image {img_id} (group: {img_group})")
+                        safe_path = img_item["image_path"].replace("\\", "\\\\") if img_item.get("image_path") else None
+                        artifact_key = make_artifact_key(tool_name, safe_path, context, sub_goal, image_id=img_item.get("image_id"))
+                        
+                        # Get image fingerprint for cross-session caching
+                        image_fingerprint = img_item.get("fingerprint") or (image_context.fingerprint if image_context else None)
+                        
+                        # Check cache (both session and global cross-session)
+                        cached_artifact = get_cached_artifact(self.agent_state, group_name, tool_name, artifact_key, image_fingerprint)
+                        execution_failed = False
+                        error_msg = None
 
-                    if cached_artifact:
-                        result = cached_artifact.get("result")
-                        analysis = "Cached result reused"
-                        explanation = "Found matching artifact in session or previous conversation; skipping execution."
-                        command = "execution = 'cached_artifact'"
-                        cache_source = "previous conversation" if image_fingerprint and cached_artifact.get("fingerprint_key") else "current session"
+                        if cached_artifact:
+                            result = cached_artifact.get("result")
+                            analysis = "Cached result reused"
+                            explanation = "Found matching artifact in session or previous conversation; skipping execution."
+                            command = "execution = 'cached_artifact'"
+                            cache_source = "previous conversation" if image_fingerprint and cached_artifact.get("fingerprint_key") else "current session"
                         
                         # Create a ToolCommand object for memory consistency
                         from octotools.models.formatters import ToolCommand
