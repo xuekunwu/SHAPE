@@ -1477,17 +1477,25 @@ class Solver:
         max_workers = min(4, len(commands_to_execute))
         results_per_image = [None] * num_images
         
-        print(f"   ⚡ Executing tools in parallel ({max_workers} workers)...")
+        print(f"   ⚡ Executing tools in parallel ({max_workers} workers, {len(commands_to_execute)} commands)...")
         
         def execute_command(cmd_tuple):
             """Execute a single tool command."""
             idx, img_item, command, artifact_key, image_fingerprint = cmd_tuple
-            if command is None:
-                return idx, {"error": "Command generation failed", "result": None}, True
-            result, execution_failed = self._execute_tool_command(
-                tool_name, command, artifact_key, image_fingerprint, group_name, img_item, idx, num_images
-            )
-            return idx, result, execution_failed
+            try:
+                print(f"   [Worker] Starting execution for image {idx + 1}/{num_images} (ID: {img_item.get('image_id')})")
+                if command is None:
+                    return idx, {"error": "Command generation failed", "result": None}, True
+                result, execution_failed = self._execute_tool_command(
+                    tool_name, command, artifact_key, image_fingerprint, group_name, img_item, idx, num_images
+                )
+                print(f"   [Worker] Completed execution for image {idx + 1}/{num_images} (ID: {img_item.get('image_id')})")
+                return idx, result, execution_failed
+            except Exception as e:
+                print(f"   [Worker] Exception in execute_command for image {idx + 1}/{num_images}: {e}")
+                import traceback
+                traceback.print_exc()
+                return idx, {"error": str(e), "result": None}, True
         
         # Process cached results first
         for idx, status in enumerate(cache_status):
@@ -1502,13 +1510,24 @@ class Solver:
                 ))
                 results_per_image[idx] = result
         
-        # Execute commands in parallel
+        # Execute commands in parallel with timeout protection
+        import time
+        start_time = time.time()
+        completed_count = 0
+        
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = {executor.submit(execute_command, cmd): cmd[0] for cmd in commands_to_execute}
+            print(f"   📊 Submitted {len(futures)} tasks to thread pool")
+            
             for future in as_completed(futures):
                 idx = futures[future]
+                completed_count += 1
+                elapsed = time.time() - start_time
+                print(f"   ✅ Completed {completed_count}/{len(futures)} tasks (elapsed: {elapsed:.2f}s)")
+                
                 try:
-                    idx_result, result, execution_failed = future.result()
+                    # Add timeout to future.result() to prevent indefinite blocking
+                    idx_result, result, execution_failed = future.result(timeout=300)  # 5 minute timeout per task
                     results_per_image[idx] = result
                     if execution_failed:
                         tool_execution_failed = True
@@ -1531,6 +1550,21 @@ class Solver:
                     if tool_name not in failed_tool_names:
                         failed_tool_names.append(tool_name)
                     print(f"⚠️ Exception processing image {idx + 1}/{num_images}: {e}")
+                    import traceback
+                    traceback.print_exc()
+        
+        # Verify all results are populated (critical check)
+        missing_results = [i for i, r in enumerate(results_per_image) if r is None]
+        if missing_results:
+            print(f"⚠️ Warning: {len(missing_results)} images have no results: indices {missing_results}")
+            for idx in missing_results:
+                img_item = cache_status[idx]["img_item"] if idx < len(cache_status) else {}
+                results_per_image[idx] = {"error": "No result returned from parallel execution", "result": None}
+                print(f"   ⚠️ Setting error result for missing image {idx + 1} (ID: {img_item.get('image_id', 'unknown')})")
+        
+        total_elapsed = time.time() - start_time
+        successful_count = len([r for r in results_per_image if r and not (isinstance(r, dict) and r.get("error"))])
+        print(f"   ✅ Parallel execution completed: {successful_count}/{num_images} successful, {len(missing_results)} missing, total time: {total_elapsed:.2f}s")
         
         return results_per_image, command_info_for_display
 
