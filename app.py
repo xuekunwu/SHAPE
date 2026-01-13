@@ -1278,59 +1278,29 @@ class Solver:
         total_tokens = input_tokens + output_tokens
         return total_tokens * self.default_cost_per_token
 
-    def _process_single_image(self, img_item, img_idx, total_images, tool_name, context, sub_goal, 
-                             user_query, conversation_text, group_name, image_context, step_count,
-                             messages, tool_execution_failed, failed_tool_names, successful_tools):
-        """
-        Process a single image with the given tool. Used for parallel processing.
-        Returns: (result, error_msg, execution_failed, cache_source)
-        """
-        img_group = img_item.get('group', 'unknown')
-        img_id = img_item.get('image_id', 'unknown')
-        safe_path = img_item["image_path"].replace("\\", "\\\\") if img_item.get("image_path") else None
-        artifact_key = make_artifact_key(tool_name, safe_path, context, sub_goal, image_id=img_item.get("image_id"))
-        
-        # Get image fingerprint for cross-session caching
-        image_fingerprint = img_item.get("fingerprint") or (image_context.fingerprint if image_context else None)
-        
-        # Check cache (both session and global cross-session)
-        cached_artifact = get_cached_artifact(self.agent_state, group_name, tool_name, artifact_key, image_fingerprint)
-        execution_failed = False
-        error_msg = None
-        cache_source = None
-        
-        if cached_artifact:
-            result = cached_artifact.get("result")
-            cache_source = "previous conversation" if image_fingerprint and cached_artifact.get("fingerprint_key") else "current session"
-            print(f"Reused cached artifact for {tool_name} (key={artifact_key}, source={cache_source})")
-        else:
-            # Generate tool command and execute
-            image_id = img_item.get("image_id")
-            group = img_item.get("group", "default")
-            tool_command = self.executor.generate_tool_command(
-                user_query, safe_path, context, sub_goal, tool_name,
-                self.planner.toolbox_metadata[tool_name], self.memory, 
-                conversation_context=conversation_text, image_id=image_id,
-                current_image_path=img_item.get("image_path"),
-                group=group
-            )
-            _, _, command = self.executor.extract_explanation_and_command(tool_command)
+    def _execute_tool_command(self, tool_name, command, artifact_key, image_fingerprint, group_name, img_item, idx, num_images):
+        """Execute a tool command and handle errors. Returns (result, execution_failed)."""
+        try:
             result = self.executor.execute_tool_command(tool_name, command)
             result = make_json_serializable(result)
-            
-            # Check if tool execution failed
             execution_failed, error_msg = _check_tool_execution_error(result, tool_name)
             
             if execution_failed:
                 store_artifact(self.agent_state, group_name, tool_name, artifact_key, 
                              {"error": error_msg, "result": None}, image_fingerprint)
                 result = {"error": error_msg, "result": None}
-                print(f"⚠️ Tool '{tool_name}' failed for image {img_idx + 1}/{total_images} ({img_id}): {error_msg}")
+                print(f"⚠️ Tool '{tool_name}' failed for image {idx + 1}/{num_images} ({img_item.get('image_id')}): {error_msg}")
             else:
                 store_artifact(self.agent_state, group_name, tool_name, artifact_key, result, image_fingerprint)
-                print(f"Tool '{tool_name}' result for image {img_id}: {result}")
-        
-        return result, error_msg, execution_failed, cache_source
+                print(f"Tool '{tool_name}' result for image {img_item.get('image_id')}: {result}")
+            
+            return result, execution_failed
+        except Exception as e:
+            error_msg = str(e)
+            store_artifact(self.agent_state, group_name, tool_name, artifact_key, 
+                         {"error": error_msg, "result": None}, image_fingerprint)
+            print(f"⚠️ Exception executing tool for image {idx + 1}/{num_images}: {e}")
+            return {"error": error_msg, "result": None}, True
     
     def _process_images_parallel(self, image_items, tool_name, context, sub_goal, user_query,
                                  conversation_text, group_name, image_context, step_count,
@@ -1377,13 +1347,11 @@ class Solver:
                 results_per_image.append(result)
             return results_per_image
         
-        # For images that need execution, generate commands first (serial) then execute in parallel
-        # LLM calls (generate_tool_command) must be serial to avoid retry conflicts
-        # Tool execution can be parallel for I/O-bound operations
+        # Generate commands serially (avoid LLM API conflicts), then execute in parallel
         print(f"   🚀 Processing: {need_execution} image(s) need execution")
-        print(f"   📝 Generating tool commands (serial) for {need_execution} image(s)...")
+        print(f"   📝 Generating commands (serial)...")
         
-        # Step 1: Generate all tool commands serially (to avoid LLM API conflicts)
+        # Step 1: Generate commands serially
         commands_to_execute = []
         for idx, status in enumerate(cache_status):
             if not status["cached"]:
@@ -1391,109 +1359,59 @@ class Solver:
                 safe_path = img_item["image_path"].replace("\\", "\\\\") if img_item.get("image_path") else None
                 image_id = img_item.get("image_id")
                 group = img_item.get("group", "default")
+                artifact_key = make_artifact_key(tool_name, safe_path, context, sub_goal, image_id=image_id)
+                image_fingerprint = img_item.get("fingerprint") or (image_context.fingerprint if image_context else None)
                 
                 try:
                     tool_command = self.executor.generate_tool_command(
                         user_query, safe_path, context, sub_goal, tool_name,
                         self.planner.toolbox_metadata[tool_name], self.memory, 
                         conversation_context=conversation_text, image_id=image_id,
-                        current_image_path=img_item.get("image_path"),
-                        group=group
+                        current_image_path=img_item.get("image_path"), group=group
                     )
                     _, _, command = self.executor.extract_explanation_and_command(tool_command)
-                    commands_to_execute.append({
-                        "idx": idx,
-                        "img_item": img_item,
-                        "command": command,
-                        "artifact_key": make_artifact_key(tool_name, safe_path, context, sub_goal, image_id=image_id),
-                        "image_fingerprint": img_item.get("fingerprint") or (image_context.fingerprint if image_context else None)
-                    })
+                    commands_to_execute.append((idx, img_item, command, artifact_key, image_fingerprint))
                 except Exception as e:
-                    error_msg = str(e)
                     print(f"⚠️ Failed to generate command for image {idx + 1}/{num_images}: {e}")
-                    commands_to_execute.append({
-                        "idx": idx,
-                        "img_item": status["img_item"],
-                        "command": None,
-                        "error": error_msg,
-                        "artifact_key": None,
-                        "image_fingerprint": None
-                    })
+                    commands_to_execute.append((idx, img_item, None, artifact_key, image_fingerprint))
         
-        # Step 2: Execute commands in parallel (I/O-bound operations)
-        max_workers = min(4, len(commands_to_execute))  # Limit to 4 workers
+        # Step 2: Execute in parallel
+        max_workers = min(4, len(commands_to_execute))
         results_per_image = [None] * num_images
-        execution_results = {}
         
-        print(f"   ⚡ Executing tools in parallel (using {max_workers} workers)...")
+        print(f"   ⚡ Executing tools in parallel ({max_workers} workers)...")
         
-        def execute_single_command(cmd_data):
-            """Execute a single tool command (used for parallel execution)."""
-            idx = cmd_data["idx"]
-            img_item = cmd_data["img_item"]
-            command = cmd_data["command"]
-            artifact_key = cmd_data["artifact_key"]
-            image_fingerprint = cmd_data["image_fingerprint"]
-            
+        def execute_command(cmd_tuple):
+            """Execute a single tool command."""
+            idx, img_item, command, artifact_key, image_fingerprint = cmd_tuple
             if command is None:
-                return idx, {"error": cmd_data.get("error", "Command generation failed"), "result": None}, True
-            
-            try:
-                result = self.executor.execute_tool_command(tool_name, command)
-                result = make_json_serializable(result)
-                execution_failed, error_msg = _check_tool_execution_error(result, tool_name)
-                
-                if execution_failed:
-                    store_artifact(self.agent_state, group_name, tool_name, artifact_key, 
-                                 {"error": error_msg, "result": None}, image_fingerprint)
-                    result = {"error": error_msg, "result": None}
-                    print(f"⚠️ Tool '{tool_name}' failed for image {idx + 1}/{num_images} ({img_item.get('image_id')}): {error_msg}")
-                else:
-                    store_artifact(self.agent_state, group_name, tool_name, artifact_key, result, image_fingerprint)
-                    print(f"Tool '{tool_name}' result for image {img_item.get('image_id')}: {result}")
-                
-                return idx, result, execution_failed, None
-            except Exception as e:
-                error_msg = str(e)
-                store_artifact(self.agent_state, group_name, tool_name, artifact_key, 
-                             {"error": error_msg, "result": None}, image_fingerprint)
-                return idx, {"error": error_msg, "result": None}, True, None
+                return idx, {"error": "Command generation failed", "result": None}, True
+            result, execution_failed = self._execute_tool_command(
+                tool_name, command, artifact_key, image_fingerprint, group_name, img_item, idx, num_images
+            )
+            return idx, result, execution_failed
         
+        # Process cached results first
+        for idx, status in enumerate(cache_status):
+            if status["cached"]:
+                img_item = status["img_item"]
+                result = status["artifact"].get("result")
+                cache_source = "previous conversation" if status["artifact"].get("fingerprint_key") else "current session"
+                messages.append(ChatMessage(
+                    role="assistant",
+                    content=f"♻️ Reusing cached {tool_name} result for image `{img_item.get('image_id')}` (from {cache_source}).",
+                    metadata={"title": f"### 🛠️ Step {step_count}: Cached Execution ({tool_name})"}
+                ))
+                results_per_image[idx] = result
+        
+        # Execute commands in parallel
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # Submit all execution tasks
-            future_to_idx = {}
-            for cmd_data in commands_to_execute:
-                future = executor.submit(execute_single_command, cmd_data)
-                future_to_idx[future] = cmd_data["idx"]
-            
-            # Process cached results first (immediate)
-            for idx, status in enumerate(cache_status):
-                if status["cached"]:
-                    img_item = status["img_item"]
-                    result = status["artifact"].get("result")
-                    cache_source = "previous conversation" if status["artifact"].get("fingerprint_key") else "current session"
-                    messages.append(ChatMessage(
-                        role="assistant",
-                        content=f"♻️ Reusing cached {tool_name} result for image `{img_item.get('image_id')}` (from {cache_source}).",
-                        metadata={"title": f"### 🛠️ Step {step_count}: Cached Execution ({tool_name})"}
-                    ))
-                    results_per_image[idx] = result
-            
-            # Collect execution results as they complete
-            for future in as_completed(future_to_idx):
-                idx = future_to_idx[future]
+            futures = {executor.submit(execute_command, cmd): cmd[0] for cmd in commands_to_execute}
+            for future in as_completed(futures):
+                idx = futures[future]
                 try:
-                    result_data = future.result()
-                    if len(result_data) == 4:
-                        idx_result, result, execution_failed, cache_source = result_data
-                    else:
-                        # Fallback for old format
-                        idx_result, result, execution_failed = result_data
-                        cache_source = None
-                    
+                    idx_result, result, execution_failed = future.result()
                     results_per_image[idx] = result
-                    execution_results[idx] = (result, None, execution_failed)
-                    
                     if execution_failed:
                         tool_execution_failed = True
                         if tool_name not in failed_tool_names:
@@ -1511,7 +1429,6 @@ class Solver:
                 except Exception as e:
                     error_msg = str(e)
                     results_per_image[idx] = {"error": error_msg, "result": None}
-                    execution_results[idx] = (results_per_image[idx], error_msg, True)
                     tool_execution_failed = True
                     if tool_name not in failed_tool_names:
                         failed_tool_names.append(tool_name)
