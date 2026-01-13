@@ -1512,23 +1512,37 @@ class Solver:
         
         # Execute commands in parallel with timeout protection
         import time
+        from concurrent.futures import TimeoutError as FutureTimeoutError
         start_time = time.time()
         completed_count = 0
+        max_total_time = 1800  # 30 minutes total timeout for all tasks
         
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = {executor.submit(execute_command, cmd): cmd[0] for cmd in commands_to_execute}
             print(f"   📊 Submitted {len(futures)} tasks to thread pool")
             
-            for future in as_completed(futures):
-                idx = futures[future]
-                completed_count += 1
-                elapsed = time.time() - start_time
-                print(f"   ✅ Completed {completed_count}/{len(futures)} tasks (elapsed: {elapsed:.2f}s)")
-                
-                try:
-                    # Add timeout to future.result() to prevent indefinite blocking
-                    idx_result, result, execution_failed = future.result(timeout=300)  # 5 minute timeout per task
-                    results_per_image[idx] = result
+            # Track which futures have been processed
+            processed_futures = set()
+            
+            # Use timeout for the entire as_completed loop to prevent indefinite blocking
+            try:
+                for future in as_completed(futures, timeout=max_total_time):
+                    # Check if we've exceeded total time
+                    elapsed = time.time() - start_time
+                    if elapsed > max_total_time:
+                        print(f"⚠️ Total timeout ({max_total_time}s) exceeded, stopping parallel execution")
+                        break
+                    
+                    idx = futures[future]
+                    completed_count += 1
+                    processed_futures.add(future)
+                    
+                    print(f"   ✅ Completed {completed_count}/{len(futures)} tasks (elapsed: {elapsed:.2f}s, image {idx + 1}, ID: {cache_status[idx]['img_item'].get('image_id') if idx < len(cache_status) else 'unknown'})")
+                    
+                    try:
+                        # Get result with per-task timeout
+                        idx_result, result, execution_failed = future.result(timeout=600)  # 10 minute timeout per task
+                        results_per_image[idx] = result
                     if execution_failed:
                         tool_execution_failed = True
                         if tool_name not in failed_tool_names:
@@ -1552,6 +1566,22 @@ class Solver:
                     print(f"⚠️ Exception processing image {idx + 1}/{num_images}: {e}")
                     import traceback
                     traceback.print_exc()
+                
+                except FutureTimeoutError:
+                    print(f"⚠️ Timeout waiting for result from image {idx + 1}/{num_images} (ID: {cache_status[idx]['img_item'].get('image_id') if idx < len(cache_status) else 'unknown'})")
+                    results_per_image[idx] = {"error": "Task execution timeout (10 minutes)", "result": None}
+                    tool_execution_failed = True
+                    if tool_name not in failed_tool_names:
+                        failed_tool_names.append(tool_name)
+            
+            except TimeoutError:
+                print(f"⚠️ Total timeout ({max_total_time}s) exceeded for parallel execution")
+                # Mark unprocessed futures as failed
+                for future, idx in futures.items():
+                    if future not in processed_futures:
+                        print(f"   ⚠️ Marking image {idx + 1} as timeout (not processed)")
+                        results_per_image[idx] = {"error": "Parallel execution timeout", "result": None}
+                        tool_execution_failed = True
         
         # Verify all results are populated (critical check)
         missing_results = [i for i, r in enumerate(results_per_image) if r is None]
