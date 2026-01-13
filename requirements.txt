@@ -1,9 +1,11 @@
 # Core dependencies for OctoTools framework
 # Build system dependencies (required for Python 3.13)
+# Install these first to ensure build tools are available
 setuptools>=65.0.0
 wheel>=0.40.0
 build>=0.10.0
 cython>=3.0.0  # Required for building scikit-learn on Python 3.13
+numpy>=1.21.0,<2.0  # Install numpy early as many packages depend on it
 
 python-bidi==0.4.2
 easyocr==1.7.1
@@ -15,7 +17,9 @@ platformdirs==4.2.2
 sympy>=1.13.3
 tenacity==9.0.0
 diskcache==5.6.3
-transformers==4.44.2
+# Updated transformers and tokenizers for Python 3.13 compatibility
+# tokenizers will be installed automatically as a dependency of transformers
+transformers>=4.44.2  # Updated to allow newer versions with Python 3.13 support
 pymed==0.8.9
 metapub==0.5.12
 gradio==5.23.1
@@ -26,7 +30,7 @@ torchvision>=0.15.0
 
 # Scientific computing and data analysis
 # Updated versions for Python 3.13 compatibility
-numpy>=1.21.0,<2.0
+# Note: numpy is installed above in build dependencies section
 pandas>=2.1.0,<3.0  # Updated for Python 3.13 support (pandas 2.1+ supports Python 3.13)
 scikit-learn>=1.4.0,<2.0  # Updated for Python 3.13 support (scikit-learn 1.4+ supports Python 3.13)
 scipy>=1.7.0
