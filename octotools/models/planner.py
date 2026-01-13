@@ -434,6 +434,23 @@ IMPORTANT: Do NOT suggest tools for analysis that is not explicitly requested in
         # Enforce Single_Cell_Cropper_Tool after segmentation
         if last_tool in ["Cell_Segmenter_Tool", "Nuclei_Segmenter_Tool", "Organoid_Segmenter_Tool"]:
             if next_required == 'Single_Cell_Cropper_Tool' and selected_tool != 'Single_Cell_Cropper_Tool':
+                # Check if previous tool execution failed for all images - if so, don't enforce next tool
+                actions = memory.get_actions(llm_safe=False)
+                if actions:
+                    last_action = actions[-1]
+                    last_result = last_action.get('result')
+                    if isinstance(last_result, dict) and 'per_image' in last_result:
+                        # Check if all images failed
+                        per_image = last_result.get('per_image', [])
+                        all_failed = True
+                        for img_result in per_image:
+                            if isinstance(img_result, dict) and 'error' not in img_result:
+                                all_failed = False
+                                break
+                        if all_failed and len(per_image) > 0:
+                            logger.warning(f"⚠️ SKIPPING PIPELINE ENFORCEMENT: Previous tool {last_tool} failed for all images. Not enforcing Single_Cell_Cropper_Tool.")
+                            return None  # Don't enforce next tool if all images failed
+                
                 if 'Single_Cell_Cropper_Tool' in available_tools:
                     logger.warning(f"⚠️ PIPELINE ENFORCEMENT: After {last_tool}, need Single_Cell_Cropper_Tool. "
                                  f"LLM selected '{selected_tool}', overriding.")

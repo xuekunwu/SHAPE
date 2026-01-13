@@ -222,7 +222,7 @@ class ChatOpenAI(EngineLM, CachedEngine):
                         "total_tokens": getattr(response._response.usage, 'total_tokens', 0)
                     }
                 
-                print(f"Structured model usage info: {usage_info}")
+                # Token usage info removed - no longer tracking costs
                 
                 # Return both content and usage info
                 return {
@@ -267,7 +267,7 @@ class ChatOpenAI(EngineLM, CachedEngine):
                             "total_tokens": response.usage.total_tokens
                         }
                     }
-                    print(f"Fallback usage info: {result['usage']}")
+                    # Token usage info removed - no longer tracking costs
                     return result
                 except Exception as fallback_error:
                     fallback_error_details = str(fallback_error)
@@ -494,7 +494,7 @@ class ChatOpenAI(EngineLM, CachedEngine):
                         "total_tokens": getattr(response._response.usage, 'total_tokens', 0)
                     }
                 
-                print(f"Multimodal structured model usage info: {usage_info}")
+                # Token usage info removed - no longer tracking costs
                 
                 # Return both content and usage info
                 return {
@@ -536,7 +536,7 @@ class ChatOpenAI(EngineLM, CachedEngine):
                             "total_tokens": response.usage.total_tokens
                         }
                     }
-                    print(f"Multimodal fallback usage info: {result['usage']}")
+                    # Token usage info removed - no longer tracking costs
                     return result
                 except Exception as fallback_error:
                     fallback_error_details = str(fallback_error)
