@@ -3,6 +3,7 @@
 setuptools>=65.0.0
 wheel>=0.40.0
 build>=0.10.0
+cython>=3.0.0  # Required for building scikit-learn on Python 3.13
 
 python-bidi==0.4.2
 easyocr==1.7.1
@@ -24,10 +25,10 @@ torch>=2.0.0
 torchvision>=0.15.0
 
 # Scientific computing and data analysis
-# Updated numpy version for Python 3.13 compatibility
+# Updated versions for Python 3.13 compatibility
 numpy>=1.21.0,<2.0
 pandas>=1.3.0,<2.0
-scikit-learn>=1.0.0,<1.4
+scikit-learn>=1.0.0,<2.0  # Updated for Python 3.13 support
 scipy>=1.7.0
 
 # Image processing and computer vision
