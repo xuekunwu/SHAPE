@@ -1188,7 +1188,6 @@ class Solver:
         self.query_cache_dir = query_cache_dir
         self.agent_state = agent_state or AgentState()
         self.start_time = time.time()
-        self.step_tokens = []
         self.visual_outputs_for_gradio = []
         self.downloadable_files = []  # List of file paths for downloadable files (e.g., h5ad)
 
@@ -1198,12 +1197,8 @@ class Solver:
         self.step_times = []
         self.step_memory = []
         self.max_memory = 0
-        self.step_costs = []
-        self.total_cost = 0.0
         self.end_time = None
         self.step_info = []  # Store detailed information for each step
-        self.model_config = self._get_model_config(planner.llm_engine_name)
-        self.default_cost_per_token = self._get_default_cost_per_token()
 
     def _format_conversation_history(self) -> str:
         """Render conversation history into a plain-text transcript for prompts."""
@@ -1256,27 +1251,6 @@ class Solver:
         else:
             return str(result)[:200] + "..." if len(str(result)) > 200 else str(result)
 
-    def _get_model_config(self, model_id: str) -> dict:
-        """Return the pricing config for the current model (cached on init)."""
-        for config in OPENAI_MODEL_CONFIGS.values():
-            if config.get("model_id") == model_id:
-                return config
-        return None
-
-    def _get_default_cost_per_token(self) -> float:
-        """Fallback pricing when model-specific costs are unavailable."""
-        if self.model_config and 'expected_cost_per_1k_tokens' in self.model_config:
-            return self.model_config['expected_cost_per_1k_tokens'] / 1000
-        return 0.00001
-
-    def _calculate_cost(self, input_tokens: int, output_tokens: int) -> float:
-        """Calculate token cost using input/output pricing when available."""
-        if self.model_config and 'input_cost_per_1k_tokens' in self.model_config and 'output_cost_per_1k_tokens' in self.model_config:
-            input_cost = (input_tokens / 1000) * self.model_config['input_cost_per_1k_tokens']
-            output_cost = (output_tokens / 1000) * self.model_config['output_cost_per_1k_tokens']
-            return input_cost + output_cost
-        total_tokens = input_tokens + output_tokens
-        return total_tokens * self.default_cost_per_token
 
     def _execute_tool_command(self, tool_name, command, artifact_key, image_fingerprint, group_name, img_item, idx, num_images):
         """Execute a tool command and handle errors. Returns (result, execution_failed)."""
@@ -1469,40 +1443,6 @@ class Solver:
         
         return results_per_image, command_info_for_display
 
-    def _collect_usage_and_cost(self, planner_usage=None, result=None):
-        """
-        Normalize usage stats from planner and executor outputs into input/output tokens
-        plus a unified cost calculation.
-        """
-        planner_usage = planner_usage or {}
-        input_tokens = planner_usage.get('prompt_tokens', 0)
-        output_tokens = planner_usage.get('completion_tokens', 0)
-        total_tokens = planner_usage.get('total_tokens', 0)
-
-        if total_tokens and not (input_tokens or output_tokens):
-            input_tokens = int(total_tokens * 0.7)
-            output_tokens = total_tokens - input_tokens
-
-        result_input = result_output = result_total = 0
-        if isinstance(result, dict):
-            if 'usage' in result:
-                result_input = result['usage'].get('prompt_tokens', 0)
-                result_output = result['usage'].get('completion_tokens', 0)
-                result_total = result['usage'].get('total_tokens', result_input + result_output)
-            elif 'token_usage' in result:
-                result_total = result['token_usage']
-                result_input = int(result_total * 0.7)
-                result_output = result_total - result_input
-
-        input_tokens += result_input
-        output_tokens += result_output
-        if input_tokens or output_tokens:
-            total_tokens = input_tokens + output_tokens
-        else:
-            total_tokens += result_total
-
-        cost = self._calculate_cost(input_tokens, output_tokens)
-        return input_tokens, output_tokens, total_tokens, cost
 
     def stream_solve_user_problem(self, user_query: str, image_context: ImageContext, group_name: str, group_images: List[Dict[str, Any]], api_key: str, messages: List[ChatMessage]) -> Iterator:
         import time
@@ -1568,17 +1508,6 @@ class Solver:
             query_analysis_end = time.time()
             query_analysis_time = query_analysis_end - query_analysis_start
             
-            # Track tokens for query analysis step
-            planner_usage = self.planner.last_usage if hasattr(self.planner, 'last_usage') else None
-            qa_input_tokens, qa_output_tokens, query_analysis_tokens, query_analysis_cost = self._collect_usage_and_cost(planner_usage)
-            self.step_tokens.append(query_analysis_tokens)
-            self.step_costs.append(query_analysis_cost)
-            self.total_cost += query_analysis_cost
-
-            if query_analysis_tokens:
-                print(f"Query analysis - Input tokens: {qa_input_tokens}, Output tokens: {qa_output_tokens}")
-                print(f"Query analysis cost: ${query_analysis_cost:.6f}")
-            
             # Track time for query analysis step
             self.step_times.append(query_analysis_time)
             print(f"Query analysis time: {query_analysis_time:.2f}s")
@@ -1597,11 +1526,7 @@ class Solver:
                 "tool_name": "Query Analyzer",
                 "description": "Analyze user query and determine required skills and tools",
                 "time": query_analysis_time,
-                "tokens": query_analysis_tokens,
-                "cost": query_analysis_cost,
-                "memory": mem_after_query_analysis,
-                "input_tokens": qa_input_tokens,
-                "output_tokens": qa_output_tokens
+                "memory": mem_after_query_analysis
             }
             self.step_info.append(step_info)
             
@@ -2132,16 +2057,6 @@ class Solver:
             progress_msg_verified = f"**Progress**: Executing: {tool_name}"
             yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, progress_msg_verified
 
-            # After tool execution, estimate tokens and cost
-            planner_usage = self.planner.last_usage if hasattr(self.planner, 'last_usage') else None
-            input_tokens, output_tokens, tokens_used, cost = self._collect_usage_and_cost(planner_usage, result)
-
-            print(f"Step {step_count} - Input tokens: {input_tokens}, Output tokens: {output_tokens}")
-            print(f"Step {step_count} - Total tokens: {tokens_used}, Cost: ${cost:.6f}")
-            
-            self.step_tokens.append(tokens_used)
-            self.step_costs.append(cost)
-            self.total_cost += cost
             mem_after = process.memory_info().rss / 1024 / 1024  # MB
             self.step_memory.append(mem_after)
             if mem_after > self.max_memory:
@@ -2161,11 +2076,7 @@ class Solver:
                 "tool_name": tool_name,
                 "description": f"Execute {tool_name} with sub-goal: {sub_goal_text[:100]}...",
                 "time": step_end - step_start,
-                "tokens": tokens_used,
-                "cost": cost,
                 "memory": mem_after,
-                "input_tokens": input_tokens,
-                "output_tokens": output_tokens,
                 "context": context_text[:200] + "..." if len(context_text) > 200 else context_text,
                 "sub_goal": sub_goal_text[:200] + "..." if len(sub_goal_text) > 200 else sub_goal_text
             }
@@ -2200,17 +2111,6 @@ class Solver:
             final_output_end = time.time()
             final_output_time = final_output_end - final_output_start
             
-            # Track tokens for final output generation
-            planner_usage = self.planner.last_usage if hasattr(self.planner, 'last_usage') else None
-            direct_input_tokens, direct_output_tokens, final_output_tokens, final_output_cost = self._collect_usage_and_cost(planner_usage)
-            self.step_tokens.append(final_output_tokens)
-            self.step_costs.append(final_output_cost)
-            self.total_cost += final_output_cost
-
-            if final_output_tokens:
-                print(f"Final output - Input tokens: {direct_input_tokens}, Output tokens: {direct_output_tokens}")
-                print(f"Final output cost: ${final_output_cost:.6f}")
-            
             # Track time for final output generation
             self.step_times.append(final_output_time)
             print(f"Final output time: {final_output_time:.2f}s")
@@ -2229,11 +2129,7 @@ class Solver:
                 "tool_name": "Direct Output Generator",
                 "description": "Generate final comprehensive answer based on all previous steps",
                 "time": final_output_time,
-                "tokens": final_output_tokens,
-                "cost": final_output_cost,
-                "memory": mem_after_final_output,
-                "input_tokens": direct_input_tokens,
-                "output_tokens": direct_output_tokens
+                "memory": mem_after_final_output
             }
             self.step_info.append(final_step_info)
             
@@ -2317,15 +2213,6 @@ class Solver:
             final_output_end = time.time()
             final_output_time = final_output_end - final_output_start
 
-            planner_usage = self.planner.last_usage if hasattr(self.planner, 'last_usage') else None
-            final_input_tokens, final_output_tokens, final_total_tokens, final_output_cost = self._collect_usage_and_cost(planner_usage)
-            self.step_tokens.append(final_total_tokens)
-            self.step_costs.append(final_output_cost)
-            self.total_cost += final_output_cost
-
-            if final_total_tokens:
-                print(f"Final output - Input tokens: {final_input_tokens}, Output tokens: {final_output_tokens}")
-                print(f"Final output cost: ${final_output_cost:.6f}")
 
             # Track time for final output generation
             self.step_times.append(final_output_time)
@@ -2341,11 +2228,7 @@ class Solver:
                 "tool_name": "Final Output Generator",
                 "description": "Generate final follow-up answer",
                 "time": final_output_time,
-                "tokens": final_total_tokens,
-                "cost": final_output_cost,
-                "memory": mem_after_final_generation,
-                "input_tokens": final_input_tokens,
-                "output_tokens": final_output_tokens
+                "memory": mem_after_final_generation
             }
             self.step_info.append(final_step_info)
 
