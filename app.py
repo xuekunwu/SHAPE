@@ -32,7 +32,7 @@ from octotools.models.utils import normalize_tool_name
 from dataclasses import dataclass, field
 import pandas as pd
 import tifffile
-from concurrent.futures import ThreadPoolExecutor, as_completed
+# Removed ThreadPoolExecutor - using sequential processing with optimizations
 from functools import partial
 
 _AVAILABLE_TOOLS_CACHE = None
@@ -1857,7 +1857,7 @@ class Solver:
                 print(f"🔍 Processing {len(image_items)} image(s) with {tool_name} (batch processing mode)")
                 print(f"   Groups: {group_data['groups_summary']}")
                 
-                # Optimized parallel processing for multiple images
+                # Optimized sequential processing for multiple images
                 # Generate conversation_text once (same for all images in this step)
                 conversation_text = self._format_conversation_history()
                 
