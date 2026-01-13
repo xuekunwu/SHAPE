@@ -1095,7 +1095,7 @@ Detailed Instructions:
       - IMPORTANT: Match the query type to required results:
         * Counting queries → Only need counts (from segmentation or detection)
         * State analysis queries → Need full analysis pipeline results
-        * Comparison queries → Need comparison results
+        * Comparison queries → Need comparison results (group-wise data, visualizations, or comparative metrics). If Analysis_Visualizer_Tool has produced group comparison visualizations, the task is COMPLETE. Do NOT require explicit statistical tests (p-values) - visualizations and comparative data are sufficient.
       - CRITICAL: If the query asks for analysis and you see analysis results with visualizations, distributions, and statistics, the task is COMPLETE.
       - For cell state analysis: If preprocessing → segmentation → cropping → clustering → visualization is complete, STOP.
       - Technical analysis results (clusters, UMAP, exemplars) are SUFFICIENT - do NOT require biological label mapping or validation.
@@ -1125,6 +1125,7 @@ Detailed Instructions:
    - Has the MAIN query been answered EXACTLY as asked? If yes, STOP immediately.
    - For "how many cells" queries: If cell count is available (from segmentation), STOP. Do NOT require cell state analysis.
    - For "what cell states" queries: If cell state analysis (clustering + visualization) is complete, STOP. Do NOT require additional steps.
+   - For "compare" queries: If group-wise data exists (per-group metrics, group labels) AND comparison visualizations are produced (by Analysis_Visualizer_Tool), STOP. Do NOT require explicit statistical tests - visualizations with comparative data are sufficient to answer comparison queries.
    - Are there analysis results, visualizations, counts, or statistics that DIRECTLY answer the query? If yes, STOP.
    - If the query asked for "compare", "count", "analyze", "detect" and you have those results, STOP.
    - If the query asked for specific outputs (charts, counts, comparisons) and they exist, STOP.
