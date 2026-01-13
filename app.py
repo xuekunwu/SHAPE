@@ -1377,27 +1377,94 @@ class Solver:
                 results_per_image.append(result)
             return results_per_image
         
-        # Parallel processing for images that need execution
-        # Use ThreadPoolExecutor for I/O-bound operations (image processing tools)
-        max_workers = min(4, num_images)  # Limit to 4 workers to avoid overwhelming system
+        # For images that need execution, generate commands first (serial) then execute in parallel
+        # LLM calls (generate_tool_command) must be serial to avoid retry conflicts
+        # Tool execution can be parallel for I/O-bound operations
+        print(f"   🚀 Processing: {need_execution} image(s) need execution")
+        print(f"   📝 Generating tool commands (serial) for {need_execution} image(s)...")
         
+        # Step 1: Generate all tool commands serially (to avoid LLM API conflicts)
+        commands_to_execute = []
+        for idx, status in enumerate(cache_status):
+            if not status["cached"]:
+                img_item = status["img_item"]
+                safe_path = img_item["image_path"].replace("\\", "\\\\") if img_item.get("image_path") else None
+                image_id = img_item.get("image_id")
+                group = img_item.get("group", "default")
+                
+                try:
+                    tool_command = self.executor.generate_tool_command(
+                        user_query, safe_path, context, sub_goal, tool_name,
+                        self.planner.toolbox_metadata[tool_name], self.memory, 
+                        conversation_context=conversation_text, image_id=image_id,
+                        current_image_path=img_item.get("image_path"),
+                        group=group
+                    )
+                    _, _, command = self.executor.extract_explanation_and_command(tool_command)
+                    commands_to_execute.append({
+                        "idx": idx,
+                        "img_item": img_item,
+                        "command": command,
+                        "artifact_key": make_artifact_key(tool_name, safe_path, context, sub_goal, image_id=image_id),
+                        "image_fingerprint": img_item.get("fingerprint") or (image_context.fingerprint if image_context else None)
+                    })
+                except Exception as e:
+                    error_msg = str(e)
+                    print(f"⚠️ Failed to generate command for image {idx + 1}/{num_images}: {e}")
+                    commands_to_execute.append({
+                        "idx": idx,
+                        "img_item": status["img_item"],
+                        "command": None,
+                        "error": error_msg,
+                        "artifact_key": None,
+                        "image_fingerprint": None
+                    })
+        
+        # Step 2: Execute commands in parallel (I/O-bound operations)
+        max_workers = min(4, len(commands_to_execute))  # Limit to 4 workers
         results_per_image = [None] * num_images
         execution_results = {}
         
-        print(f"   🚀 Parallel processing: {need_execution} image(s) need execution (using {max_workers} workers)")
+        print(f"   ⚡ Executing tools in parallel (using {max_workers} workers)...")
+        
+        def execute_single_command(cmd_data):
+            """Execute a single tool command (used for parallel execution)."""
+            idx = cmd_data["idx"]
+            img_item = cmd_data["img_item"]
+            command = cmd_data["command"]
+            artifact_key = cmd_data["artifact_key"]
+            image_fingerprint = cmd_data["image_fingerprint"]
+            
+            if command is None:
+                return idx, {"error": cmd_data.get("error", "Command generation failed"), "result": None}, True
+            
+            try:
+                result = self.executor.execute_tool_command(tool_name, command)
+                result = make_json_serializable(result)
+                execution_failed, error_msg = _check_tool_execution_error(result, tool_name)
+                
+                if execution_failed:
+                    store_artifact(self.agent_state, group_name, tool_name, artifact_key, 
+                                 {"error": error_msg, "result": None}, image_fingerprint)
+                    result = {"error": error_msg, "result": None}
+                    print(f"⚠️ Tool '{tool_name}' failed for image {idx + 1}/{num_images} ({img_item.get('image_id')}): {error_msg}")
+                else:
+                    store_artifact(self.agent_state, group_name, tool_name, artifact_key, result, image_fingerprint)
+                    print(f"Tool '{tool_name}' result for image {img_item.get('image_id')}: {result}")
+                
+                return idx, result, execution_failed, None
+            except Exception as e:
+                error_msg = str(e)
+                store_artifact(self.agent_state, group_name, tool_name, artifact_key, 
+                             {"error": error_msg, "result": None}, image_fingerprint)
+                return idx, {"error": error_msg, "result": None}, True, None
         
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # Submit tasks for images that need execution
+            # Submit all execution tasks
             future_to_idx = {}
-            for idx, status in enumerate(cache_status):
-                if not status["cached"]:
-                    future = executor.submit(
-                        self._process_single_image,
-                        status["img_item"], idx + 1, num_images, tool_name, context, sub_goal,
-                        user_query, conversation_text, group_name, image_context, step_count,
-                        messages, tool_execution_failed, failed_tool_names, successful_tools
-                    )
-                    future_to_idx[future] = idx
+            for cmd_data in commands_to_execute:
+                future = executor.submit(execute_single_command, cmd_data)
+                future_to_idx[future] = cmd_data["idx"]
             
             # Process cached results first (immediate)
             for idx, status in enumerate(cache_status):
@@ -1416,15 +1483,23 @@ class Solver:
             for future in as_completed(future_to_idx):
                 idx = future_to_idx[future]
                 try:
-                    result, error_msg, execution_failed, cache_source = future.result()
+                    result_data = future.result()
+                    if len(result_data) == 4:
+                        idx_result, result, execution_failed, cache_source = result_data
+                    else:
+                        # Fallback for old format
+                        idx_result, result, execution_failed = result_data
+                        cache_source = None
+                    
                     results_per_image[idx] = result
-                    execution_results[idx] = (result, error_msg, execution_failed)
+                    execution_results[idx] = (result, None, execution_failed)
                     
                     if execution_failed:
                         tool_execution_failed = True
                         if tool_name not in failed_tool_names:
                             failed_tool_names.append(tool_name)
                         img_item = cache_status[idx]["img_item"]
+                        error_msg = result.get("error", "Unknown error") if isinstance(result, dict) else "Execution failed"
                         messages.append(ChatMessage(
                             role="assistant",
                             content=f"⚠️ **Tool Execution Failed for image {idx + 1}/{num_images}:** {error_msg}\n\n**Tool:** `{tool_name}`\n**Image ID:** `{img_item.get('image_id')}`\n",
