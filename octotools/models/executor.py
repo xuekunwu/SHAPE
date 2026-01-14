@@ -154,7 +154,7 @@ logger.info(f"Found {{len(expected_metadata_files)}} metadata file(s) in expecte
 try:
     # Use the tool's improved metadata loading method (merges all metadata files)
     # Pass query_cache_dir (parent directory), the method will construct tool_cache path internally
-    cell_crops, cell_metadata = tool._load_cell_data_from_metadata(query_cache_dir_parent)
+    cell_crops, cell_metadata, skipped_images = tool._load_cell_data_from_metadata(query_cache_dir_parent)
     
     if cell_crops and len(cell_crops) > 0:
         # Execute the tool with loaded data (merged from all metadata files)
