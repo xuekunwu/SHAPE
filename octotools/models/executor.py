@@ -360,9 +360,7 @@ execution = tool.execute(
                             break
             
             if mask_path:
-                # Convert to absolute path if relative
-                if not os.path.isabs(mask_path):
-                    mask_path = os.path.join(self.query_cache_dir, mask_path)
+                # mask_path from Cell_Segmenter_Tool is already absolute, use as-is
                 mask_path = os.path.normpath(mask_path)
                 
                 # Determine source tool
