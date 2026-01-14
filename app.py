@@ -44,6 +44,8 @@ _AVAILABLE_TOOLS_CACHE = None
 # These tools execute once, merging all images' data together for group comparison
 TOOLS_THAT_MERGE_ALL_IMAGES = [
     "Cell_State_Analyzer_Tool",  # Merges all cells from all images for unified analysis and group comparison
+    "Cell_State_Analyzer_Single_Tool",  # Merges all crops from all images (single-channel)
+    "Cell_State_Analyzer_Multi_Tool",  # Merges all crops from all images (multi-channel)
     "Analysis_Visualizer_Tool",  # Visualizes results from Cell_State_Analyzer_Tool (merged data with group comparison)
 ]
 

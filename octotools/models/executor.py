@@ -102,10 +102,10 @@ class Executor:
                     previous_outputs_for_llm = get_llm_safe_result(previous_outputs)
                     logger.debug(f"Extracted previous outputs: {list(previous_outputs.keys()) if isinstance(previous_outputs, dict) else 'Not a dict'}")
         
-        # Special handling for Cell_State_Analyzer_Tool to use dynamic metadata file discovery
-        state_analyzer_tools = ["Cell_State_Analyzer_Tool"]
+        # Special handling for Cell_State_Analyzer_*_Tool to use dynamic metadata file discovery
+        state_analyzer_tools = ["Cell_State_Analyzer_Tool", "Cell_State_Analyzer_Single_Tool", "Cell_State_Analyzer_Multi_Tool"]
         if tool_name in state_analyzer_tools:
-            tool_label = "Cell_State_Analyzer_Tool"
+            tool_label = tool_name
             # Use dynamic paths from executor's cache directories
             # Escape backslashes for Windows paths in Python string
             metadata_dir_str = self.tool_cache_dir.replace("\\", "\\\\")
@@ -157,17 +157,20 @@ try:
     cell_crops, cell_metadata, skipped_images = tool._load_cell_data_from_metadata(query_cache_dir_parent)
     
     if cell_crops and len(cell_crops) > 0:
-        # Execute the tool with loaded data (merged from all metadata files)
-        execution = tool.execute(
-            cell_crops=cell_crops, 
-            cell_metadata=cell_metadata, 
-            max_epochs=25,
-            early_stop_loss=0.5,
-            batch_size=16,
-            learning_rate=3e-5,
-            cluster_resolution=0.5,
-            query_cache_dir=query_cache_dir_parent
-        )
+            # Execute the tool with loaded data (merged from all metadata files)
+            # Note: in_channels will be auto-detected from first crop if not specified
+            execution = tool.execute(
+                cell_crops=cell_crops, 
+                cell_metadata=cell_metadata, 
+                max_epochs=25,
+                early_stop_loss=0.5,
+                batch_size=16,
+                learning_rate=3e-5,
+                cluster_resolution=0.5,
+                query_cache_dir=query_cache_dir_parent,
+                in_channels=None,  # Auto-detect from crops
+                selected_channels=None  # Use all channels
+            )
     else:
         execution = {{"error": "No valid cell crops found in metadata", "status": "failed"}}
     

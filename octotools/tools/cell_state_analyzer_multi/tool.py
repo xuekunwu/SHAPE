@@ -486,10 +486,13 @@ class Cell_State_Analyzer_Multi_Tool(BaseTool):
             try:
                 img_data = ImageProcessor.load_image(cell_crops[0])
                 in_channels = img_data.num_channels
-                logger.info(f"Auto-detected {in_channels} channels")
-            except Exception:
+                logger.info(f"Auto-detected {in_channels} channels from first crop: {cell_crops[0]}")
+                if in_channels <= 0:
+                    raise ValueError(f"Invalid channel count: {in_channels}")
+            except Exception as e:
+                logger.error(f"Failed to detect channels from {cell_crops[0] if cell_crops else 'N/A'}: {e}")
                 in_channels = 2
-                logger.warning("Failed to detect channels, defaulting to 2")
+                logger.warning(f"Defaulting to {in_channels} channels. If this is incorrect, specify in_channels parameter.")
         
         # Set selected_channels
         if selected_channels is None:
