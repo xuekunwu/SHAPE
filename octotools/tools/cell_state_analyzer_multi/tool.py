@@ -88,29 +88,36 @@ class MultiChannelCellCropDataset(Dataset):
         path = self.image_paths[idx]
         group = self.groups[idx]
         
-        # Load image - use skimage directly (matching reference implementation)
-        # Reference: 260113_Training_dinov3_CO_screen.py uses io.imread directly
-        if SKIMAGE_AVAILABLE:
-            img = io.imread(path)  # May be (H, W, C) or (C, H, W) or (H, W)
-        else:
-            # Fallback to ImageProcessor if skimage not available
-            try:
-                img_data = ImageProcessor.load_image(path)
-                img = img_data.data  # (H, W, C) numpy array
-                # Convert to (C, H, W) for consistency
-                img = np.transpose(img, (2, 0, 1))
-            except Exception as e:
-                raise ValueError(f"Failed to load image {path}: {e}")
-        
-        # Normalize to (C, H, W) format (matching reference implementation)
-        # Reference: 260113_Training_dinov3_CO_screen.py line 42-46
-        if img.ndim == 2:
-            # (H, W) -> (1, H, W)
-            img = img[None, ...]
-        elif img.shape[0] not in (1, 2, 3, 4):
-            # First dimension is large (likely H), assume (H, W, C) -> (C, H, W)
-            img = np.transpose(img, (2, 0, 1))
-        # else: already (C, H, W) format
+        # Load image using unified ImageProcessor (optimal solution: unified interface)
+        # ImageProcessor.load_image() returns ImageData with guaranteed (H, W, C) format
+        try:
+            img_data = ImageProcessor.load_image(path)
+            # ImageData.data is always (H, W, C) format where C >= 1
+            # - Single-channel: (H, W, 1)
+            # - Multi-channel: (H, W, C) where C > 1
+            img = img_data.data  # (H, W, C) numpy array
+            
+            # Convert to (C, H, W) format for PyTorch (matching reference implementation)
+            # Reference: 260113_Training_dinov3_CO_screen.py line 42-46
+            # Since ImageData always returns (H, W, C), we can directly transpose
+            img = np.transpose(img, (2, 0, 1))  # (H, W, C) -> (C, H, W)
+            
+        except Exception as load_error:
+            # Fallback to skimage for direct TIFF loading (legacy support)
+            logger.warning(f"Failed to load with ImageProcessor: {load_error}, using skimage fallback")
+            if SKIMAGE_AVAILABLE:
+                img = io.imread(path)  # May be (H, W, C) or (C, H, W) or (H, W)
+                
+                # Normalize to (C, H, W) format (matching reference implementation)
+                if img.ndim == 2:
+                    # (H, W) -> (1, H, W)
+                    img = img[None, ...]
+                elif img.shape[0] not in (1, 2, 3, 4):
+                    # First dimension is large (likely H), assume (H, W, C) -> (C, H, W)
+                    img = np.transpose(img, (2, 0, 1))
+                # else: already (C, H, W) format
+            else:
+                raise ValueError(f"Failed to load image {path}: {load_error}. skimage not available.")
         
         # Select channels if specified
         if self.selected_channels is not None:
