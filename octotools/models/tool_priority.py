@@ -25,7 +25,8 @@ BIOIMAGE_TOOL_PRIORITIES: Dict[str, ToolPriority] = {
     "Cell_Segmenter_Tool": ToolPriority.HIGH,  # For phase-contrast cell images
     "Organoid_Segmenter_Tool": ToolPriority.HIGH,  # For organoid segmentation
     "Single_Cell_Cropper_Tool": ToolPriority.HIGH,
-    "Cell_State_Analyzer_Tool": ToolPriority.HIGH,  # Self-supervised learning for cell state analysis
+    "Cell_State_Analyzer_Single_Tool": ToolPriority.HIGH,  # Self-supervised learning for single-channel images
+    "Cell_State_Analyzer_Multi_Tool": ToolPriority.HIGH,  # Self-supervised learning for multi-channel images (2+ channels)
     "Analysis_Visualizer_Tool": ToolPriority.HIGH,
         
     # LOW: Utility tools and code generation tools (use sparingly)
@@ -49,7 +50,8 @@ BIOIMAGE_TOOL_PRIORITIES: Dict[str, ToolPriority] = {
 # Bioimage analysis chain: Image_Preprocessor → (Cell_Segmenter/Nuclei_Segmenter/Organoid_Segmenter) → Single_Cell_Cropper → Cell_State_Analyzer
 TOOL_DEPENDENCIES: Dict[str, List[str]] = {
     "Single_Cell_Cropper_Tool": ["Nuclei_Segmenter_Tool", "Cell_Segmenter_Tool", "Organoid_Segmenter_Tool"],  # Cropper needs segmentation
-    "Cell_State_Analyzer_Tool": ["Single_Cell_Cropper_Tool"],  # Needs cell crops
+    "Cell_State_Analyzer_Single_Tool": ["Single_Cell_Cropper_Tool"],  # Needs cell crops (single-channel)
+    "Cell_State_Analyzer_Multi_Tool": ["Single_Cell_Cropper_Tool"],  # Needs cell crops (multi-channel)
     "Analysis_Visualizer_Tool": [],  # Can work with any analysis output
 }
 
