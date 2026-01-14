@@ -341,16 +341,17 @@ def contrastive_loss(z1, z2, temperature=0.1):
     return nn.CrossEntropyLoss()(logits, labels)
 
 
-class Cell_State_Analyzer_Tool(BaseTool):
+class Cell_State_Analyzer_Single_Tool(BaseTool):
     """
     Analyzes cell states using self-supervised learning (contrastive learning).
     Performs training on single-cell crops and generates UMAP visualizations with clustering.
+    Designed for single-channel images (converted to RGB for DINOv3).
     """
     
     def __init__(self):
         super().__init__(
-            tool_name="Cell_State_Analyzer_Tool",
-            tool_description="Performs self-supervised learning (contrastive learning) on single-cell crops to analyze cell states. Trains a DINOv3 model and generates UMAP visualizations with clustering. Supports multi-group analysis.",
+            tool_name="Cell_State_Analyzer_Single_Tool",
+            tool_description="Performs self-supervised learning (contrastive learning) on single-cell crops to analyze cell states. Trains a DINOv3 model and generates UMAP visualizations with clustering. Designed for single-channel images (converted to RGB). Supports multi-group analysis.",
             tool_version="1.0.0",
             input_types={
                 "cell_crops": "List[str] - List of cell crop image paths from Single_Cell_Cropper_Tool output.",
@@ -1151,5 +1152,5 @@ class Cell_State_Analyzer_Tool(BaseTool):
 
 if __name__ == "__main__":
     # Test script
-    tool = Cell_State_Analyzer_Tool()
+    tool = Cell_State_Analyzer_Single_Tool()
     print("Tool initialized successfully")
