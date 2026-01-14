@@ -585,10 +585,18 @@ class Single_Cell_Cropper_Tool(BaseTool):
                 
             # Crop from original image (preserve all channels if multi-channel)
             # ImageData always returns (H, W, C) format where C >= 1
-            # - Single-channel: (H, W, 1)
+            # - Single-channel: (H, W, 1) when using ImageData
             # - Multi-channel: (H, W, C) where C > 1
-            # Always use 3D indexing to preserve channel dimension
-            cell_crop = original_img[new_minr:new_maxr, new_minc:new_maxc, :]  # Preserve all channels
+            # Fallback loading may produce (H, W) which is converted to (H, W, 1) at line 172-173
+            # So original_img should always be 3D at this point, but handle both cases for safety
+            if original_img.ndim == 3:
+                cell_crop = original_img[new_minr:new_maxr, new_minc:new_maxc, :]  # Preserve all channels
+            elif original_img.ndim == 2:
+                # Fallback: 2D grayscale (should have been converted earlier, but handle for safety)
+                cell_crop = original_img[new_minr:new_maxr, new_minc:new_maxc]
+                cell_crop = cell_crop[:, :, np.newaxis]  # Add channel dimension -> (H, W, 1)
+            else:
+                raise ValueError(f"Unexpected image dimensions: {original_img.ndim}, expected 2 or 3")
             
             # Validate crop data
             if cell_crop.size == 0 or np.isnan(cell_crop).any() or np.isinf(cell_crop).any():
