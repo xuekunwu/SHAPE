@@ -334,91 +334,52 @@ execution = tool.execute(
                 # Continue to standard command generation below
         
         # Special handling for Single_Cell_Cropper_Tool to use mask from segmentation tools
-        # Supports masks from Nuclei_Segmenter_Tool, Cell_Segmenter_Tool, and Organoid_Segmenter_Tool
         if tool_name == "Single_Cell_Cropper_Tool" and previous_outputs:
-            # Handle per_image structure: find the mask for the current image by image_id
             mask_path = None
-            visual_outputs_list = []
             
-            # Extract visual_outputs from previous_outputs (handle per_image structure)
+            # Get result for current image
             if 'per_image' in previous_outputs:
-                # If previous_outputs has per_image structure, find the matching image by image_id
-                per_image_list = previous_outputs['per_image']
-                for img_result in per_image_list:
-                    if isinstance(img_result, dict) and 'visual_outputs' in img_result:
-                        # Direct match by image_id if provided
-                        if image_id and img_result.get('image_id') == image_id:
-                            visual_outputs_list = img_result['visual_outputs']
+                # Find matching result by image_id
+                for img_result in previous_outputs['per_image']:
+                    if isinstance(img_result, dict) and image_id and img_result.get('image_id') == image_id:
+                        mask_path = img_result.get('mask_path')
+                        if not mask_path and 'visual_outputs' in img_result:
+                            # Fallback: find mask from visual_outputs
+                            for path in img_result['visual_outputs']:
+                                if 'mask' in path.lower() and not 'viz' in path.lower():
+                                    mask_path = path
+                                    break
+                        break
+            else:
+                # Single image case
+                mask_path = previous_outputs.get('mask_path')
+                if not mask_path and 'visual_outputs' in previous_outputs:
+                    for path in previous_outputs['visual_outputs']:
+                        if 'mask' in path.lower() and not 'viz' in path.lower():
+                            mask_path = path
                             break
-                # If no match found and image_id not provided, use first result as fallback
-                if not visual_outputs_list and per_image_list:
-                    visual_outputs_list = per_image_list[0].get('visual_outputs', [])
-            elif 'visual_outputs' in previous_outputs:
-                # Direct visual_outputs (single image case)
-                visual_outputs_list = previous_outputs['visual_outputs']
-            
-            # Find mask file from visual_outputs
-            logger.debug(f"Looking for mask in visual_outputs: {visual_outputs_list}")
-            for output_path in visual_outputs_list:
-                logger.debug(f"Checking output path: {output_path}")
-                # Check for various mask types (support .png, .tif, .tiff formats)
-                # Exclude visualization files (those with 'viz' in the name)
-                output_path_lower = output_path.lower()
-                is_mask_file = (
-                    (output_path_lower.endswith('.png') or 
-                     output_path_lower.endswith('.tif') or 
-                     output_path_lower.endswith('.tiff')) and 
-                    'viz' not in output_path_lower
-                )
-                
-                if is_mask_file:
-                    if 'nuclei_mask' in output_path_lower:
-                        mask_path = output_path
-                        logger.debug(f"Found nuclei mask path: {mask_path}")
-                        break
-                    elif 'cell_mask' in output_path_lower:
-                        mask_path = output_path
-                        logger.debug(f"Found cell mask path: {mask_path}")
-                        break
-                    elif 'organoid_mask' in output_path_lower:
-                        mask_path = output_path
-                        logger.debug(f"Found organoid mask path: {mask_path}")
-                        break
             
             if mask_path:
-                source_tool = "segmentation tool"
-                if 'nuclei_mask' in mask_path.lower():
-                    source_tool = "Nuclei_Segmenter_Tool"
-                elif 'cell_mask' in mask_path.lower():
-                    source_tool = "Cell_Segmenter_Tool"
-                elif 'organoid_mask' in mask_path.lower():
-                    source_tool = "Organoid_Segmenter_Tool"
-                
-                # Normalize mask_path: convert relative paths to absolute paths relative to query_cache_dir
+                # Convert to absolute path if relative
                 if not os.path.isabs(mask_path):
-                    # Relative path: resolve relative to query_cache_dir
                     mask_path = os.path.join(self.query_cache_dir, mask_path)
-                    # Normalize path (resolve '..' and '.')
-                    mask_path = os.path.normpath(mask_path)
+                mask_path = os.path.normpath(mask_path)
                 
-                # Include query_cache_dir, source_image_id, and group to ensure metadata files are saved correctly
-                # query_cache_dir should be the parent directory (without 'tool_cache')
+                # Determine source tool
+                source_tool = "Cell_Segmenter_Tool" if 'cell_mask' in mask_path.lower() else \
+                             "Nuclei_Segmenter_Tool" if 'nuclei_mask' in mask_path.lower() else \
+                             "Organoid_Segmenter_Tool" if 'organoid_mask' in mask_path.lower() else \
+                             "segmentation tool"
+                
                 query_cache_dir_str = self.query_cache_dir.replace("\\", "\\\\")
                 mask_path_str = mask_path.replace("\\", "\\\\")
-                # Get group from kwargs first (passed from app.py), then fallback to extracting from image_id
                 group = kwargs.get('group', "default")
-                if group == "default" and image_id and '_' in image_id:
-                    # Fallback: Extract group from image_id if available (e.g., "Control_7dd4a783..." -> "Control")
-                    group = image_id.split('_')[0]
-                
-                # Use image_id as source_image_id for tracking
                 source_image_id_param = f', source_image_id="{image_id}"' if image_id else ''
                 group_param = f', group="{group}"'
                 
-                logger.info(f"Single_Cell_Cropper_Tool: Using query_cache_dir={self.query_cache_dir}, mask_path={mask_path}, source_image_id={image_id}, group={group}")
                 return ToolCommand(
                     analysis=f"Using the mask from {source_tool} for single cell cropping",
-                    explanation=f"Using the mask path '{mask_path}' from the previous {source_tool} step (image: {image_id}, group: {group})",
+                    explanation=f"Using mask path from {source_tool}",
                     command=f"""execution = tool.execute(original_image="{actual_image_path}", nuclei_mask=r'{mask_path_str}', min_area=50, margin=25, query_cache_dir=r'{query_cache_dir_str}'{source_image_id_param}{group_param})"""
                 )
             else:
