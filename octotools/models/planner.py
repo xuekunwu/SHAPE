@@ -286,6 +286,10 @@ Output format:
                          memory: Memory, bytes_mode: bool = False,
                          conversation_context: str = "", **kwargs) -> MemoryVerification:
         """Verify if memory contains sufficient information to answer query."""
+        # Ensure query_analysis is a string
+        if not isinstance(query_analysis, str):
+            query_analysis = str(query_analysis) if query_analysis else ""
+        
         prompt = f"""Verify if the following steps contain sufficient information to answer the query.
 
 Query: {question}
@@ -296,7 +300,11 @@ Previous Steps:
 
 Determine if the query can be answered with the information available, or if more steps are needed."""
         
-        return self.llm_engine.generate(prompt, response_format=MemoryVerification)
+        response = self.llm_engine.generate(prompt, response_format=MemoryVerification)
+        # Handle dict response (with 'content' key) or direct object
+        if isinstance(response, dict) and 'content' in response:
+            return response['content']
+        return response
     
     def generate_final_output(self, question: str, image: str, memory: Memory,
                              bytes_mode: bool = False, conversation_context: str = "",
