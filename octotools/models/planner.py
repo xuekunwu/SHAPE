@@ -157,7 +157,14 @@ Groups: {', '.join(sorted(groups)) if groups else 'single group'}
 
 Provide a concise analysis focusing on what needs to be done to answer the query."""
         
-        self.query_analysis = self.llm_engine.generate(prompt, max_tokens=500)
+        response = self.llm_engine.generate(prompt, max_tokens=500)
+        # Handle dict response (with 'content' key) or direct string
+        if isinstance(response, dict) and 'content' in response:
+            self.query_analysis = response['content']
+        elif isinstance(response, str):
+            self.query_analysis = response
+        else:
+            self.query_analysis = str(response)
         return self.query_analysis
     
     def generate_next_step(self, question: str, image: str, query_analysis: str,
@@ -173,6 +180,10 @@ Provide a concise analysis focusing on what needs to be done to answer the query
         - Trust LLM's intelligence for tool selection
         - Minimal hardcoded rules
         """
+        # Ensure query_analysis is a string
+        if not isinstance(query_analysis, str):
+            query_analysis = str(query_analysis) if query_analysis else ""
+        
         # Get context
         image_info = self.get_image_info(image) if not bytes_mode else {}
         detected_domain = self.priority_manager.detect_task_domain(question, query_analysis)
@@ -300,13 +311,27 @@ Analysis Steps:
 
 Provide a clear, complete answer to the query based on the analysis results."""
         
-        return self.llm_engine.generate(prompt, max_tokens=2000)
+        response = self.llm_engine.generate(prompt, max_tokens=2000)
+        # Handle dict response (with 'content' key) or direct string
+        if isinstance(response, dict) and 'content' in response:
+            return response['content']
+        elif isinstance(response, str):
+            return response
+        else:
+            return str(response)
     
     def generate_base_response(self, question: str, image: str, max_tokens: str = "4000",
                               bytes_mode: bool = False) -> str:
         """Generate base response (for compatibility)."""
         prompt = f"Answer this question about the image: {question}"
-        self.base_response = self.llm_engine.generate(prompt, max_tokens=int(max_tokens))
+        response = self.llm_engine.generate(prompt, max_tokens=int(max_tokens))
+        # Handle dict response (with 'content' key) or direct string
+        if isinstance(response, dict) and 'content' in response:
+            self.base_response = response['content']
+        elif isinstance(response, str):
+            self.base_response = response
+        else:
+            self.base_response = str(response)
         return self.base_response
     
     def extract_context_subgoal_and_tool(self, response) -> Tuple[str, str, str]:
