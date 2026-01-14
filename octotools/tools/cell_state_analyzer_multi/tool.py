@@ -210,6 +210,9 @@ class DinoV3Projector(nn.Module):
         
         logger.info(f"Attempting to load DINOv3 model weights from Hugging Face Hub: {custom_repo_id}/{model_filename}")
         
+        # Log in_channels for debugging
+        logger.info(f"🔧 DinoV3Projector.__init__: in_channels={in_channels}, freeze_patch_embed={freeze_patch_embed}, freeze_blocks={freeze_blocks}")
+        
         self.backbone = None
         from transformers import AutoModel
         hf_token = os.getenv("HUGGINGFACE_TOKEN")
@@ -289,6 +292,7 @@ class DinoV3Projector(nn.Module):
                         patch_embed = self.backbone.patch_embed
                         old_proj = patch_embed.proj
                         
+                        logger.info(f"🔍 Checking patch embedding: old_proj.in_channels={old_proj.in_channels}, target in_channels={in_channels}")
                         if old_proj.in_channels != in_channels:
                             logger.info(f"🔧 Adapting patch embedding from {old_proj.in_channels} to {in_channels} channels")
                             new_proj = nn.Conv2d(
@@ -1206,7 +1210,10 @@ class Cell_State_Analyzer_Multi_Tool(BaseTool):
             logger.info(f"✅ Loaded {len(eval_dataset)} images for zero-shot inference")
             
             # Initialize model (will use pretrained weights)
-            model = DinoV3Projector(backbone_name="dinov3_vits16", proj_dim=256, in_channels=len(selected_channels), freeze_patch_embed=freeze_patch_embed, freeze_blocks=freeze_blocks).to(self.device)
+            # Use len(selected_channels) as in_channels to match the actual input channels
+            actual_in_channels = len(selected_channels)
+            logger.info(f"🔧 Initializing model with in_channels={actual_in_channels} (from selected_channels={selected_channels})")
+            model = DinoV3Projector(backbone_name="dinov3_vits16", proj_dim=256, in_channels=actual_in_channels, freeze_patch_embed=freeze_patch_embed, freeze_blocks=freeze_blocks).to(self.device)
             logger.info("✅ Using pretrained DINOv3 model (zero-shot mode, no training)")
             
             # Extract features directly with pretrained model
@@ -1232,7 +1239,10 @@ class Cell_State_Analyzer_Multi_Tool(BaseTool):
             logger.info(f"✅ Loaded {len(train_dataset)} images")
             
             # Initialize model with multi-channel support
-            model = DinoV3Projector(backbone_name="dinov3_vits16", proj_dim=256, in_channels=len(selected_channels), freeze_patch_embed=freeze_patch_embed, freeze_blocks=freeze_blocks).to(self.device)
+            # Use len(selected_channels) as in_channels to match the actual input channels
+            actual_in_channels = len(selected_channels)
+            logger.info(f"🔧 Initializing model with in_channels={actual_in_channels} (from selected_channels={selected_channels})")
+            model = DinoV3Projector(backbone_name="dinov3_vits16", proj_dim=256, in_channels=actual_in_channels, freeze_patch_embed=freeze_patch_embed, freeze_blocks=freeze_blocks).to(self.device)
             
             # Train model
             logger.info("🎯 Starting training...")

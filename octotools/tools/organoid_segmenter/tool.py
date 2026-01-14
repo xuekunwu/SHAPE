@@ -322,7 +322,7 @@ class Organoid_Segmenter_Tool(BaseTool):
                     self._model_load_error = error_msg
                     raise ValueError(error_msg)
 
-    def execute(self, image, diameter=100, flow_threshold=0.4, cellprob_threshold=0, model_path=None, query_cache_dir=None, image_id=None):
+    def execute(self, image, diameter=100, flow_threshold=0.4, cellprob_threshold=0, model_path=None, query_cache_dir=None, image_id=None, **kwargs):
         """
         Execute organoid segmentation on the input image.
         
