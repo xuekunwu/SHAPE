@@ -351,7 +351,7 @@ class Cell_State_Analyzer_Single_Tool(BaseTool):
     def __init__(self):
         super().__init__(
             tool_name="Cell_State_Analyzer_Single_Tool",
-            tool_description="Performs self-supervised learning (contrastive learning) on single-cell crops to analyze cell states. Trains a DINOv3 model and generates UMAP visualizations with clustering. Designed for single-channel images (converted to RGB). Supports multi-group analysis.",
+            tool_description="Performs self-supervised learning (contrastive learning) on individual cell/organoid crops to analyze cell states. Analyzes pre-cropped single-cell/organoid images from Single_Cell_Cropper_Tool. Performs feature extraction, UMAP embedding, and clustering. Designed for single-channel images (converted to RGB). Supports multi-group analysis. REQUIRES: Single_Cell_Cropper_Tool must be executed first to generate individual crop images.",
             tool_version="1.0.0",
             input_types={
                 "cell_crops": "List[str] - List of cell crop image paths from Single_Cell_Cropper_Tool output.",
@@ -371,8 +371,8 @@ class Cell_State_Analyzer_Single_Tool(BaseTool):
                 }
             ],
             user_metadata={
-                "limitation": "Requires GPU for training. Requires anndata and scanpy for advanced visualizations. Training time depends on number of cells and epochs.",
-                "best_practice": "Use with output from Single_Cell_Cropper_Tool. Include 'group' field in cell_metadata for multi-group cluster composition analysis. Adjust cluster_resolution based on your data granularity needs."
+                "limitation": "Requires GPU for training. Requires anndata and scanpy for advanced visualizations. REQUIRES Single_Cell_Cropper_Tool output as input - cannot process raw images or segmentation masks.",
+                "best_practice": "MUST use output from Single_Cell_Cropper_Tool. Input should be individual crop images, not original images or masks. Include 'group' field in cell_metadata for multi-group cluster composition analysis."
             },
             output_dir="output_visualizations"
         )

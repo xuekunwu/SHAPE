@@ -288,7 +288,8 @@ MULTI-IMAGE PROCESSING CONTEXT:
 - Group comparison enabled: {'YES - tools should compare groups statistically' if is_group_comparison else 'NO'}
 - Tool execution modes:
   * Per-image tools (segmenters, croppers): Process each of {num_images} images independently
-  * Merge-all tools (Cell_State_Analyzer_Tool, Analysis_Visualizer_Tool): Execute ONCE, merging all {num_images} images with group labels
+  * Merge-all tools (Cell_State_Analyzer_*_Tool, Analysis_Visualizer_Tool): Execute ONCE, merging all crops from all {num_images} images with group labels
+- Cell_State_Analyzer_*_Tool automatically loads all crop images from Single_Cell_Cropper_Tool metadata (from all {num_images} images)
 """
         
         # Get tools by priority
@@ -326,28 +327,37 @@ CRITICAL: Bioimage Analysis Chain for Single-Cell Analysis
 This system performs SINGLE-CELL level analysis. For queries involving cell states, cell counts, or cell-level comparisons:
 
 **Tool Role & Pipeline:**
-- Analysis Tools: Cell_State_Analyzer_*_Tool performs feature extraction, clustering, morphological analysis
-- Visualization Tool: Analysis_Visualizer_Tool ONLY visualizes - requires pre-computed analysis results
+- Analysis Tools: Cell_State_Analyzer_*_Tool analyzes individual cell/organoid crops - REQUIRES Single_Cell_Cropper_Tool output
+- Visualization Tool: Analysis_Visualizer_Tool ONLY visualizes pre-computed analysis results
 
-**Pipeline Flow:**
+**Pipeline Flow (Cell/Organoid State Analysis):**
 1. Preprocessing (optional) → Image_Preprocessor_Tool
-2. Segmentation → [Cell/Nuclei/Organoid_Segmenter_Tool]
-3. Cropping → Single_Cell_Cropper_Tool
+2. Segmentation → [Cell/Nuclei/Organoid_Segmenter_Tool] → produces masks
+3. Cropping → Single_Cell_Cropper_Tool → REQUIRED: produces individual crop images (one per cell/organoid)
 4. Analysis → Cell_State_Analyzer_Single_Tool (1 channel) | Cell_State_Analyzer_Multi_Tool (2+ channels)
+   - Input: Individual crop images from step 3 (NOT original images or masks)
+   - Processes each crop to extract features, perform clustering
 5. Visualization → Analysis_Visualizer_Tool
+
+**CRITICAL Input Requirements:**
+- Cell_State_Analyzer_*_Tool REQUIRES cell_crops parameter: List of paths to individual crop images from Single_Cell_Cropper_Tool
+- Input format: cell_crops=["path/to/crop1.tiff", "path/to/crop2.tiff", ...] (individual crop images)
+- Single_Cell_Cropper_Tool MUST be executed first - it produces the crop images that Cell_State_Analyzer_*_Tool needs
+- When Single_Cell_Cropper_Tool completes, it saves metadata in query_cache_dir/tool_cache/ - Cell_State_Analyzer_*_Tool automatically loads crops from this metadata
 
 **Query → Pipeline Mapping:**
 - Counting: Segmentation → Count (visualize if needed)
-- Morphology/Comparison/States: Full pipeline (requires Analysis tool for feature extraction)
-- Analysis_Visualizer_Tool cannot compute features - only visualizes results from Cell_State_Analyzer_*_Tool
+- Morphology/Comparison/States: Full pipeline (Segmentation → Cropping → Analysis → Visualization)
+- Analysis tools analyze individual crops - cannot skip cropping step
 
 INSTRUCTIONS:
 1. Review the query analysis to understand what type of analysis is needed
 2. Check what has been done (PREVIOUS STEPS) and what is still needed
 3. Follow the bioimage analysis chain appropriate for the query type
 4. Select ONE tool that is the logical next step in the pipeline
-5. Ensure dependencies are satisfied (e.g., need segmentation before cropping)
-6. Formulate a clear sub-goal explaining what this tool will accomplish
+5. Ensure dependencies are satisfied (e.g., need segmentation before cropping, need cropping before analysis)
+6. For Cell_State_Analyzer_*_Tool: Do NOT pass original images or masks - tool automatically loads crop images from Single_Cell_Cropper_Tool metadata (query_cache_dir parameter)
+7. Formulate a clear sub-goal explaining what this tool will accomplish, referencing the correct input format
 
 Output format:
 <justification>: Why this tool is the best next step, referencing the analysis pipeline
@@ -392,9 +402,9 @@ Output format:
         lines = []
         for tool_name, metadata in list(toolbox_metadata.items())[:10]:
             desc = metadata.get('description', 'No description')[:200]
-            # Emphasize critical role distinctions directly in description
+            # Emphasize critical role distinctions and input requirements
             if 'Cell_State_Analyzer' in tool_name:
-                lines.append(f"{tool_name}: {desc} [ANALYSIS: performs feature extraction & clustering]")
+                lines.append(f"{tool_name}: {desc} [REQUIRES: cell crops from Single_Cell_Cropper_Tool]")
             elif tool_name == "Analysis_Visualizer_Tool":
                 lines.append(f"{tool_name}: {desc} [VISUALIZATION ONLY: requires pre-computed analysis results]")
             else:

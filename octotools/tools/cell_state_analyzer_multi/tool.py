@@ -257,9 +257,12 @@ class DinoV3Projector(nn.Module):
         elif hasattr(patch_embed, 'projection'):
             patch_embed.projection = new_proj
         
-        # Update config
-        if hasattr(self.backbone, 'config') and hasattr(self.backbone.config, 'num_channels'):
-            self.backbone.config.num_channels = in_channels
+        # Update config - CRITICAL for transformers models
+        if hasattr(self.backbone, 'config'):
+            if hasattr(self.backbone.config, 'num_channels'):
+                self.backbone.config.num_channels = in_channels
+            # Also update image_size if exists (for validation)
+            # Ensure all config fields that might affect channel validation are updated
         
         logger.info(f"✅ Adapted patch embedding: {old_proj.in_channels} -> {in_channels} channels")
     
@@ -271,8 +274,27 @@ class DinoV3Projector(nn.Module):
         if x.shape[1] != self.in_channels:
             raise ValueError(f"Channel mismatch: expected {self.in_channels}, got {x.shape[1]}")
         
-        # Forward through backbone
-        out = self.backbone(x)
+        # Forward through backbone - handle transformers models that may validate channels
+        try:
+            out = self.backbone(x)
+        except (ValueError, RuntimeError) as e:
+            error_msg = str(e).lower()
+            if 'channel' in error_msg or ('expected' in error_msg and 'got' in error_msg):
+                # Transformers model may still be checking config - try with pixel_values
+                if hasattr(self.backbone, 'forward'):
+                    logger.warning(f"Direct call failed ({e}), trying with pixel_values parameter")
+                    # Update config one more time before retry
+                    if hasattr(self.backbone, 'config') and hasattr(self.backbone.config, 'num_channels'):
+                        self.backbone.config.num_channels = self.in_channels
+                    try:
+                        out = self.backbone(pixel_values=x, output_hidden_states=False)
+                    except Exception as e2:
+                        logger.error(f"Both methods failed: {e2}")
+                        raise ValueError(f"Channel adaptation failed: {e}. Tried both direct call and pixel_values.")
+                else:
+                    raise
+            else:
+                raise
         
         # Extract CLS token
         if isinstance(out, torch.Tensor):
@@ -307,28 +329,28 @@ class Cell_State_Analyzer_Multi_Tool(BaseTool):
     def __init__(self):
         super().__init__(
             tool_name="Cell_State_Analyzer_Multi_Tool",
-            tool_description="Self-supervised learning for multi-channel cell state analysis. Supports 2+ channels.",
+            tool_description="Performs self-supervised learning (contrastive learning) on individual cell/organoid crops to analyze cell states. Analyzes pre-cropped single-cell/organoid images from Single_Cell_Cropper_Tool. Performs feature extraction, UMAP embedding, and clustering. Supports 2+ channel multi-channel images. REQUIRES: Single_Cell_Cropper_Tool must be executed first to generate individual crop images.",
             tool_version="2.0.0",
             input_types={
-                "cell_crops": "List[str] - Cell crop image paths",
-                "cell_metadata": "List[dict] - Metadata with 'group' field",
+                "cell_crops": "List[str] - REQUIRED: Individual cell/organoid crop image paths from Single_Cell_Cropper_Tool output. Each path should be a cropped image of a single cell/organoid.",
+                "cell_metadata": "List[dict] - Metadata with 'group' field for each crop (must match cell_crops length)",
                 "max_epochs": "int - Max training epochs (default: 25)",
                 "early_stop_loss": "float - Early stopping threshold (default: 0.5)",
                 "batch_size": "int - Batch size (default: 16)",
                 "learning_rate": "float - Learning rate (default: 3e-5)",
                 "cluster_resolution": "float - Clustering resolution (default: 0.5)",
                 "query_cache_dir": "str - Output directory",
-                "in_channels": "int - Number of channels (auto-detect if None)",
-                "selected_channels": "List[int] - Channel indices to use (all if None)",
+                "in_channels": "int - Number of input channels (auto-detect from first crop if None)",
+                "selected_channels": "List[int] - Channel indices to use (all channels if None)",
             },
-            output_type="dict - Analysis results with AnnData object",
+            output_type="dict - Analysis results with AnnData object containing UMAP coordinates and cluster assignments",
             demo_commands=[{
-                "command": "tool.execute(cell_crops=paths, cell_metadata=metadata)",
-                "description": "Analyze cell states with default parameters"
+                "command": "tool.execute(cell_crops=crop_paths, cell_metadata=metadata)",
+                "description": "Analyze pre-cropped cell/organoid images from Single_Cell_Cropper_Tool"
             }],
             user_metadata={
-                "limitation": "Requires GPU for training. Supports 2+ channels.",
-                "best_practice": "Use with multi-channel TIFF files from Single_Cell_Cropper_Tool."
+                "limitation": "Requires GPU for training. Supports 2+ channels. REQUIRES Single_Cell_Cropper_Tool output as input - cannot process raw images or segmentation masks.",
+                "best_practice": "MUST use output from Single_Cell_Cropper_Tool. Input should be individual crop images, not original images or masks. Include 'group' field in cell_metadata for multi-group analysis."
             },
             output_dir="output_visualizations"
         )
