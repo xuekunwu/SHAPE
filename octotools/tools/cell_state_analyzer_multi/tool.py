@@ -164,6 +164,13 @@ class DinoV3Projector(nn.Module):
         # Load backbone
         self.backbone = self._load_backbone(backbone_name)
         
+        # CRITICAL: Update config immediately after loading to prevent validation errors
+        # Transformers may validate input channels during forward, so config must match
+        if hasattr(self.backbone, 'config') and hasattr(self.backbone.config, 'num_channels'):
+            if self.backbone.config.num_channels != in_channels:
+                logger.info(f"Updating model config.num_channels before adaptation: {self.backbone.config.num_channels} -> {in_channels}")
+                self.backbone.config.num_channels = in_channels
+        
         # Adapt patch embedding for multi-channel input
         self._adapt_patch_embedding(in_channels)
         
@@ -222,6 +229,14 @@ class DinoV3Projector(nn.Module):
     
     def _adapt_patch_embedding(self, in_channels):
         """Adapt patch embedding layer for multi-channel input."""
+        # CRITICAL: Update config FIRST before any operations
+        # This prevents transformers from validating with wrong channel count
+        if hasattr(self.backbone, 'config'):
+            if hasattr(self.backbone.config, 'num_channels'):
+                original_channels = self.backbone.config.num_channels
+                self.backbone.config.num_channels = in_channels
+                logger.info(f"Updated backbone.config.num_channels: {original_channels} -> {in_channels}")
+        
         # Find patch embedding
         patch_embed = (self.backbone.patch_embed if hasattr(self.backbone, 'patch_embed') else
                       (self.backbone.embeddings.patch_embeddings if hasattr(self.backbone, 'embeddings') else None))
@@ -231,7 +246,12 @@ class DinoV3Projector(nn.Module):
             return
         
         old_proj = getattr(patch_embed, 'proj', None) or getattr(patch_embed, 'projection', None)
-        if old_proj is None or old_proj.in_channels == in_channels:
+        if old_proj is None:
+            logger.warning("Could not find projection layer in patch embedding")
+            return
+        
+        if old_proj.in_channels == in_channels:
+            logger.info(f"Patch embedding already has {in_channels} channels, no adaptation needed")
             return
         
         # Create new projection layer
@@ -256,13 +276,13 @@ class DinoV3Projector(nn.Module):
             patch_embed.proj = new_proj
         elif hasattr(patch_embed, 'projection'):
             patch_embed.projection = new_proj
+        else:
+            logger.warning("Could not find proj or projection attribute in patch_embed")
+            return
         
-        # Update config - CRITICAL for transformers models
-        if hasattr(self.backbone, 'config'):
-            if hasattr(self.backbone.config, 'num_channels'):
-                self.backbone.config.num_channels = in_channels
-            # Also update image_size if exists (for validation)
-            # Ensure all config fields that might affect channel validation are updated
+        # Ensure config is still updated (redundant but safe)
+        if hasattr(self.backbone, 'config') and hasattr(self.backbone.config, 'num_channels'):
+            self.backbone.config.num_channels = in_channels
         
         logger.info(f"✅ Adapted patch embedding: {old_proj.in_channels} -> {in_channels} channels")
     
