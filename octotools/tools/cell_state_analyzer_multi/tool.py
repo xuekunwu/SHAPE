@@ -431,31 +431,55 @@ class DinoV3Projector(nn.Module):
                 # Adapt patch embedding for multi-channel input (if in_channels != 3)
                 if in_channels != 3:
                     try:
+                        # Use the same adaptation logic as main model
+                        old_proj = None
+                        patch_embed_path = None
+                        
+                        # Method 1: torch.hub style (patch_embed.proj)
                         if hasattr(self.backbone, 'patch_embed') and hasattr(self.backbone.patch_embed, 'proj'):
-                            patch_embed = self.backbone.patch_embed
-                            old_proj = patch_embed.proj
+                            old_proj = self.backbone.patch_embed.proj
+                            patch_embed_path = 'patch_embed.proj'
+                        # Method 2: transformers style (embeddings.patch_embeddings.projection)
+                        elif hasattr(self.backbone, 'embeddings') and hasattr(self.backbone.embeddings, 'patch_embeddings'):
+                            if hasattr(self.backbone.embeddings.patch_embeddings, 'projection'):
+                                old_proj = self.backbone.embeddings.patch_embeddings.projection
+                                patch_embed_path = 'embeddings.patch_embeddings.projection'
+                        
+                        # Update config if available
+                        if hasattr(self.backbone, 'config') and hasattr(self.backbone.config, 'num_channels'):
+                            logger.info(f"🔧 Updating fallback model config num_channels from {self.backbone.config.num_channels} to {in_channels}")
+                            self.backbone.config.num_channels = in_channels
+                        
+                        if old_proj is not None and old_proj.in_channels != in_channels:
+                            logger.info(f"🔧 Adapting fallback model patch embedding at {patch_embed_path} from {old_proj.in_channels} to {in_channels} channels")
+                            new_proj = nn.Conv2d(
+                                in_channels=in_channels,
+                                out_channels=old_proj.out_channels,
+                                kernel_size=old_proj.kernel_size,
+                                stride=old_proj.stride,
+                                padding=old_proj.padding,
+                                bias=old_proj.bias is not None,
+                            )
                             
-                            if old_proj.in_channels != in_channels:
-                                logger.info(f"🔧 Adapting fallback model patch embedding from {old_proj.in_channels} to {in_channels} channels")
-                                new_proj = nn.Conv2d(
-                                    in_channels=in_channels,
-                                    out_channels=old_proj.out_channels,
-                                    kernel_size=old_proj.kernel_size,
-                                    stride=old_proj.stride,
-                                    padding=old_proj.padding,
-                                    bias=old_proj.bias is not None,
-                                )
-                                
-                                with torch.no_grad():
-                                    c = min(old_proj.in_channels, in_channels)
-                                    new_proj.weight[:, :c] = old_proj.weight[:, :c]
-                                    if old_proj.bias is not None:
-                                        new_proj.bias.copy_(old_proj.bias)
-                                
-                                patch_embed.proj = new_proj
-                                logger.info(f"✅ Fallback model patch embedding adapted to {in_channels} channels")
+                            with torch.no_grad():
+                                c = min(old_proj.in_channels, in_channels)
+                                new_proj.weight[:, :c] = old_proj.weight[:, :c]
+                                if old_proj.bias is not None:
+                                    new_proj.bias.copy_(old_proj.bias)
+                            
+                            # Replace the projection layer
+                            if patch_embed_path == 'patch_embed.proj':
+                                self.backbone.patch_embed.proj = new_proj
+                            elif patch_embed_path == 'embeddings.patch_embeddings.projection':
+                                self.backbone.embeddings.patch_embeddings.projection = new_proj
+                            
+                            logger.info(f"✅ Fallback model patch embedding adapted to {in_channels} channels")
+                        elif old_proj is None:
+                            logger.warning(f"⚠️ Could not find patch embedding in fallback model")
                     except Exception as e:
                         logger.warning(f"⚠️ Failed to adapt fallback model patch embedding: {e}")
+                        import traceback
+                        logger.debug(traceback.format_exc())
                 
                 # Freeze layers if requested
                 if freeze_patch_embed:
