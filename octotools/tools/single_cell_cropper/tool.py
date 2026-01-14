@@ -595,6 +595,7 @@ class Single_Cell_Cropper_Tool(BaseTool):
             else:
                 crop_filename = f"{image_name_safe}_cell_{idx:04d}_crop.{output_format}"
             crop_path = os.path.join(output_dir, crop_filename)
+            crop_path = os.path.abspath(crop_path)  # Ensure absolute path
             
             try:
                 # Unified logic: preserve all channel information
