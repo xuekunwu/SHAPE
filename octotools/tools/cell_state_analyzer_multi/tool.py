@@ -88,65 +88,42 @@ class MultiChannelCellCropDataset(Dataset):
         path = self.image_paths[idx]
         group = self.groups[idx]
         
-        # Load multi-channel image using ImageProcessor
-        try:
-            img_data = ImageProcessor.load_image(path)
-            # ImageData always returns (H, W, C) format where C >= 1
-            # - Single-channel: (H, W, 1), is_multi_channel = False
-            # - Multi-channel: (H, W, C) where C > 1, is_multi_channel = True
-            img = img_data.data  # (H, W, C) numpy array, always 3D
-            
-            # Verify format: ImageData should always return 3D array
-            if img.ndim != 3:
-                raise ValueError(f"Expected 3D array (H, W, C) from ImageData, got {img.ndim}D array with shape {img.shape}")
-            
-            # Convert to (C, H, W) format for PyTorch
-            img = np.transpose(img, (2, 0, 1))  # (H, W, C) -> (C, H, W)
-            
-            # Select channels if specified
-            if self.selected_channels is not None:
-                img = img[self.selected_channels]
-            
-            # Convert to float tensor and normalize
-            img = torch.from_numpy(img).float()
-            
-            # Normalize to [-1, 1] range
-            if img.max() > 1:
-                img = img / 255.0
-            img = (img - 0.5) / 0.5
-            
-        except Exception as load_error:
-            # Fallback to skimage for direct TIFF loading (legacy support)
-            logger.warning(f"Failed to load with ImageProcessor: {load_error}, using skimage fallback")
-            if SKIMAGE_AVAILABLE:
-                img = io.imread(path)  # May be (H, W, C) or (C, H, W) or (H, W)
-                
-                # Normalize to (C, H, W) format
-                if img.ndim == 2:
-                    # Single-channel grayscale: (H, W) -> (1, H, W)
-                    img = img[np.newaxis, ...]
-                elif img.ndim == 3:
-                    # 3D array: determine if (H, W, C) or (C, H, W)
-                    if img.shape[0] not in (1, 2, 3, 4):
-                        # First dimension is large (likely H), assume (H, W, C)
-                        img = np.transpose(img, (2, 0, 1))  # (H, W, C) -> (C, H, W)
-                    # else: already (C, H, W) format
-                else:
-                    raise ValueError(f"Unsupported image dimensions: {img.ndim}D with shape {img.shape}")
-                
-                # Select channels if specified
-                if self.selected_channels is not None:
-                    img = img[self.selected_channels]
-                
-                # Convert to float tensor and normalize
-                img = torch.from_numpy(img).float()
-                
-                # Normalize to [-1, 1] range
-                if img.max() > 1:
-                    img = img / 255.0
-                img = (img - 0.5) / 0.5
-            else:
-                raise ValueError(f"Failed to load image {path}: {load_error}. skimage not available.")
+        # Load image - use skimage directly (matching reference implementation)
+        # Reference: 260113_Training_dinov3_CO_screen.py uses io.imread directly
+        if SKIMAGE_AVAILABLE:
+            img = io.imread(path)  # May be (H, W, C) or (C, H, W) or (H, W)
+        else:
+            # Fallback to ImageProcessor if skimage not available
+            try:
+                img_data = ImageProcessor.load_image(path)
+                img = img_data.data  # (H, W, C) numpy array
+                # Convert to (C, H, W) for consistency
+                img = np.transpose(img, (2, 0, 1))
+            except Exception as e:
+                raise ValueError(f"Failed to load image {path}: {e}")
+        
+        # Normalize to (C, H, W) format (matching reference implementation)
+        # Reference: 260113_Training_dinov3_CO_screen.py line 42-46
+        if img.ndim == 2:
+            # (H, W) -> (1, H, W)
+            img = img[None, ...]
+        elif img.shape[0] not in (1, 2, 3, 4):
+            # First dimension is large (likely H), assume (H, W, C) -> (C, H, W)
+            img = np.transpose(img, (2, 0, 1))
+        # else: already (C, H, W) format
+        
+        # Select channels if specified
+        if self.selected_channels is not None:
+            img = img[self.selected_channels]
+        
+        # Convert to float tensor and normalize (matching reference implementation)
+        # Reference: 260113_Training_dinov3_CO_screen.py line 51-56
+        img = torch.from_numpy(img).float()
+        
+        # Normalize to [-1, 1] range
+        if img.max() > 1:
+            img = img / 255.0
+        img = (img - 0.5) / 0.5
         
         # Apply transforms (two augmented views for contrastive learning)
         if self.transform:
