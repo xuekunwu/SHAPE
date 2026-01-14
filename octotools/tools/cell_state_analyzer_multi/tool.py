@@ -194,8 +194,8 @@ class MultiChannelTransform(nn.Module):
 
 
 class DinoV3Projector(nn.Module):
-    """DINOv3 model with projection head for contrastive learning."""
-    def __init__(self, backbone_name="dinov3_vits16", proj_dim=256):
+    """DINOv3 model with projection head for contrastive learning. Supports multi-channel input."""
+    def __init__(self, backbone_name="dinov3_vits16", proj_dim=256, in_channels=3, freeze_patch_embed=False, freeze_blocks=0):
         super().__init__()
         
         feat_dim_map = {
@@ -285,6 +285,63 @@ class DinoV3Projector(nn.Module):
             self.backbone = base_model
             logger.info(f"✅ Successfully loaded DINOv3 model weights from {model_filename}")
             
+            # Adapt patch embedding for multi-channel input (if in_channels != 3)
+            if in_channels != 3:
+                try:
+                    # Try to access patch_embed (for torch.hub.load models)
+                    if hasattr(self.backbone, 'patch_embed') and hasattr(self.backbone.patch_embed, 'proj'):
+                        patch_embed = self.backbone.patch_embed
+                        old_proj = patch_embed.proj
+                        
+                        if old_proj.in_channels != in_channels:
+                            logger.info(f"🔧 Adapting patch embedding from {old_proj.in_channels} to {in_channels} channels")
+                            new_proj = nn.Conv2d(
+                                in_channels=in_channels,
+                                out_channels=old_proj.out_channels,
+                                kernel_size=old_proj.kernel_size,
+                                stride=old_proj.stride,
+                                padding=old_proj.padding,
+                                bias=old_proj.bias is not None,
+                            )
+                            
+                            with torch.no_grad():
+                                # Inherit as much as possible from RGB weights
+                                c = min(old_proj.in_channels, in_channels)
+                                new_proj.weight[:, :c] = old_proj.weight[:, :c]
+                                if old_proj.bias is not None:
+                                    new_proj.bias.copy_(old_proj.bias)
+                            
+                            patch_embed.proj = new_proj
+                            logger.info(f"✅ Patch embedding adapted to {in_channels} channels")
+                    else:
+                        # Transformers models may have different structure
+                        logger.warning(f"⚠️ Model does not have patch_embed.proj attribute. Multi-channel adaptation may not work correctly.")
+                        logger.warning(f"   Model type: {type(self.backbone)}, attributes: {dir(self.backbone)[:10]}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to adapt patch embedding for multi-channel input: {e}")
+                    logger.warning(f"   Continuing with default 3-channel input. This may cause errors if input has {in_channels} channels.")
+            
+            # Freeze patch embedding if requested
+            if freeze_patch_embed:
+                try:
+                    if hasattr(self.backbone, 'patch_embed'):
+                        for p in self.backbone.patch_embed.parameters():
+                            p.requires_grad = False
+                        logger.info("🔒 Frozen patch embedding layer")
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to freeze patch embedding: {e}")
+            
+            # Freeze transformer blocks if requested
+            if freeze_blocks > 0:
+                try:
+                    if hasattr(self.backbone, 'blocks'):
+                        for blk in self.backbone.blocks[:freeze_blocks]:
+                            for p in blk.parameters():
+                                p.requires_grad = False
+                        logger.info(f"🔒 Frozen first {freeze_blocks} transformer blocks")
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to freeze transformer blocks: {e}")
+            
             # Update feat_dim based on model architecture
             # Using dinov3-small (ViT-S/16, 384 dimensions) as specified
             if 'vits16' in backbone_name.lower() or custom_repo_id.endswith('dinov3_vits16'):
@@ -313,6 +370,53 @@ class DinoV3Projector(nn.Module):
                 logger.info(f"✅ Loaded fallback model from Hugging Face Hub (384 dimensions)")
                 # Update feat_dim for small model (384 dimensions)
                 feat_dim_map[backbone_name] = 384
+                
+                # Adapt patch embedding for multi-channel input (if in_channels != 3)
+                if in_channels != 3:
+                    try:
+                        if hasattr(self.backbone, 'patch_embed') and hasattr(self.backbone.patch_embed, 'proj'):
+                            patch_embed = self.backbone.patch_embed
+                            old_proj = patch_embed.proj
+                            
+                            if old_proj.in_channels != in_channels:
+                                logger.info(f"🔧 Adapting fallback model patch embedding from {old_proj.in_channels} to {in_channels} channels")
+                                new_proj = nn.Conv2d(
+                                    in_channels=in_channels,
+                                    out_channels=old_proj.out_channels,
+                                    kernel_size=old_proj.kernel_size,
+                                    stride=old_proj.stride,
+                                    padding=old_proj.padding,
+                                    bias=old_proj.bias is not None,
+                                )
+                                
+                                with torch.no_grad():
+                                    c = min(old_proj.in_channels, in_channels)
+                                    new_proj.weight[:, :c] = old_proj.weight[:, :c]
+                                    if old_proj.bias is not None:
+                                        new_proj.bias.copy_(old_proj.bias)
+                                
+                                patch_embed.proj = new_proj
+                                logger.info(f"✅ Fallback model patch embedding adapted to {in_channels} channels")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Failed to adapt fallback model patch embedding: {e}")
+                
+                # Freeze layers if requested
+                if freeze_patch_embed:
+                    try:
+                        if hasattr(self.backbone, 'patch_embed'):
+                            for p in self.backbone.patch_embed.parameters():
+                                p.requires_grad = False
+                    except Exception:
+                        pass
+                
+                if freeze_blocks > 0:
+                    try:
+                        if hasattr(self.backbone, 'blocks'):
+                            for blk in self.backbone.blocks[:freeze_blocks]:
+                                for p in blk.parameters():
+                                    p.requires_grad = False
+                    except Exception:
+                        pass
             except Exception as fallback_e:
                 logger.error(f"Failed to load fallback model: {fallback_e}")
                 raise ValueError(
@@ -905,7 +1009,8 @@ class Cell_State_Analyzer_Multi_Tool(BaseTool):
         return recommendations
     
     def execute(self, cell_crops=None, cell_metadata=None, max_epochs=25, early_stop_loss=0.5,
-                batch_size=16, learning_rate=3e-5, cluster_resolution=0.5, query_cache_dir=None):
+                batch_size=16, learning_rate=3e-5, cluster_resolution=0.5, query_cache_dir=None,
+                in_channels=None, selected_channels=None, freeze_patch_embed=False, freeze_blocks=0):
         """
         Execute self-supervised learning training and analysis.
         
@@ -918,6 +1023,10 @@ class Cell_State_Analyzer_Multi_Tool(BaseTool):
             learning_rate: Learning rate (default: 3e-5, auto-adjusted based on crop count)
             cluster_resolution: Leiden clustering resolution (default: 0.5)
             query_cache_dir: Directory for outputs
+            in_channels: Number of input channels (default: None, auto-detect from first image)
+            selected_channels: List of channel indices to use (e.g., [0, 1] for BF+GFP). If None and in_channels is set, uses [0, ..., in_channels-1]
+            freeze_patch_embed: Whether to freeze patch embedding layer (default: False)
+            freeze_blocks: Number of transformer blocks to freeze (default: 0)
             
         Returns:
             dict: Analysis results with visualizations and AnnData object
@@ -937,6 +1046,24 @@ class Cell_State_Analyzer_Multi_Tool(BaseTool):
         
         num_crops = len(cell_crops)
         logger.info(f"🔬 Processing {num_crops} cell crops...")
+        
+        # Auto-detect in_channels if not provided
+        if in_channels is None:
+            # Load first image to detect channel count
+            try:
+                img_data = ImageProcessor.load_image(cell_crops[0])
+                in_channels = img_data.num_channels
+                logger.info(f"🔍 Auto-detected {in_channels} channels from first image: {cell_crops[0]}")
+            except Exception as e:
+                logger.warning(f"Failed to auto-detect channels: {e}, defaulting to 2 channels")
+                in_channels = 2
+        
+        # Set selected_channels if not provided
+        if selected_channels is None:
+            selected_channels = list(range(in_channels))
+            logger.info(f"📊 Using channels: {selected_channels} (all {in_channels} channels)")
+        else:
+            logger.info(f"📊 Using selected channels: {selected_channels}")
         
         # Strategy: Use zero-shot inference for small datasets (<50 crops), training for larger datasets
         use_zero_shot = num_crops < 50
@@ -1009,13 +1136,13 @@ class Cell_State_Analyzer_Multi_Tool(BaseTool):
         
         if use_zero_shot:
             # Zero-shot mode: only need eval dataset for feature extraction
-            eval_dataset = MultiChannelCellCropDataset(cell_crops, groups, transform=eval_transform)
+            eval_dataset = MultiChannelCellCropDataset(cell_crops, groups, transform=eval_transform, selected_channels=selected_channels)
             eval_loader = DataLoader(eval_dataset, batch_size=final_batch_size, shuffle=False,
                                     num_workers=0, pin_memory=True if torch.cuda.is_available() else False)
             logger.info(f"✅ Loaded {len(eval_dataset)} images for zero-shot inference")
             
             # Initialize model (will use pretrained weights)
-            model = DinoV3Projector(backbone_name="dinov3_vits16", proj_dim=256).to(self.device)
+            model = DinoV3Projector(backbone_name="dinov3_vits16", proj_dim=256, in_channels=len(selected_channels), freeze_patch_embed=freeze_patch_embed, freeze_blocks=freeze_blocks).to(self.device)
             logger.info("✅ Using pretrained DINOv3 model (zero-shot mode, no training)")
             
             # Extract features directly with pretrained model
@@ -1030,18 +1157,18 @@ class Cell_State_Analyzer_Multi_Tool(BaseTool):
             # Training mode: create train and eval datasets
             train_transform = self._get_augmentation_transform()
             
-            train_dataset = MultiChannelCellCropDataset(cell_crops, groups, transform=train_transform)
+            train_dataset = MultiChannelCellCropDataset(cell_crops, groups, transform=train_transform, selected_channels=selected_channels)
             train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, 
                                      num_workers=0, pin_memory=True if torch.cuda.is_available() else False)
             
-            eval_dataset = MultiChannelCellCropDataset(cell_crops, groups, transform=eval_transform)
+            eval_dataset = MultiChannelCellCropDataset(cell_crops, groups, transform=eval_transform, selected_channels=selected_channels)
             eval_loader = DataLoader(eval_dataset, batch_size=batch_size, shuffle=False,
                                     num_workers=0, pin_memory=True if torch.cuda.is_available() else False)
             
             logger.info(f"✅ Loaded {len(train_dataset)} images")
             
-            # Initialize model
-            model = DinoV3Projector(backbone_name="dinov3_vits16", proj_dim=256).to(self.device)
+            # Initialize model with multi-channel support
+            model = DinoV3Projector(backbone_name="dinov3_vits16", proj_dim=256, in_channels=len(selected_channels), freeze_patch_embed=freeze_patch_embed, freeze_blocks=freeze_blocks).to(self.device)
             
             # Train model
             logger.info("🎯 Starting training...")

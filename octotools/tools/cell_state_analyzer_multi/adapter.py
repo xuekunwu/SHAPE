@@ -13,6 +13,15 @@ class InputModel(BaseModel):
     cluster_resolution: float | None = None
     query_cache_dir: str | None = None
     in_channels: int | None = None  # Number of input channels (default: 2 for BF+GFP)
+    selected_channels: list[int] | None = Field(
+        None, description="List of channel indices to use for multi-channel analysis (e.g., [0, 1] for BF and GFP)."
+    )
+    freeze_patch_embed: bool | None = Field(
+        False, description="Whether to freeze the patch embedding layer of the DINOv3 backbone."
+    )
+    freeze_blocks: int | None = Field(
+        0, description="Number of transformer blocks to freeze in the DINOv3 backbone."
+    )
 
 
 class Adapter(ToolAdapter):
@@ -30,4 +39,7 @@ class Adapter(ToolAdapter):
             cluster_resolution=args.cluster_resolution if args.cluster_resolution is not None else 0.5,
             query_cache_dir=args.query_cache_dir,
             in_channels=args.in_channels,
+            selected_channels=args.selected_channels,
+            freeze_patch_embed=args.freeze_patch_embed if args.freeze_patch_embed is not None else False,
+            freeze_blocks=args.freeze_blocks if args.freeze_blocks is not None else 0,
         )
