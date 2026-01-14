@@ -596,8 +596,11 @@ class Single_Cell_Cropper_Tool(BaseTool):
             # Validate crop data
             if cell_crop.size == 0 or np.isnan(cell_crop).any() or np.isinf(cell_crop).any():
                 invalid_crop_data += 1
-                print(f"Warning: Invalid crop data for cell {idx}, skipping")
+                print(f"Warning: Invalid crop data for cell {idx}, skipping (size={cell_crop.size}, has_nan={np.isnan(cell_crop).any()}, has_inf={np.isinf(cell_crop).any()})")
                 continue
+            
+            # Debug: log crop shape and dtype
+            print(f"Cell {idx}: crop shape={cell_crop.shape}, dtype={cell_crop.dtype}, is_multi_channel={is_multi_channel}")
             
             # Ensure crop is in valid range
             if cell_crop.dtype == np.float32 or cell_crop.dtype == np.float64:
@@ -656,7 +659,8 @@ class Single_Cell_Cropper_Tool(BaseTool):
                 
                 # Verify the saved file
                 if not os.path.exists(crop_path) or os.path.getsize(crop_path) == 0:
-                    print(f"Warning: Failed to save crop for cell {idx}")
+                    print(f"Warning: Failed to save crop for cell {idx} to {crop_path} (exists={os.path.exists(crop_path)}, size={os.path.getsize(crop_path) if os.path.exists(crop_path) else 0})")
+                    invalid_crop_data += 1
                     continue
                 
                 # Test loading the saved image
@@ -666,10 +670,14 @@ class Single_Cell_Cropper_Tool(BaseTool):
                     test_image.close()
                 except Exception as e:
                     print(f"Warning: Saved image verification failed for cell {idx}: {e}")
+                    invalid_crop_data += 1
                     continue
                 
             except Exception as e:
                 print(f"Error saving crop for cell {idx}: {e}")
+                import traceback
+                traceback.print_exc()
+                invalid_crop_data += 1
                 continue
             
             # Create cell ID in format: {group}_{image_name}_{crop_id}
