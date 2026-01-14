@@ -174,10 +174,10 @@ class Organoid_Segmenter_Tool(BaseTool):
             tool_version="1.0.0",
             input_types={
                 "image": "str - Path to the input image (supports .tif, .png, .jpg formats).",
-                "diameter": "float - Expected organoid diameter in pixels (default: None, auto-detect).",
+                "diameter": "float - Expected organoid diameter in pixels (default: 100).",
                 "flow_threshold": "float - Flow threshold for organoid detection (default: 0.4).",
                 "cellprob_threshold": "float - Cell probability threshold (default: 0).",
-                "model_path": "str - Optional path to a custom organoid model. If not provided, downloads from Hugging Face."
+                "model_path": "str - Optional path to a custom organoid model. If not provided, downloads cpsam model from Hugging Face."
             },
             output_type="dict - Contains segmentation results, organoid count, and visualization paths.",
             demo_commands=[
