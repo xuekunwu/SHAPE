@@ -224,6 +224,22 @@ class Single_Cell_Cropper_Tool(BaseTool):
                 }
             
             # Load segmentation mask (supports nuclei_mask, cell_mask, or organoid_mask)
+            # Debug: log mask path and verify it exists
+            print(f"Single_Cell_Cropper_Tool: Loading mask from: {nuclei_mask}")
+            print(f"Single_Cell_Cropper_Tool: mask path isabs={os.path.isabs(nuclei_mask)}")
+            print(f"Single_Cell_Cropper_Tool: mask file exists={os.path.exists(nuclei_mask)}")
+            if not os.path.exists(nuclei_mask):
+                print(f"⚠️ WARNING: Mask file does not exist at: {nuclei_mask}")
+                # Try to find the mask file in query_cache_dir if provided
+                if query_cache_dir and os.path.isabs(query_cache_dir):
+                    alt_mask_path = os.path.join(query_cache_dir, "output_visualizations", os.path.basename(nuclei_mask))
+                    print(f"Single_Cell_Cropper_Tool: Trying alternative path: {alt_mask_path}")
+                    if os.path.exists(alt_mask_path):
+                        print(f"✅ Found mask at alternative path: {alt_mask_path}")
+                        nuclei_mask = alt_mask_path
+                    else:
+                        print(f"❌ Alternative path also does not exist: {alt_mask_path}")
+            
             # Prioritize tifffile for .tif files to preserve 16-bit label values
             mask_path_lower = nuclei_mask.lower()
             if mask_path_lower.endswith('.tif') or mask_path_lower.endswith('.tiff'):
