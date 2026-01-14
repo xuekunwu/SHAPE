@@ -681,6 +681,7 @@ class Single_Cell_Cropper_Tool(BaseTool):
             # Save cell mask if needed
             mask_filename = f"cell_{idx:04d}_mask.{output_format}"
             mask_path = os.path.join(output_dir, mask_filename)
+            mask_path = os.path.abspath(mask_path)  # Ensure absolute path
             try:
                 if len(cell_mask_crop.shape) == 2:
                     mask_pil = Image.fromarray(cell_mask_crop, mode='L')
