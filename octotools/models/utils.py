@@ -174,15 +174,27 @@ class VisualizationConfig:
             Path to output directory (always absolute)
         """
         if query_cache_dir:
+            # query_cache_dir should be absolute, join with OUTPUT_DIR
             output_dir = os.path.join(query_cache_dir, cls.OUTPUT_DIR)
         else:
+            # If query_cache_dir is None, use default OUTPUT_DIR
+            # But ensure it's resolved relative to current working directory
             output_dir = cls.OUTPUT_DIR
         
-        # Ensure absolute path
+        # Ensure absolute path: if output_dir is relative, resolve it
         if not os.path.isabs(output_dir):
-            output_dir = os.path.abspath(output_dir)
-        else:
-            output_dir = os.path.normpath(output_dir)
+            # If query_cache_dir was provided but output_dir is still relative,
+            # it means query_cache_dir itself was relative - resolve it
+            if query_cache_dir and not os.path.isabs(query_cache_dir):
+                # Resolve query_cache_dir first, then join with OUTPUT_DIR
+                query_cache_dir_abs = os.path.abspath(query_cache_dir)
+                output_dir = os.path.join(query_cache_dir_abs, cls.OUTPUT_DIR)
+            else:
+                # Resolve output_dir relative to current working directory
+                output_dir = os.path.abspath(output_dir)
+        
+        # Normalize path separators
+        output_dir = os.path.normpath(output_dir)
         
         # Ensure directory exists
         os.makedirs(output_dir, exist_ok=True)
