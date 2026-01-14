@@ -207,7 +207,13 @@ class DinoV3Projector(nn.Module):
         try:
             if HF_HUB_AVAILABLE:
                 weights_path = hf_hub_download(custom_repo_id, model_filename, token=hf_token)
-                base_model = AutoModel.from_pretrained(architecture_repo_id, token=hf_token, trust_remote_code=True)
+                # Load model WITHOUT validating input (we'll adapt it later)
+                base_model = AutoModel.from_pretrained(
+                    architecture_repo_id, 
+                    token=hf_token, 
+                    trust_remote_code=True,
+                    ignore_mismatched_sizes=True  # Allow size mismatches during loading
+                )
                 
                 state_dict = torch.load(weights_path, map_location='cpu')
                 if isinstance(state_dict, dict):
@@ -224,8 +230,13 @@ class DinoV3Projector(nn.Module):
         except Exception as e:
             logger.warning(f"Failed to load custom model: {e}, using fallback")
         
-        # Fallback
-        return AutoModel.from_pretrained(architecture_repo_id, token=hf_token, trust_remote_code=True)
+        # Fallback - also disable validation
+        return AutoModel.from_pretrained(
+            architecture_repo_id, 
+            token=hf_token, 
+            trust_remote_code=True,
+            ignore_mismatched_sizes=True
+        )
     
     def _adapt_patch_embedding(self, in_channels):
         """Adapt patch embedding layer for multi-channel input."""
