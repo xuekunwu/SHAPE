@@ -570,9 +570,16 @@ class Single_Cell_Cropper_Tool(BaseTool):
             
             # Verify that the entire mask is included in the crop
             # At borders, margin may be reduced, but mask must be fully contained
-            # Only skip if crop doesn't fully contain the mask (with at least some margin)
+            # Crop boundaries must fully contain mask boundaries:
+            # - new_minr <= minr (crop top should be above/equal to mask top)
+            # - new_maxr >= maxr (crop bottom should be below/equal to mask bottom)
+            # - new_minc <= minc (crop left should be left of/equal to mask left)
+            # - new_maxc >= maxc (crop right should be right of/equal to mask right)
             if new_minr > minr or new_maxr < maxr or new_minc > minc or new_maxc < maxc:
-                # Crop doesn't fully contain the mask
+                # Crop doesn't fully contain the mask - this should not happen with proper margin calculation
+                # But if it does (e.g., due to image border constraints), skip this cell
+                print(f"Warning: Cell {idx} at ({center_row}, {center_col}) filtered by border constraints: "
+                      f"mask bbox=({minr}, {minc}, {maxr}, {maxc}), crop bbox=({new_minr}, {new_minc}, {new_maxr}, {new_maxc})")
                 filtered_by_border += 1
                 continue
                 
