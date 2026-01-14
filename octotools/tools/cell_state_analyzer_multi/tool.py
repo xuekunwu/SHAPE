@@ -272,88 +272,75 @@ class DinoV3Projector(nn.Module):
             logger.info(f"✅ Successfully loaded DINOv3 model weights from {model_filename}")
             
             # Adapt patch embedding for multi-channel input (if in_channels != 3)
+            # IMPORTANT: Do this AFTER loading weights (matching reference implementation)
+            # Reference: 260113_Training_dinov3_CO_screen.py line 141-164
             if in_channels != 3:
                 try:
-                    # Try multiple ways to access patch embedding for different model structures
-                    old_proj = None
-                    patch_embed_path = None
-                    
-                    # Method 1: torch.hub style (patch_embed.proj)
+                    # Reference implementation uses: self.backbone.patch_embed.proj
+                    # Try this first (torch.hub style)
                     if hasattr(self.backbone, 'patch_embed') and hasattr(self.backbone.patch_embed, 'proj'):
-                        old_proj = self.backbone.patch_embed.proj
-                        patch_embed_path = 'patch_embed.proj'
-                    # Method 2: transformers style (embeddings.patch_embeddings.projection)
-                    elif hasattr(self.backbone, 'embeddings') and hasattr(self.backbone.embeddings, 'patch_embeddings'):
-                        if hasattr(self.backbone.embeddings.patch_embeddings, 'projection'):
-                            old_proj = self.backbone.embeddings.patch_embeddings.projection
-                            patch_embed_path = 'embeddings.patch_embeddings.projection'
-                    # Method 3: Check if config has num_channels and update it
-                    elif hasattr(self.backbone, 'config'):
-                        # Try to update config first
-                        if hasattr(self.backbone.config, 'num_channels'):
-                            logger.info(f"🔧 Updating model config num_channels from {self.backbone.config.num_channels} to {in_channels}")
-                            self.backbone.config.num_channels = in_channels
+                        patch_embed = self.backbone.patch_embed
+                        old_proj = patch_embed.proj
                         
-                        # Then try to find and replace the projection layer
-                        if hasattr(self.backbone, 'embeddings'):
-                            embeddings = self.backbone.embeddings
-                            # Try different attribute names
-                            for attr_name in ['patch_embeddings', 'patch_embedding', 'patch_embed']:
-                                if hasattr(embeddings, attr_name):
-                                    patch_emb = getattr(embeddings, attr_name)
-                                    for proj_attr in ['projection', 'proj', 'conv_proj']:
-                                        if hasattr(patch_emb, proj_attr):
-                                            old_proj = getattr(patch_emb, proj_attr)
-                                            patch_embed_path = f'embeddings.{attr_name}.{proj_attr}'
-                                            break
-                                    if old_proj:
-                                        break
-                                if old_proj:
-                                    break
-                    
-                    if old_proj is not None and old_proj.in_channels != in_channels:
-                        logger.info(f"🔧 Adapting patch embedding at {patch_embed_path} from {old_proj.in_channels} to {in_channels} channels")
-                        new_proj = nn.Conv2d(
-                            in_channels=in_channels,
-                            out_channels=old_proj.out_channels,
-                            kernel_size=old_proj.kernel_size,
-                            stride=old_proj.stride,
-                            padding=old_proj.padding,
-                            bias=old_proj.bias is not None,
-                        )
-                        
-                        with torch.no_grad():
-                            # Inherit as much as possible from RGB weights
-                            c = min(old_proj.in_channels, in_channels)
-                            new_proj.weight[:, :c] = old_proj.weight[:, :c]
-                            if old_proj.bias is not None:
-                                new_proj.bias.copy_(old_proj.bias)
-                        
-                        # Replace the projection layer
-                        if patch_embed_path == 'patch_embed.proj':
-                            self.backbone.patch_embed.proj = new_proj
-                        elif patch_embed_path == 'embeddings.patch_embeddings.projection':
-                            self.backbone.embeddings.patch_embeddings.projection = new_proj
+                        if old_proj.in_channels != in_channels:
+                            logger.info(f"🔧 Adapting patch embedding from {old_proj.in_channels} to {in_channels} channels")
+                            new_proj = nn.Conv2d(
+                                in_channels=in_channels,
+                                out_channels=old_proj.out_channels,
+                                kernel_size=old_proj.kernel_size,
+                                stride=old_proj.stride,
+                                padding=old_proj.padding,
+                                bias=old_proj.bias is not None,
+                            )
+                            
+                            with torch.no_grad():
+                                # Inherit as much as possible from RGB weights (matching reference)
+                                c = min(old_proj.in_channels, in_channels)
+                                new_proj.weight[:, :c] = old_proj.weight[:, :c]
+                                if old_proj.bias is not None:
+                                    new_proj.bias.copy_(old_proj.bias)
+                            
+                            patch_embed.proj = new_proj
+                            logger.info(f"✅ Patch embedding adapted to {in_channels} channels")
+                    else:
+                        # Fallback: try transformers style structure
+                        logger.warning(f"⚠️ Model does not have patch_embed.proj, trying transformers structure...")
+                        if hasattr(self.backbone, 'embeddings') and hasattr(self.backbone.embeddings, 'patch_embeddings'):
+                            if hasattr(self.backbone.embeddings.patch_embeddings, 'projection'):
+                                old_proj = self.backbone.embeddings.patch_embeddings.projection
+                                if old_proj.in_channels != in_channels:
+                                    logger.info(f"🔧 Adapting transformers patch embedding from {old_proj.in_channels} to {in_channels} channels")
+                                    new_proj = nn.Conv2d(
+                                        in_channels=in_channels,
+                                        out_channels=old_proj.out_channels,
+                                        kernel_size=old_proj.kernel_size,
+                                        stride=old_proj.stride,
+                                        padding=old_proj.padding,
+                                        bias=old_proj.bias is not None,
+                                    )
+                                    
+                                    with torch.no_grad():
+                                        c = min(old_proj.in_channels, in_channels)
+                                        new_proj.weight[:, :c] = old_proj.weight[:, :c]
+                                        if old_proj.bias is not None:
+                                            new_proj.bias.copy_(old_proj.bias)
+                                    
+                                    self.backbone.embeddings.patch_embeddings.projection = new_proj
+                                    
+                                    # Also update config if available
+                                    if hasattr(self.backbone, 'config') and hasattr(self.backbone.config, 'num_channels'):
+                                        self.backbone.config.num_channels = in_channels
+                                    
+                                    logger.info(f"✅ Transformers patch embedding adapted to {in_channels} channels")
                         else:
-                            # Try to set it back using the same path
-                            parts = patch_embed_path.split('.')
-                            obj = self.backbone
-                            for part in parts[:-1]:
-                                obj = getattr(obj, part)
-                            setattr(obj, parts[-1], new_proj)
-                        
-                        logger.info(f"✅ Patch embedding adapted to {in_channels} channels")
-                    elif old_proj is None:
-                        # Could not find patch embedding layer
-                        logger.warning(f"⚠️ Could not find patch embedding layer. Model structure: {type(self.backbone)}")
-                        if hasattr(self.backbone, 'config'):
-                            logger.warning(f"   Config attributes: {[k for k in dir(self.backbone.config) if not k.startswith('_')][:10]}")
-                        logger.warning(f"   Model attributes: {[k for k in dir(self.backbone) if not k.startswith('_')][:15]}")
+                            logger.error(f"❌ Could not find patch embedding layer. Model type: {type(self.backbone)}")
+                            logger.error(f"   Available attributes: {[k for k in dir(self.backbone) if not k.startswith('_')][:20]}")
+                            raise ValueError(f"Cannot adapt patch embedding: model structure not recognized")
                 except Exception as e:
-                    logger.warning(f"⚠️ Failed to adapt patch embedding for multi-channel input: {e}")
+                    logger.error(f"❌ Failed to adapt patch embedding for multi-channel input: {e}")
                     import traceback
-                    logger.debug(traceback.format_exc())
-                    logger.warning(f"   Continuing with default 3-channel input. This may cause errors if input has {in_channels} channels.")
+                    logger.error(traceback.format_exc())
+                    raise ValueError(f"Failed to adapt model for {in_channels} channels: {e}")
             
             # Freeze patch embedding if requested
             if freeze_patch_embed:
