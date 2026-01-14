@@ -360,25 +360,25 @@ execution = tool.execute(
                             break
             
             if mask_path:
-                # mask_path from Cell_Segmenter_Tool is already absolute, use as-is
-                mask_path = os.path.normpath(mask_path)
-                
                 # Determine source tool
                 source_tool = "Cell_Segmenter_Tool" if 'cell_mask' in mask_path.lower() else \
                              "Nuclei_Segmenter_Tool" if 'nuclei_mask' in mask_path.lower() else \
                              "Organoid_Segmenter_Tool" if 'organoid_mask' in mask_path.lower() else \
                              "segmentation tool"
                 
-                query_cache_dir_str = self.query_cache_dir.replace("\\", "\\\\")
+                # Use mask_path directly as-is (from Cell_Segmenter_Tool, already absolute)
+                # Escape backslashes for Python string in command
                 mask_path_str = mask_path.replace("\\", "\\\\")
+                query_cache_dir_str = self.query_cache_dir.replace("\\", "\\\\")
                 group = kwargs.get('group', "default")
                 source_image_id_param = f', source_image_id="{image_id}"' if image_id else ''
                 group_param = f', group="{group}"'
                 
+                logger.info(f"Single_Cell_Cropper_Tool: Using query_cache_dir={self.query_cache_dir}, mask_path={mask_path}, source_image_id={image_id}, group={group}")
                 return ToolCommand(
                     analysis=f"Using the mask from {source_tool} for single cell cropping",
-                    explanation=f"Using mask path from {source_tool}",
-                    command=f"""execution = tool.execute(original_image="{actual_image_path}", nuclei_mask=r'{mask_path_str}', min_area=50, margin=25, query_cache_dir=r'{query_cache_dir_str}'{source_image_id_param}{group_param})"""
+                    explanation=f"Using the mask path '{mask_path}' from the previous {source_tool} step (image: {image_id}, group: {group})",
+                    command=f"""execution = tool.execute(original_image="{actual_image_path}", nuclei_mask="{mask_path_str}", min_area=50, margin=25, query_cache_dir=r'{query_cache_dir_str}'{source_image_id_param}{group_param})"""
                 )
             else:
                 logger.debug(f"No mask found in previous outputs: {previous_outputs['visual_outputs']}")
