@@ -912,10 +912,73 @@ class Cell_State_Analyzer_Single_Tool(BaseTool):
             if query_cache_dir is None:
                 query_cache_dir = "solver_cache/temp"
             logger.info(f"Loading cell data from metadata in: {query_cache_dir}")
-            cell_crops, cell_metadata, skipped_images = self._load_cell_data_from_metadata(query_cache_dir)
+            try:
+                cell_crops, cell_metadata, skipped_images = self._load_cell_data_from_metadata(query_cache_dir)
+            except ValueError as e:
+                # If loading from metadata fails, provide diagnostic information
+                error_msg = str(e)
+                recommendations = (
+                    "\n\n**Recommendations to fix this issue:**\n"
+                    "1. **Adjust Single_Cell_Cropper_Tool parameters:**\n"
+                    "   - Reduce `margin` parameter (e.g., from 25 to 1-5) to avoid crops extending beyond image boundaries\n"
+                    "   - Reduce `min_area` parameter (e.g., from 50 to 10-20) to include smaller cells\n"
+                    "2. **Re-run segmentation with different parameters:**\n"
+                    "   - Check if segmentation mask quality is sufficient\n"
+                    "   - Consider running Image_Preprocessor_Tool first to improve image quality\n"
+                    "   - Re-run Cell_Segmenter_Tool with adjusted parameters\n"
+                    "3. **Verify segmentation results:**\n"
+                    "   - Check that segmentation mask contains valid cell labels\n"
+                    "   - Ensure mask file exists and is readable"
+                )
+                return {
+                    "error": f"No cell crops available for analysis. {error_msg}{recommendations}",
+                    "status": "failed",
+                    "diagnostic": {
+                        "issue": "no_crops_available",
+                        "recommendations": [
+                            "Reduce margin parameter in Single_Cell_Cropper_Tool (e.g., margin=1-5)",
+                            "Reduce min_area parameter in Single_Cell_Cropper_Tool (e.g., min_area=10-20)",
+                            "Re-run Image_Preprocessor_Tool and Cell_Segmenter_Tool with adjusted parameters",
+                            "Verify segmentation mask quality and file existence"
+                        ]
+                    }
+                }
         
         if not cell_crops or len(cell_crops) == 0:
-            return {"error": "No cell crops found for analysis", "status": "failed"}
+            # Provide detailed diagnostic information
+            diagnostic_info = ""
+            if skipped_images:
+                skipped_list = ", ".join([img.get('image', 'unknown') for img in skipped_images])
+                diagnostic_info = f"\n\n**Skipped images:** {len(skipped_images)} image(s) had no crops generated: {skipped_list}"
+            
+            recommendations = (
+                "\n\n**Recommendations to fix this issue:**\n"
+                "1. **Adjust Single_Cell_Cropper_Tool parameters:**\n"
+                "   - Reduce `margin` parameter (e.g., from 25 to 1-5) to avoid crops extending beyond image boundaries\n"
+                "   - Reduce `min_area` parameter (e.g., from 50 to 10-20) to include smaller cells\n"
+                "2. **Re-run segmentation with different parameters:**\n"
+                "   - Check if segmentation mask quality is sufficient\n"
+                "   - Consider running Image_Preprocessor_Tool first to improve image quality\n"
+                "   - Re-run Cell_Segmenter_Tool with adjusted parameters\n"
+                "3. **Verify segmentation results:**\n"
+                "   - Check that segmentation mask contains valid cell labels\n"
+                "   - Ensure mask file exists and is readable"
+            )
+            
+            return {
+                "error": f"No cell crops found for analysis.{diagnostic_info}{recommendations}",
+                "status": "failed",
+                "diagnostic": {
+                    "issue": "no_crops_available",
+                    "skipped_images": skipped_images,
+                    "recommendations": [
+                        "Reduce margin parameter in Single_Cell_Cropper_Tool (e.g., margin=1-5)",
+                        "Reduce min_area parameter in Single_Cell_Cropper_Tool (e.g., min_area=10-20)",
+                        "Re-run Image_Preprocessor_Tool and Cell_Segmenter_Tool with adjusted parameters",
+                        "Verify segmentation mask quality and file existence"
+                    ]
+                }
+            }
         
         num_crops = len(cell_crops)
         logger.info(f"🔬 Processing {num_crops} cell crops...")
