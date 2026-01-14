@@ -1478,30 +1478,24 @@ class Solver:
             self.step_info.append(step_info)
             
             json_data["query_analysis"] = query_analysis
-            # Extract only Concise Summary section for display
-            concise_summary = ""
-            if "Concise Summary:" in query_analysis:
-                # Find the start of Concise Summary
-                start_idx = query_analysis.find("Concise Summary:")
-                # Find the end (next section or end of string)
-                end_markers = ["Required Skills:", "Relevant Tools:", "Additional Considerations:"]
-                end_idx = len(query_analysis)
-                for marker in end_markers:
-                    marker_idx = query_analysis.find(marker, start_idx)
-                    if marker_idx != -1 and marker_idx < end_idx:
-                        end_idx = marker_idx
-                # Extract the summary text (skip "Concise Summary:" label)
-                summary_text = query_analysis[start_idx + len("Concise Summary:"):end_idx].strip()
-                concise_summary = summary_text
+            # Extract structured sections for display
+            display_content = ""
+            if query_analysis:
+                # Try to extract structured sections
+                if "**Concise Summary:**" in query_analysis or "Concise Summary:" in query_analysis:
+                    # Use the full structured analysis for display
+                    display_content = query_analysis
+                else:
+                    # Fallback: use original if no structured format found
+                    display_content = query_analysis
             else:
-                # Fallback: use original if pattern not found
-                concise_summary = query_analysis
+                display_content = "Query analysis completed, but no content was generated."
             
-            # Keep full query_analysis for internal use, but display only concise summary
+            # Display full query analysis (structured format) for transparency
             messages.append(ChatMessage(role="assistant", 
-                                        content=f"{concise_summary}",
+                                        content=f"{display_content}",
                                         metadata={"title": "### 🔍 Step 0: Query Analysis"}))
-            yield messages, concise_summary, self.visual_outputs_for_gradio, visual_description, "**Progress**: Generating steps..."
+            yield messages, display_content, self.visual_outputs_for_gradio, visual_description, "**Progress**: Generating steps..."
 
             # Save the query analysis data
             query_analysis_data = {"query_analysis": query_analysis, "time": round(time.time() - self.start_time, 5)}

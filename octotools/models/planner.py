@@ -6,6 +6,7 @@ Inspired by Biomni's planning strategy:
 - Minimal hardcoded rules
 - LLM-driven intelligent decision making
 - Simplified, maintainable code
+- Retains essential bioimage analysis chain awareness
 """
 
 import os
@@ -29,7 +30,8 @@ class Planner:
     - Trust LLM's intelligence for tool selection
     - Provide rich context, not rigid rules
     - Let tool metadata guide dependencies
-    - Minimize hardcoded enforcement
+    - Retain essential bioimage analysis chain awareness
+    - Display analysis plan for transparency
     """
     
     def __init__(self, llm_engine_name: str, toolbox_metadata: dict = None, 
@@ -57,7 +59,7 @@ class Planner:
         self.query_analysis = None
         self.last_usage = {}
         self.base_response = None  # For compatibility
-    
+
     def get_image_info(self, image_path: str) -> Dict[str, Any]:
         """Extract image metadata for context."""
         if not image_path or not os.path.isfile(image_path):
@@ -128,7 +130,7 @@ class Planner:
                      **kwargs) -> str:
         """
         Analyze query to understand intent and requirements.
-        Returns query analysis string for use in planning.
+        Returns structured query analysis string for display and planning.
         """
         image_info = self.get_image_info(image) if not bytes_mode else {}
         
@@ -144,18 +146,35 @@ class Planner:
         if group_images:
             groups = {img.get("group", "default") for img in group_images if img.get("group")}
         
-        # Simple, focused prompt
-        prompt = f"""Analyze this bioimage analysis query and determine:
-1. Query type (counting, morphology, cell state analysis, comparison)
-2. Required analysis depth (minimal, intermediate, full pipeline)
-3. Key requirements and constraints
+        # Enhanced prompt with structured output for better display
+        prompt = f"""Analyze this bioimage analysis query and provide a structured analysis.
 
 Query: {question}
 Image info: {image_info}
 Number of images: {num_images}
 Groups: {', '.join(sorted(groups)) if groups else 'single group'}
 
-Provide a concise analysis focusing on what needs to be done to answer the query."""
+Provide your analysis in the following structured format:
+
+**Concise Summary:**
+[Brief summary of what the query is asking for]
+
+**Query Type:**
+[One of: Simple Counting / Basic Morphology / Cell State Analysis / Comparison]
+
+**Required Analysis Pipeline:**
+[Describe the analysis steps needed, for example:
+- For cell counting: Image preprocessing (optional) → Segmentation → Count extraction
+- For cell state analysis: Image preprocessing (optional) → Segmentation → Single cell cropping → Cell state analysis → Visualization
+- For comparison: Full pipeline with group comparison]
+
+**Key Requirements:**
+[List specific requirements, constraints, or considerations]
+
+**Expected Tools:**
+[Suggest which tools will likely be needed in order]
+
+Provide a clear, actionable analysis that helps plan the bioimage analysis workflow."""
         
         response = self.llm_engine.generate(prompt, max_tokens=500)
         # Handle dict response (with 'content' key) or direct string
@@ -176,9 +195,10 @@ Provide a concise analysis focusing on what needs to be done to answer the query
         
         Core approach:
         - Provide rich context (query, memory, tools, metadata)
+        - Retain essential bioimage analysis chain awareness
         - Let LLM understand dependencies from tool metadata
         - Trust LLM's intelligence for tool selection
-        - Minimal hardcoded rules
+        - Display analysis plan for transparency
         """
         # Ensure query_analysis is a string
         if not isinstance(query_analysis, str):
@@ -208,8 +228,8 @@ Provide a concise analysis focusing on what needs to be done to answer the query
         if group_images:
             groups = {img.get("group", "default") for img in group_images if img.get("group")}
         
-        # Build intelligent prompt - concise but informative
-        prompt = f"""You are an intelligent planner for a bioimage analysis system. 
+        # Build intelligent prompt with bioimage analysis chain awareness
+        prompt = f"""You are an intelligent planner for a bioimage analysis system specializing in SINGLE-CELL level analysis.
 Your goal: Select the optimal next tool to progress toward answering the query.
 
 QUERY: {question}
@@ -227,20 +247,41 @@ AVAILABLE TOOLS:
 TOOL METADATA (includes dependencies and capabilities):
 {self._format_tool_metadata(toolbox_metadata)}
 
+CRITICAL: Bioimage Analysis Chain for Single-Cell Analysis
+
+This system performs SINGLE-CELL level analysis. For queries involving cell states, cell counts, or cell-level comparisons, you MUST follow the standard bioimage analysis pipeline:
+
+**Standard Pipeline for Cell-Level Analysis:**
+1. Image Preprocessing (optional) → Image_Preprocessor_Tool
+2. Segmentation → [Cell_Segmenter_Tool | Nuclei_Segmenter_Tool | Organoid_Segmenter_Tool]
+3. Single Cell Cropping → Single_Cell_Cropper_Tool (MANDATORY for cell-level analysis)
+4. Cell State Analysis → [Cell_State_Analyzer_Single_Tool | Cell_State_Analyzer_Multi_Tool]
+   - Use Cell_State_Analyzer_Single_Tool for single-channel images (1 channel)
+   - Use Cell_State_Analyzer_Multi_Tool for multi-channel images (2+ channels)
+5. Visualization → Analysis_Visualizer_Tool
+
+**Query-Specific Guidelines:**
+- For "cell count" or "how many cells": Need Segmentation → Count (may skip cropping if only counting)
+- For "cell states", "cell types", "clustering", "UMAP": Need FULL pipeline (Segmentation → Cropping → Analysis → Visualization)
+- For "compare" queries at cell level: Need FULL pipeline with group comparison
+- For basic morphology (area, size): May need Segmentation → (optional Cropping) → Visualization
+
+**Tool Selection Rules:**
+1. If query involves cell states/cell types → MUST use full pipeline (cannot skip cropping or analysis)
+2. If Single_Cell_Cropper_Tool was used → MUST use Cell_State_Analyzer next (check channel count for Single vs Multi)
+3. If Cell_State_Analyzer was used → MUST use Analysis_Visualizer_Tool next
+4. Check image channel count: multi-channel (2+) → Cell_State_Analyzer_Multi_Tool, single-channel → Cell_State_Analyzer_Single_Tool
+
 INSTRUCTIONS:
-1. Understand the query goal and what has been done so far
-2. Check tool metadata for dependencies (some tools require others to run first)
-3. Select ONE tool that best progresses toward answering the query
-4. Consider:
-   - What information is still needed?
-   - What tools can provide that information?
-   - Are dependencies satisfied?
-   - For multi-channel images (2+ channels), use Cell_State_Analyzer_Multi_Tool
-   - For single-channel images, use Cell_State_Analyzer_Single_Tool
-5. Formulate a clear sub-goal for the selected tool
+1. Review the query analysis to understand what type of analysis is needed
+2. Check what has been done (PREVIOUS STEPS) and what is still needed
+3. Follow the bioimage analysis chain appropriate for the query type
+4. Select ONE tool that is the logical next step in the pipeline
+5. Ensure dependencies are satisfied (e.g., need segmentation before cropping)
+6. Formulate a clear sub-goal explaining what this tool will accomplish
 
 Output format:
-<justification>: Why this tool is the best next step
+<justification>: Why this tool is the best next step, referencing the analysis pipeline
 <context>: All necessary information from previous steps (file paths, data, variables)
 <sub_goal>: Specific, achievable objective for this tool
 <tool_name>: Exact tool name from available tools list"""
