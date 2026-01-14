@@ -102,6 +102,7 @@ from octotools.models.initializer import Initializer
 from octotools.models.planner import Planner
 from octotools.models.memory import Memory
 from octotools.models.executor import Executor
+from octotools.utils.image_processor import ImageProcessor
 
 class CustomEncoder(json.JSONEncoder):
     """Custom JSON encoder for ToolCommand objects."""
@@ -465,38 +466,29 @@ def add_image_to_group(group_name: str, user_image, state: "AgentState", images_
         image_id = uuid.uuid4().hex
         
         # Determine file extension based on original file format
-        # Preserve TIFF format for multi-channel images
         original_path = None
         if isinstance(img, dict) and 'path' in img:
             original_path = img['path']
         elif isinstance(img, str) and os.path.exists(img):
             original_path = img
         
-        # Check if original file is TIFF to preserve multi-channel format
+        # Preserve original extension for format consistency
         file_ext = '.jpg'  # default
         if original_path:
             original_ext = os.path.splitext(original_path)[1].lower()
-            if original_ext in ['.tif', '.tiff']:
-                file_ext = '.tiff'  # Preserve TIFF format for multi-channel images
+            if original_ext:
+                file_ext = original_ext
+            elif ImageProcessor.is_multi_channel_image(original_path):
+                file_ext = '.tiff'  # Use TIFF for multi-channel
         
         image_path = group_image_dir / f"{image_id}{file_ext}"
         try:
             if isinstance(img, dict) and 'path' in img:
-                # For TIFF files, use tifffile to preserve multi-channel data
-                if file_ext == '.tiff':
-                    import tifffile
-                    img_data = tifffile.imread(img['path'])
-                    tifffile.imwrite(str(image_path), img_data)
-                else:
-                    shutil.copy(img['path'], image_path)
+                # Use unified ImageProcessor to preserve multi-channel format
+                ImageProcessor.copy_image_preserving_format(img['path'], str(image_path))
             elif isinstance(img, str) and os.path.exists(img):
-                # For TIFF files, use tifffile to preserve multi-channel data
-                if file_ext == '.tiff':
-                    import tifffile
-                    img_data = tifffile.imread(img)
-                    tifffile.imwrite(str(image_path), img_data)
-                else:
-                    shutil.copy(img, image_path)
+                # Use unified ImageProcessor to preserve multi-channel format
+                ImageProcessor.copy_image_preserving_format(img, str(image_path))
             elif hasattr(img, "save"):
                 img.save(image_path)
             else:
@@ -741,60 +733,33 @@ def _collect_group_info(image_items: List[Dict[str, Any]]) -> Dict[str, Any]:
 def _load_image_for_display(image_path: str) -> Optional[Image.Image]:
     """
     Unified function to load and prepare image for display.
-    Handles format conversion and validation.
+    Uses ImageProcessor for consistent multi-channel handling.
     Returns PIL Image or None if failed.
     """
     if not image_path or not os.path.exists(image_path):
         return None
     
-    try:
-        original_image = Image.open(image_path)
-        supported_formats = ['PNG', 'JPEG', 'JPG', 'GIF', 'WEBP']
-        file_ext = os.path.splitext(image_path)[1].upper().lstrip('.')
-        
-        # Convert mode if needed
-        if original_image.mode not in ['RGB', 'L', 'RGBA']:
-            try:
-                original_image = original_image.convert('RGB')
-            except Exception as e:
-                print(f"Warning: Failed to convert image {image_path} to RGB: {e}")
-                return None
-        
-        # Convert unsupported formats to PNG
-        if file_ext not in supported_formats:
-            from io import BytesIO
-            png_buffer = BytesIO()
-            if original_image.mode in ('RGBA', 'LA', 'P'):
-                rgb_image = Image.new('RGB', original_image.size, (255, 255, 255))
-                if original_image.mode == 'P':
-                    original_image = original_image.convert('RGBA')
-                rgb_image.paste(original_image, mask=original_image.split()[-1] if original_image.mode in ('RGBA', 'LA') else None)
-                original_image = rgb_image
-            elif original_image.mode != 'RGB':
-                original_image = original_image.convert('RGB')
-            original_image.save(png_buffer, format='PNG')
-            png_buffer.seek(0)
-            original_image = Image.open(png_buffer)
-        
-        # Validate image size
-        if original_image.size[0] == 0 or original_image.size[1] == 0:
-            print(f"Warning: Invalid image size: {image_path}")
-            return None
-        
-        # Validate image data
-        try:
-            img_array = np.array(original_image)
-            if img_array.size == 0 or np.isnan(img_array).any():
-                print(f"Warning: Invalid image data in {image_path}")
-                return None
-        except Exception as e:
-            print(f"Warning: Failed to validate image data for {image_path}: {e}")
-            return None
-        
-        return original_image
-    except Exception as e:
-        print(f"Warning: Failed to load image {image_path} for display. Error: {e}")
+    # Use unified ImageProcessor for consistent loading
+    image = ImageProcessor.load_for_display(image_path)
+    if image is None:
         return None
+    
+    # Validate image size
+    if image.size[0] == 0 or image.size[1] == 0:
+        print(f"Warning: Invalid image size: {image_path}")
+        return None
+    
+    # Validate image data
+    try:
+        img_array = np.array(image)
+        if img_array.size == 0 or np.isnan(img_array).any():
+            print(f"Warning: Invalid image data in {image_path}")
+            return None
+    except Exception as e:
+        print(f"Warning: Failed to validate image data for {image_path}: {e}")
+        return None
+    
+    return image
 
 
 def _create_unified_crops_zip(per_image_results: List[Dict[str, Any]], tool_cache_dir: str) -> Optional[str]:
@@ -1070,32 +1035,9 @@ def _collect_visual_outputs(result, visual_outputs_list, downloadable_files_list
             filename = os.path.basename(file_path)
             filename_lower = filename.lower()
             
-            # Check if it's a multi-channel TIFF file
-            is_tiff = filename_lower.endswith('.tif') or filename_lower.endswith('.tiff')
-            is_multi_channel = False
-            
-            if is_tiff:
-                try:
-                    # Try loading with tifffile to check if multi-channel
-                    img_full = tifffile.imread(file_path)
-                    # Check if multi-channel (shape: (H, W, C) or (C, H, W))
-                    if img_full.ndim == 3:
-                        if img_full.shape[2] > 1 and img_full.shape[2] <= 4:  # (H, W, C) with multiple channels
-                            is_multi_channel = True
-                        elif img_full.shape[0] > 1 and img_full.shape[0] <= 4:  # (C, H, W) with multiple channels
-                            is_multi_channel = True
-                    elif img_full.ndim == 4:
-                        # 4D: could be (Z, H, W, C) or (C, Z, H, W)
-                        if img_full.shape[3] > 1 and img_full.shape[3] <= 4:  # (Z, H, W, C)
-                            is_multi_channel = True
-                        elif img_full.shape[0] > 1 and img_full.shape[0] <= 4:  # (C, Z, H, W)
-                            is_multi_channel = True
-                except Exception as tiff_error:
-                    print(f"Warning: Failed to check TIFF channels for {file_path}: {tiff_error}")
-            
             # Check if this is a multi-channel visualization file (from Image_Preprocessor_Tool)
             # If it has "multi_channel_" in the filename, display it directly without splitting
-            if "multi_channel_" in filename.lower():
+            if "multi_channel_" in filename_lower:
                 # This is already a multi-channel visualization, display as-is
                 try:
                     img_pil = Image.open(file_path)
@@ -1104,28 +1046,33 @@ def _collect_visual_outputs(result, visual_outputs_list, downloadable_files_list
                 except Exception as e:
                     print(f"Warning: Failed to load multi-channel visualization {file_path}: {e}")
                     # Fall through to default processing
-                    
-            # For other multi-channel TIFFs (not visualizations), skip splitting
+            
+            # Use unified ImageProcessor to check and load images
+            is_multi_channel = ImageProcessor.is_multi_channel_image(file_path)
+            
+            # For multi-channel TIFFs (not visualizations), skip splitting
             # They should be handled by tools that create multi_channel_ visualizations
             if is_multi_channel:
                 # Skip splitting - tools should create multi_channel_ visualizations if needed
                 continue
-            else:
-                # Regular image loading (non-multi-channel TIFF or other formats)
-                try:
-                    image = Image.open(file_path)
-                    if image.size[0] == 0 or image.size[1] == 0:
-                        continue
-                    
-                    if image.mode not in ['RGB', 'L', 'RGBA']:
-                        image = image.convert('RGB')
-                    
-                    img_array = np.array(image)
-                    if img_array.size == 0 or np.isnan(img_array).any():
-                        continue
-                except Exception as e:
-                    print(f"Warning: Failed to load image {file_path}: {e}")
+            
+            # Regular image loading (non-multi-channel TIFF or other formats)
+            # Use unified ImageProcessor for consistent loading
+            image = ImageProcessor.load_for_display(file_path)
+            if image is None:
+                continue
+            
+            if image.size[0] == 0 or image.size[1] == 0:
+                continue
+            
+            # Validate image data
+            try:
+                img_array = np.array(image)
+                if img_array.size == 0 or np.isnan(img_array).any():
                     continue
+            except Exception as e:
+                print(f"Warning: Failed to validate image {file_path}: {e}")
+                continue
                 
                 # Extract image identifier from filename (consistent naming: tool_type_imageid.ext)
                 # Patterns: nuclei_overlay_<image_id>.png, nuclei_mask_<image_id>.png, <image_id>_default_processed.png

@@ -88,36 +88,23 @@ class MultiChannelCellCropDataset(Dataset):
         path = self.image_paths[idx]
         group = self.groups[idx]
         
-        # Load image using unified ImageProcessor (optimal solution: unified interface)
-        # ImageProcessor.load_image() returns ImageData with guaranteed (H, W, C) format
+        # Load image - support arbitrary number of channels (2, 3, 5, etc.)
+        # Reference: 260113_Training_dinov3_CO_screen.py line 38-46
         try:
             img_data = ImageProcessor.load_image(path)
-            # ImageData.data is always (H, W, C) format where C >= 1
-            # - Single-channel: (H, W, 1)
-            # - Multi-channel: (H, W, C) where C > 1
             img = img_data.data  # (H, W, C) numpy array
-            
-            # Convert to (C, H, W) format for PyTorch (matching reference implementation)
-            # Reference: 260113_Training_dinov3_CO_screen.py line 42-46
-            # Since ImageData always returns (H, W, C), we can directly transpose
             img = np.transpose(img, (2, 0, 1))  # (H, W, C) -> (C, H, W)
-            
-        except Exception as load_error:
-            # Fallback to skimage for direct TIFF loading (legacy support)
-            logger.warning(f"Failed to load with ImageProcessor: {load_error}, using skimage fallback")
+        except Exception:
+            # Fallback to skimage
             if SKIMAGE_AVAILABLE:
-                img = io.imread(path)  # May be (H, W, C) or (C, H, W) or (H, W)
-                
-                # Normalize to (C, H, W) format (matching reference implementation)
+                img = io.imread(path)
+                # Normalize to (C, H, W) format
                 if img.ndim == 2:
-                    # (H, W) -> (1, H, W)
-                    img = img[None, ...]
-                elif img.shape[0] not in (1, 2, 3, 4):
-                    # First dimension is large (likely H), assume (H, W, C) -> (C, H, W)
+                    img = img[None, ...]  # (H, W) -> (1, H, W)
+                elif img.shape[0] > 5:  # First dim is large (likely H), assume (H, W, C) -> (C, H, W)
                     img = np.transpose(img, (2, 0, 1))
-                # else: already (C, H, W) format
             else:
-                raise ValueError(f"Failed to load image {path}: {load_error}. skimage not available.")
+                raise ValueError(f"Failed to load image {path}")
         
         # Select channels if specified
         if self.selected_channels is not None:
@@ -281,96 +268,44 @@ class DinoV3Projector(nn.Module):
             self.backbone = base_model
             logger.info(f"✅ Successfully loaded DINOv3 model weights from {model_filename}")
             
-            # Update config.num_channels FIRST (before adapting patch embedding)
-            # This is critical for transformers library compatibility
-            if hasattr(self.backbone, 'config'):
-                if hasattr(self.backbone.config, 'num_channels'):
-                    logger.info(f"🔧 Updating config.num_channels from {self.backbone.config.num_channels} to {in_channels}")
-                    self.backbone.config.num_channels = in_channels
-                else:
-                    logger.warning(f"⚠️ Model config does not have num_channels attribute")
-            
-            # Adapt patch embedding for multi-channel input (if in_channels != 3)
-            # IMPORTANT: Do this AFTER loading weights (matching reference implementation)
+            # Adapt patch embedding for multi-channel input (matching reference implementation)
             # Reference: 260113_Training_dinov3_CO_screen.py line 141-164
-            if in_channels != 3:
-                try:
-                    # Reference implementation uses: self.backbone.patch_embed.proj
-                    # Try this first (torch.hub style)
-                    if hasattr(self.backbone, 'patch_embed') and hasattr(self.backbone.patch_embed, 'proj'):
-                        patch_embed = self.backbone.patch_embed
-                        old_proj = patch_embed.proj
-                        
-                        logger.info(f"🔍 Checking patch embedding: old_proj.in_channels={old_proj.in_channels}, target in_channels={in_channels}")
-                        if old_proj.in_channels != in_channels:
-                            logger.info(f"🔧 Adapting patch embedding from {old_proj.in_channels} to {in_channels} channels")
-                            new_proj = nn.Conv2d(
-                                in_channels=in_channels,
-                                out_channels=old_proj.out_channels,
-                                kernel_size=old_proj.kernel_size,
-                                stride=old_proj.stride,
-                                padding=old_proj.padding,
-                                bias=old_proj.bias is not None,
-                            )
-                            
-                            with torch.no_grad():
-                                # Inherit as much as possible from RGB weights (matching reference)
-                                c = min(old_proj.in_channels, in_channels)
-                                new_proj.weight[:, :c] = old_proj.weight[:, :c]
-                                if old_proj.bias is not None:
-                                    new_proj.bias.copy_(old_proj.bias)
-                            
-                            patch_embed.proj = new_proj
-                            
-                            # Update config if available (for transformers compatibility)
-                            if hasattr(self.backbone, 'config'):
-                                if hasattr(self.backbone.config, 'num_channels'):
-                                    self.backbone.config.num_channels = in_channels
-                                    logger.info(f"✅ Updated config.num_channels to {in_channels}")
-                                # Also check for image_size and other relevant config fields
-                                if hasattr(self.backbone.config, 'image_size'):
-                                    logger.debug(f"Model config.image_size: {self.backbone.config.image_size}")
-                            
-                            logger.info(f"✅ Patch embedding adapted to {in_channels} channels")
-                    else:
-                        # Fallback: try transformers style structure
-                        logger.warning(f"⚠️ Model does not have patch_embed.proj, trying transformers structure...")
-                        if hasattr(self.backbone, 'embeddings') and hasattr(self.backbone.embeddings, 'patch_embeddings'):
-                            if hasattr(self.backbone.embeddings.patch_embeddings, 'projection'):
-                                old_proj = self.backbone.embeddings.patch_embeddings.projection
-                                if old_proj.in_channels != in_channels:
-                                    logger.info(f"🔧 Adapting transformers patch embedding from {old_proj.in_channels} to {in_channels} channels")
-                                    new_proj = nn.Conv2d(
-                                        in_channels=in_channels,
-                                        out_channels=old_proj.out_channels,
-                                        kernel_size=old_proj.kernel_size,
-                                        stride=old_proj.stride,
-                                        padding=old_proj.padding,
-                                        bias=old_proj.bias is not None,
-                                    )
-                                    
-                                    with torch.no_grad():
-                                        c = min(old_proj.in_channels, in_channels)
-                                        new_proj.weight[:, :c] = old_proj.weight[:, :c]
-                                        if old_proj.bias is not None:
-                                            new_proj.bias.copy_(old_proj.bias)
-                                    
-                                    self.backbone.embeddings.patch_embeddings.projection = new_proj
-                                    
-                                    # Also update config if available
-                                    if hasattr(self.backbone, 'config') and hasattr(self.backbone.config, 'num_channels'):
-                                        self.backbone.config.num_channels = in_channels
-                                    
-                                    logger.info(f"✅ Transformers patch embedding adapted to {in_channels} channels")
-                        else:
-                            logger.error(f"❌ Could not find patch embedding layer. Model type: {type(self.backbone)}")
-                            logger.error(f"   Available attributes: {[k for k in dir(self.backbone) if not k.startswith('_')][:20]}")
-                            raise ValueError(f"Cannot adapt patch embedding: model structure not recognized")
-                except Exception as e:
-                    logger.error(f"❌ Failed to adapt patch embedding for multi-channel input: {e}")
-                    import traceback
-                    logger.error(traceback.format_exc())
-                    raise ValueError(f"Failed to adapt model for {in_channels} channels: {e}")
+            patch_embed = self.backbone.patch_embed if hasattr(self.backbone, 'patch_embed') else None
+            if patch_embed is None and hasattr(self.backbone, 'embeddings'):
+                patch_embed = self.backbone.embeddings.patch_embeddings if hasattr(self.backbone.embeddings, 'patch_embeddings') else None
+            
+            if patch_embed is not None:
+                old_proj = patch_embed.proj if hasattr(patch_embed, 'proj') else (patch_embed.projection if hasattr(patch_embed, 'projection') else None)
+                
+                if old_proj is not None and old_proj.in_channels != in_channels:
+                    # Create new Conv2d with correct input channels (supports 2, 3, 5, etc.)
+                    new_proj = nn.Conv2d(
+                        in_channels=in_channels,
+                        out_channels=old_proj.out_channels,
+                        kernel_size=old_proj.kernel_size,
+                        stride=old_proj.stride,
+                        padding=old_proj.padding,
+                        bias=old_proj.bias is not None,
+                    )
+                    
+                    with torch.no_grad():
+                        # Inherit as much as possible from RGB weights
+                        c = min(old_proj.in_channels, in_channels)
+                        new_proj.weight[:, :c] = old_proj.weight[:, :c]
+                        if old_proj.bias is not None:
+                            new_proj.bias.copy_(old_proj.bias)
+                    
+                    # Replace patch embedding
+                    if hasattr(patch_embed, 'proj'):
+                        patch_embed.proj = new_proj
+                    elif hasattr(patch_embed, 'projection'):
+                        patch_embed.projection = new_proj
+                    
+                    # Update config if available
+                    if hasattr(self.backbone, 'config') and hasattr(self.backbone.config, 'num_channels'):
+                        self.backbone.config.num_channels = in_channels
+                    
+                    logger.info(f"✅ Adapted patch embedding from {old_proj.in_channels} to {in_channels} channels")
             
             # Freeze patch embedding if requested
             if freeze_patch_embed:
@@ -422,89 +357,39 @@ class DinoV3Projector(nn.Module):
                 # Update feat_dim for small model (384 dimensions)
                 feat_dim_map[backbone_name] = 384
                 
-                # Update config.num_channels FIRST (before adapting patch embedding)
-                # This is critical for transformers library compatibility
-                if hasattr(self.backbone, 'config'):
-                    if hasattr(self.backbone.config, 'num_channels'):
-                        logger.info(f"🔧 Updating fallback config.num_channels from {self.backbone.config.num_channels} to {in_channels}")
-                        self.backbone.config.num_channels = in_channels
-                    else:
-                        logger.warning(f"⚠️ Fallback model config does not have num_channels attribute")
+                # Adapt patch embedding (same logic as main model)
+                patch_embed = self.backbone.patch_embed if hasattr(self.backbone, 'patch_embed') else None
+                if patch_embed is None and hasattr(self.backbone, 'embeddings'):
+                    patch_embed = self.backbone.embeddings.patch_embeddings if hasattr(self.backbone.embeddings, 'patch_embeddings') else None
                 
-                # Adapt patch embedding for multi-channel input (if in_channels != 3)
-                # Use same logic as main model (matching reference implementation)
-                if in_channels != 3:
-                    try:
-                        # Reference implementation uses: self.backbone.patch_embed.proj
-                        if hasattr(self.backbone, 'patch_embed') and hasattr(self.backbone.patch_embed, 'proj'):
-                            patch_embed = self.backbone.patch_embed
-                            old_proj = patch_embed.proj
-                            
-                            if old_proj.in_channels != in_channels:
-                                logger.info(f"🔧 Adapting fallback model patch embedding from {old_proj.in_channels} to {in_channels} channels")
-                                new_proj = nn.Conv2d(
-                                    in_channels=in_channels,
-                                    out_channels=old_proj.out_channels,
-                                    kernel_size=old_proj.kernel_size,
-                                    stride=old_proj.stride,
-                                    padding=old_proj.padding,
-                                    bias=old_proj.bias is not None,
-                                )
-                                
-                                with torch.no_grad():
-                                    c = min(old_proj.in_channels, in_channels)
-                                    new_proj.weight[:, :c] = old_proj.weight[:, :c]
-                                    if old_proj.bias is not None:
-                                        new_proj.bias.copy_(old_proj.bias)
-                                
-                                patch_embed.proj = new_proj
-                                
-                                # Update config if available (for transformers compatibility)
-                                if hasattr(self.backbone, 'config'):
-                                    if hasattr(self.backbone.config, 'num_channels'):
-                                        self.backbone.config.num_channels = in_channels
-                                        logger.info(f"✅ Updated fallback config.num_channels to {in_channels}")
-                                    # Also check for image_size and other relevant config fields
-                                    if hasattr(self.backbone.config, 'image_size'):
-                                        logger.debug(f"Fallback model config.image_size: {self.backbone.config.image_size}")
-                                
-                                logger.info(f"✅ Fallback model patch embedding adapted to {in_channels} channels")
-                        else:
-                            # Try transformers style
-                            if hasattr(self.backbone, 'embeddings') and hasattr(self.backbone.embeddings, 'patch_embeddings'):
-                                if hasattr(self.backbone.embeddings.patch_embeddings, 'projection'):
-                                    old_proj = self.backbone.embeddings.patch_embeddings.projection
-                                    if old_proj.in_channels != in_channels:
-                                        logger.info(f"🔧 Adapting fallback transformers patch embedding from {old_proj.in_channels} to {in_channels} channels")
-                                        new_proj = nn.Conv2d(
-                                            in_channels=in_channels,
-                                            out_channels=old_proj.out_channels,
-                                            kernel_size=old_proj.kernel_size,
-                                            stride=old_proj.stride,
-                                            padding=old_proj.padding,
-                                            bias=old_proj.bias is not None,
-                                        )
-                                        
-                                        with torch.no_grad():
-                                            c = min(old_proj.in_channels, in_channels)
-                                            new_proj.weight[:, :c] = old_proj.weight[:, :c]
-                                            if old_proj.bias is not None:
-                                                new_proj.bias.copy_(old_proj.bias)
-                                        
-                                        self.backbone.embeddings.patch_embeddings.projection = new_proj
-                                        
-                                        if hasattr(self.backbone, 'config') and hasattr(self.backbone.config, 'num_channels'):
-                                            self.backbone.config.num_channels = in_channels
-                                        
-                                        logger.info(f"✅ Fallback transformers patch embedding adapted to {in_channels} channels")
-                            else:
-                                logger.error(f"❌ Could not find patch embedding in fallback model")
-                                raise ValueError(f"Cannot adapt fallback model patch embedding: model structure not recognized")
-                    except Exception as e:
-                        logger.error(f"❌ Failed to adapt fallback model patch embedding: {e}")
-                        import traceback
-                        logger.error(traceback.format_exc())
-                        raise ValueError(f"Failed to adapt fallback model for {in_channels} channels: {e}")
+                if patch_embed is not None:
+                    old_proj = patch_embed.proj if hasattr(patch_embed, 'proj') else (patch_embed.projection if hasattr(patch_embed, 'projection') else None)
+                    
+                    if old_proj is not None and old_proj.in_channels != in_channels:
+                        new_proj = nn.Conv2d(
+                            in_channels=in_channels,
+                            out_channels=old_proj.out_channels,
+                            kernel_size=old_proj.kernel_size,
+                            stride=old_proj.stride,
+                            padding=old_proj.padding,
+                            bias=old_proj.bias is not None,
+                        )
+                        
+                        with torch.no_grad():
+                            c = min(old_proj.in_channels, in_channels)
+                            new_proj.weight[:, :c] = old_proj.weight[:, :c]
+                            if old_proj.bias is not None:
+                                new_proj.bias.copy_(old_proj.bias)
+                        
+                        if hasattr(patch_embed, 'proj'):
+                            patch_embed.proj = new_proj
+                        elif hasattr(patch_embed, 'projection'):
+                            patch_embed.projection = new_proj
+                        
+                        if hasattr(self.backbone, 'config') and hasattr(self.backbone.config, 'num_channels'):
+                            self.backbone.config.num_channels = in_channels
+                        
+                        logger.info(f"✅ Adapted fallback patch embedding from {old_proj.in_channels} to {in_channels} channels")
                 
                 # Freeze layers if requested
                 if freeze_patch_embed:
@@ -547,30 +432,20 @@ class DinoV3Projector(nn.Module):
             except Exception as e:
                 logger.debug(f"Could not infer feat_dim from model config: {e}, using default: {feat_dim}")
         self.projector = nn.Sequential(
-            nn.Linear(feat_dim, 512),
-            nn.ReLU(inplace=True),
-            nn.Linear(512, proj_dim)
+            nn.Linear(feat_dim, feat_dim),
+            nn.GELU(),
+            nn.Linear(feat_dim, proj_dim),
         )
     
     def forward(self, x):
-        # DINOv3 backbone directly returns CLS token as tensor (matching training script)
-        z = self.backbone(x)
-        
-        # Handle tensor output - if multi-dimensional, extract CLS token
-        if isinstance(z, torch.Tensor):
-            if z.dim() > 2:
-                # Shape is [B, N, D], take first token (CLS)
-                z = z[:, 0, :]
-            # Otherwise it's already CLS token [B, D]
-        else:
-            # Fallback for other formats (shouldn't happen with DINOv3)
-            if hasattr(z, 'last_hidden_state'):
-                z = z.last_hidden_state[:, 0]
-            elif hasattr(z, 'pooler_output'):
-                z = z.pooler_output
-        
-        # Project and normalize
-        z = self.projector(z)
+        """
+        Forward pass.
+        x: (B, C, H, W) or (C, H, W)
+        Returns: normalized embedding
+        """
+        # Reference: 260113_Training_dinov3_CO_screen.py line 190-197
+        feats = self.backbone(x)  # CLS token
+        z = self.projector(feats)
         return F.normalize(z, dim=-1)
 
 

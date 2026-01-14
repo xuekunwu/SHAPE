@@ -388,13 +388,7 @@ class Cell_Segmenter_Tool(BaseTool):
             overlay = plot.mask_overlay(img, mask)
             
             # Setup output directory using centralized configuration
-            # Debug: log query_cache_dir value
-            print(f"Cell_Segmenter_Tool: query_cache_dir={query_cache_dir}, type={type(query_cache_dir)}")
-            if query_cache_dir is None:
-                print(f"⚠️ WARNING: query_cache_dir is None! Output will be saved to default location.")
-            
             output_dir = VisualizationConfig.get_output_dir(query_cache_dir)
-            print(f"Cell_Segmenter_Tool: output_dir={output_dir}, isabs={os.path.isabs(output_dir)}")
             
             # Save overlay visualization with professional styling using image identifier
             output_path = os.path.join(output_dir, f"cell_overlay_{image_identifier}.png")
@@ -415,21 +409,14 @@ class Cell_Segmenter_Tool(BaseTool):
             # Save mask as separate visualization with professional styling using image identifier
             # Use .tif format with 16-bit depth to preserve all label values (supports up to 65535 cells)
             mask_path = os.path.join(output_dir, f"cell_mask_{image_identifier}.tif")
-            print(f"Cell_Segmenter_Tool: mask_path (before fix)={mask_path}, isabs={os.path.isabs(mask_path)}")
-            
-            # Ensure absolute path: output_dir should already be absolute from get_output_dir
-            # But double-check and fix if needed
+            # Ensure absolute path: if output_dir is already absolute, mask_path will be absolute
+            # If output_dir is relative, resolve it relative to query_cache_dir
             if not os.path.isabs(mask_path):
-                print(f"⚠️ WARNING: mask_path is not absolute! Fixing...")
                 if query_cache_dir and os.path.isabs(query_cache_dir):
                     mask_path = os.path.join(query_cache_dir, "output_visualizations", f"cell_mask_{image_identifier}.tif")
-                    print(f"Cell_Segmenter_Tool: Fixed mask_path using query_cache_dir: {mask_path}")
                 else:
-                    # Fallback: use output_dir (should be absolute from get_output_dir)
                     mask_path = os.path.abspath(mask_path)
-                    print(f"Cell_Segmenter_Tool: Fixed mask_path using abspath: {mask_path}")
             mask_path = os.path.normpath(mask_path)  # Normalize path separators
-            print(f"Cell_Segmenter_Tool: Final mask_path={mask_path}, isabs={os.path.isabs(mask_path)}")
             
             # Save the original mask array as 16-bit TIFF to preserve all label values
             # Cellpose masks are integer labels (0=background, 1-N for N cells), which can exceed 255

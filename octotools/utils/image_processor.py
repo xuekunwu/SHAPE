@@ -183,9 +183,103 @@ class ImageProcessor:
         Args:
             img_data: ImageData object (crop)
             path: Path to save
-        
+            
         Returns:
             Path to saved file
         """
         return img_data.save(path, format='tiff' if img_data.is_multi_channel else 'png')
+    
+    @staticmethod
+    def save_image(img_data: ImageData, path: str, format: Optional[str] = None) -> str:
+        """
+        Save image to file with automatic format detection
+        
+        Args:
+            img_data: ImageData object
+            path: Path to save
+            format: Optional format override ('tiff', 'png', etc.)
+            
+        Returns:
+            Path to saved file
+        """
+        return img_data.save(path, format=format)
+    
+    @staticmethod
+    def copy_image_preserving_format(source_path: str, dest_path: str) -> str:
+        """
+        Copy image file preserving multi-channel format
+        
+        Args:
+            source_path: Source image path
+            dest_path: Destination image path
+            
+        Returns:
+            Destination path
+        """
+        import shutil
+        import tifffile
+        
+        # Check if source is multi-channel TIFF
+        try:
+            img_data = ImageProcessor.load_image(source_path)
+            if img_data.is_multi_channel:
+                # Use ImageData.save to preserve format
+                img_data.save(dest_path, format='tiff')
+            else:
+                # Simple copy for single-channel
+                shutil.copy(source_path, dest_path)
+        except Exception as e:
+            # Fallback to simple copy
+            print(f"Warning: Failed to preserve format during copy: {e}, using simple copy")
+            shutil.copy(source_path, dest_path)
+        
+        return dest_path
+    
+    @staticmethod
+    def is_multi_channel_image(path: str) -> bool:
+        """
+        Check if image is multi-channel without full loading
+        
+        Args:
+            path: Image file path
+            
+        Returns:
+            True if multi-channel, False otherwise
+        """
+        try:
+            img_data = ImageProcessor.load_image(path)
+            return img_data.is_multi_channel
+        except Exception:
+            return False
+    
+    @staticmethod
+    def load_for_display(path: str) -> Optional[Image.Image]:
+        """
+        Load image for display (returns PIL Image)
+        Handles multi-channel by creating merged RGB view
+        
+        Args:
+            path: Image file path
+            
+        Returns:
+            PIL Image for display, or None if failed
+        """
+        try:
+            img_data = ImageProcessor.load_image(path)
+            
+            if img_data.is_multi_channel:
+                # Create merged RGB for multi-channel
+                merged_rgb = ImageProcessor.create_merged_rgb_for_display(img_data)
+                return Image.fromarray(merged_rgb, mode='RGB')
+            else:
+                # Single channel: convert to grayscale PIL Image
+                channel_uint8 = img_data.to_uint8(0)
+                return Image.fromarray(channel_uint8, mode='L')
+        except Exception as e:
+            print(f"Warning: Failed to load image for display: {e}")
+            # Fallback to PIL
+            try:
+                return Image.open(path)
+            except Exception:
+                return None
 
