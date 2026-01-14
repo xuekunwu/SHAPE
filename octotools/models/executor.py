@@ -255,6 +255,9 @@ except Exception as e:
                     tool_label = "nuclei segmentation" if tool_name == "Nuclei_Segmenter_Tool" else \
                                  "cell segmentation" if tool_name == "Cell_Segmenter_Tool" else \
                                  "organoid segmentation"
+                    # Always include query_cache_dir for segmentation tools to ensure correct output paths
+                    query_cache_dir_str = self.query_cache_dir.replace("\\", "\\\\")
+                    query_cache_dir_param = f', query_cache_dir=r"{query_cache_dir_str}"'
                     return ToolCommand(
                         analysis=f"Using the processed image from Image_Preprocessor_Tool for {tool_label}",
                         explanation=f"Using the processed image path '{processed_image_path}' from the previous Image_Preprocessor_Tool step (matched for image_id: {image_id})",
@@ -698,15 +701,53 @@ Remember: Your <command> field MUST be valid Python code including any necessary
             # Some tools accept query_cache_dir but LLM may generate output_dir
             # Fix for Organoid_Segmenter_Tool, Cell_Segmenter_Tool, Nuclei_Segmenter_Tool
             if tool_name in ["Organoid_Segmenter_Tool", "Cell_Segmenter_Tool", "Nuclei_Segmenter_Tool"]:
+                import re
                 # Replace output_dir with query_cache_dir if present (handle both parameter and variable cases)
                 if "output_dir" in command:
-                    import re
                     # Replace output_dir= parameter with query_cache_dir=
                     command = re.sub(r'\boutput_dir\s*=', 'query_cache_dir=', command)
                     # Remove standalone output_dir variable references (if used as variable without definition)
                     # Pattern: output_dir) or output_dir, (but not output_dir=)
                     command = re.sub(r'\boutput_dir\s*([,)\)])', r'query_cache_dir\1', command)
                     logger.debug(f"Fixed parameter/variable name: replaced output_dir with query_cache_dir for {tool_name}")
+                
+                # Ensure query_cache_dir is always included in the command
+                # Check if query_cache_dir parameter is missing
+                if "query_cache_dir" not in command:
+                    # Find the tool.execute() call and add query_cache_dir parameter
+                    query_cache_dir_str = self.query_cache_dir.replace("\\", "\\\\")
+                    # Pattern: tool.execute(...) - find the closing parenthesis and add parameter before it
+                    # Handle both single-line and multi-line commands
+                    if "tool.execute(" in command:
+                        # Find the last closing parenthesis of tool.execute() call
+                        # Add query_cache_dir before the closing parenthesis
+                        # Pattern: find ) that closes tool.execute(..., and add , query_cache_dir=r"..." before it
+                        # But be careful not to match nested parentheses
+                        import re
+                        # Simple approach: add query_cache_dir before the last ) in the command
+                        # But only if it's part of tool.execute(...)
+                        if command.strip().endswith(")"):
+                            # Add before the last closing parenthesis
+                            command = command.rsplit(")", 1)[0] + f', query_cache_dir=r"{query_cache_dir_str}")'
+                        else:
+                            # Multi-line command: find the execution = tool.execute(...) line
+                            lines = command.split('\n')
+                            for i, line in enumerate(lines):
+                                if "tool.execute(" in line and "query_cache_dir" not in line:
+                                    # Add query_cache_dir parameter to this line
+                                    if line.strip().endswith(")"):
+                                        lines[i] = line.rsplit(")", 1)[0] + f', query_cache_dir=r"{query_cache_dir_str}")'
+                                    else:
+                                        # Multi-line parameters: find the last line before closing )
+                                        for j in range(i+1, len(lines)):
+                                            if lines[j].strip() == ")":
+                                                lines[j-1] = lines[j-1].rstrip() + f', query_cache_dir=r"{query_cache_dir_str}"'
+                                                break
+                                    break
+                            command = '\n'.join(lines)
+                        logger.debug(f"Added query_cache_dir parameter to {tool_name} command")
+                    else:
+                        logger.warning(f"Could not find tool.execute() call in command for {tool_name}, cannot inject query_cache_dir")
             
             # Execute the entire command as a single block to preserve variable definitions
             result = execute_with_timeout(command, local_context)
