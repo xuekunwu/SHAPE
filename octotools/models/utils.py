@@ -171,12 +171,18 @@ class VisualizationConfig:
             query_cache_dir: Optional cache directory, if None uses default OUTPUT_DIR
             
         Returns:
-            Path to output directory
+            Path to output directory (always absolute)
         """
         if query_cache_dir:
             output_dir = os.path.join(query_cache_dir, cls.OUTPUT_DIR)
         else:
             output_dir = cls.OUTPUT_DIR
+        
+        # Ensure absolute path
+        if not os.path.isabs(output_dir):
+            output_dir = os.path.abspath(output_dir)
+        else:
+            output_dir = os.path.normpath(output_dir)
         
         # Ensure directory exists
         os.makedirs(output_dir, exist_ok=True)

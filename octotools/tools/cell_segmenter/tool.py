@@ -409,7 +409,14 @@ class Cell_Segmenter_Tool(BaseTool):
             # Save mask as separate visualization with professional styling using image identifier
             # Use .tif format with 16-bit depth to preserve all label values (supports up to 65535 cells)
             mask_path = os.path.join(output_dir, f"cell_mask_{image_identifier}.tif")
-            mask_path = os.path.abspath(mask_path)  # Ensure absolute path
+            # Ensure absolute path: if output_dir is already absolute, mask_path will be absolute
+            # If output_dir is relative, resolve it relative to query_cache_dir
+            if not os.path.isabs(mask_path):
+                if query_cache_dir and os.path.isabs(query_cache_dir):
+                    mask_path = os.path.join(query_cache_dir, "output_visualizations", f"cell_mask_{image_identifier}.tif")
+                else:
+                    mask_path = os.path.abspath(mask_path)
+            mask_path = os.path.normpath(mask_path)  # Normalize path separators
             
             # Save the original mask array as 16-bit TIFF to preserve all label values
             # Cellpose masks are integer labels (0=background, 1-N for N cells), which can exceed 255
