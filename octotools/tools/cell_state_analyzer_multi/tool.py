@@ -281,6 +281,15 @@ class DinoV3Projector(nn.Module):
             self.backbone = base_model
             logger.info(f"✅ Successfully loaded DINOv3 model weights from {model_filename}")
             
+            # Update config.num_channels FIRST (before adapting patch embedding)
+            # This is critical for transformers library compatibility
+            if hasattr(self.backbone, 'config'):
+                if hasattr(self.backbone.config, 'num_channels'):
+                    logger.info(f"🔧 Updating config.num_channels from {self.backbone.config.num_channels} to {in_channels}")
+                    self.backbone.config.num_channels = in_channels
+                else:
+                    logger.warning(f"⚠️ Model config does not have num_channels attribute")
+            
             # Adapt patch embedding for multi-channel input (if in_channels != 3)
             # IMPORTANT: Do this AFTER loading weights (matching reference implementation)
             # Reference: 260113_Training_dinov3_CO_screen.py line 141-164
@@ -312,6 +321,16 @@ class DinoV3Projector(nn.Module):
                                     new_proj.bias.copy_(old_proj.bias)
                             
                             patch_embed.proj = new_proj
+                            
+                            # Update config if available (for transformers compatibility)
+                            if hasattr(self.backbone, 'config'):
+                                if hasattr(self.backbone.config, 'num_channels'):
+                                    self.backbone.config.num_channels = in_channels
+                                    logger.info(f"✅ Updated config.num_channels to {in_channels}")
+                                # Also check for image_size and other relevant config fields
+                                if hasattr(self.backbone.config, 'image_size'):
+                                    logger.debug(f"Model config.image_size: {self.backbone.config.image_size}")
+                            
                             logger.info(f"✅ Patch embedding adapted to {in_channels} channels")
                     else:
                         # Fallback: try transformers style structure
@@ -403,6 +422,15 @@ class DinoV3Projector(nn.Module):
                 # Update feat_dim for small model (384 dimensions)
                 feat_dim_map[backbone_name] = 384
                 
+                # Update config.num_channels FIRST (before adapting patch embedding)
+                # This is critical for transformers library compatibility
+                if hasattr(self.backbone, 'config'):
+                    if hasattr(self.backbone.config, 'num_channels'):
+                        logger.info(f"🔧 Updating fallback config.num_channels from {self.backbone.config.num_channels} to {in_channels}")
+                        self.backbone.config.num_channels = in_channels
+                    else:
+                        logger.warning(f"⚠️ Fallback model config does not have num_channels attribute")
+                
                 # Adapt patch embedding for multi-channel input (if in_channels != 3)
                 # Use same logic as main model (matching reference implementation)
                 if in_channels != 3:
@@ -430,6 +458,16 @@ class DinoV3Projector(nn.Module):
                                         new_proj.bias.copy_(old_proj.bias)
                                 
                                 patch_embed.proj = new_proj
+                                
+                                # Update config if available (for transformers compatibility)
+                                if hasattr(self.backbone, 'config'):
+                                    if hasattr(self.backbone.config, 'num_channels'):
+                                        self.backbone.config.num_channels = in_channels
+                                        logger.info(f"✅ Updated fallback config.num_channels to {in_channels}")
+                                    # Also check for image_size and other relevant config fields
+                                    if hasattr(self.backbone.config, 'image_size'):
+                                        logger.debug(f"Fallback model config.image_size: {self.backbone.config.image_size}")
+                                
                                 logger.info(f"✅ Fallback model patch embedding adapted to {in_channels} channels")
                         else:
                             # Try transformers style
