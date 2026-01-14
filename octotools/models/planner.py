@@ -178,10 +178,10 @@ MULTI-IMAGE CONTEXT:
 - Groups detected: {len(groups)} ({groups_summary})
 - Group comparison: {'YES' if is_group_comparison else 'NO (all images in same group)'}
 
-IMPORTANT FOR MULTI-IMAGE PROCESSING:
-- Per-image tools (segmenters, croppers): Process each of {num_images} images independently
-- Merge-all tools (Cell_State_Analyzer_Tool, Analysis_Visualizer_Tool): Execute ONCE, merging all {num_images} images with group labels
-- For group comparison queries: Ensure using merge-all tools after per-image processing for statistical comparison
+MULTI-IMAGE PROCESSING:
+- Per-image tools: Process each image independently (segmenters, croppers)
+- Merge-all tools: Execute once, merging all images with group labels (analyzers, visualizers)
+- For comparison: Analysis tool extracts features → Visualization tool displays results
 """
         
         # Enhanced prompt with structured output
@@ -200,11 +200,12 @@ Tool metadata: {toolbox_metadata}
 CRITICAL INSTRUCTIONS:
 1. Understand the query precisely - identify EXACTLY what is being asked
 2. Determine the SINGLE main objective:
-   - "How many cells" → Only counting needed (segmentation + counting)
-   - "What cell states" or "analyze cell states" → Full cell state analysis (preprocessing → segmentation → cropping → clustering → visualization)
-   - "Compare images" or "compare groups" → Comparison analysis (requires cell state analysis for meaningful comparison)
-3. Select MINIMUM necessary tools - only what is DIRECTLY required
-4. DO NOT over-extend - if query asks for count, don't suggest cell state analysis
+   - "How many cells/organoids" → Only counting needed (segmentation + counting, may visualize counts)
+   - "What cell states" or "analyze cell states" → Full cell state analysis (preprocessing → segmentation → cropping → analysis → visualization)
+   - "Compare" or "morphology" → Full pipeline (analysis tool extracts features, visualizer displays)
+   - Analysis_Visualizer_Tool requires pre-computed results from Cell_State_Analyzer_*_Tool
+3. Select minimum necessary tools
+4. Do not skip analysis tool for morphology/comparison queries
 
 Provide your analysis in structured format:
 - Concise Summary: Brief summary of what the query asks
@@ -324,26 +325,21 @@ CRITICAL: Bioimage Analysis Chain for Single-Cell Analysis
 
 This system performs SINGLE-CELL level analysis. For queries involving cell states, cell counts, or cell-level comparisons:
 
-**Standard Pipeline for Cell-Level Analysis:**
-1. Image Preprocessing (optional) → Image_Preprocessor_Tool
-2. Segmentation → [Cell_Segmenter_Tool | Nuclei_Segmenter_Tool | Organoid_Segmenter_Tool]
-3. Single Cell Cropping → Single_Cell_Cropper_Tool (MANDATORY for cell-level analysis)
-4. Cell State Analysis → [Cell_State_Analyzer_Single_Tool | Cell_State_Analyzer_Multi_Tool]
-   - Use Cell_State_Analyzer_Single_Tool for single-channel images (1 channel)
-   - Use Cell_State_Analyzer_Multi_Tool for multi-channel images (2+ channels)
+**Tool Role & Pipeline:**
+- Analysis Tools: Cell_State_Analyzer_*_Tool performs feature extraction, clustering, morphological analysis
+- Visualization Tool: Analysis_Visualizer_Tool ONLY visualizes - requires pre-computed analysis results
+
+**Pipeline Flow:**
+1. Preprocessing (optional) → Image_Preprocessor_Tool
+2. Segmentation → [Cell/Nuclei/Organoid_Segmenter_Tool]
+3. Cropping → Single_Cell_Cropper_Tool
+4. Analysis → Cell_State_Analyzer_Single_Tool (1 channel) | Cell_State_Analyzer_Multi_Tool (2+ channels)
 5. Visualization → Analysis_Visualizer_Tool
 
-**Query-Specific Guidelines:**
-- "cell count" or "how many cells": Segmentation → Count (may skip cropping if only counting)
-- "cell states", "cell types", "clustering", "UMAP": FULL pipeline (Segmentation → Cropping → Analysis → Visualization)
-- "compare" queries at cell level: FULL pipeline with group comparison
-- Basic morphology (area, size): Segmentation → (optional Cropping) → Visualization
-
-**Tool Selection Rules:**
-1. If query involves cell states/cell types → MUST use full pipeline (cannot skip cropping or analysis)
-2. If Single_Cell_Cropper_Tool was used → MUST use Cell_State_Analyzer next (check channel count for Single vs Multi)
-3. If Cell_State_Analyzer was used → MUST use Analysis_Visualizer_Tool next
-4. Check image channel count: multi-channel (2+) → Cell_State_Analyzer_Multi_Tool, single-channel → Cell_State_Analyzer_Single_Tool
+**Query → Pipeline Mapping:**
+- Counting: Segmentation → Count (visualize if needed)
+- Morphology/Comparison/States: Full pipeline (requires Analysis tool for feature extraction)
+- Analysis_Visualizer_Tool cannot compute features - only visualizes results from Cell_State_Analyzer_*_Tool
 
 INSTRUCTIONS:
 1. Review the query analysis to understand what type of analysis is needed
@@ -396,7 +392,13 @@ Output format:
         lines = []
         for tool_name, metadata in list(toolbox_metadata.items())[:10]:
             desc = metadata.get('description', 'No description')[:200]
-            lines.append(f"{tool_name}: {desc}")
+            # Emphasize critical role distinctions directly in description
+            if 'Cell_State_Analyzer' in tool_name:
+                lines.append(f"{tool_name}: {desc} [ANALYSIS: performs feature extraction & clustering]")
+            elif tool_name == "Analysis_Visualizer_Tool":
+                lines.append(f"{tool_name}: {desc} [VISUALIZATION ONLY: requires pre-computed analysis results]")
+            else:
+                lines.append(f"{tool_name}: {desc}")
         
         if len(toolbox_metadata) > 10:
             lines.append(f"... and {len(toolbox_metadata) - 10} more tools")

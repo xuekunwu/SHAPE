@@ -47,12 +47,24 @@ BIOIMAGE_TOOL_PRIORITIES: Dict[str, ToolPriority] = {
 }
 
 # Tool dependency chains for workflow optimization
-# Bioimage analysis chain: Image_Preprocessor → (Cell_Segmenter/Nuclei_Segmenter/Organoid_Segmenter) → Single_Cell_Cropper → Cell_State_Analyzer
+# Bioimage analysis chain: Image_Preprocessor → (Cell_Segmenter/Nuclei_Segmenter/Organoid_Segmenter) → Single_Cell_Cropper → Cell_State_Analyzer → Analysis_Visualizer
+
+# CRITICAL: Tool role definitions
+# - Analysis Tools: Extract features, perform statistical analysis, generate embeddings/clusters
+#   * Cell_State_Analyzer_Single_Tool: Feature extraction + clustering for single-channel images
+#   * Cell_State_Analyzer_Multi_Tool: Feature extraction + clustering for multi-channel images
+# - Visualization Tools: Only visualize pre-computed analysis results
+#   * Analysis_Visualizer_Tool: Visualizes results from Cell_State_Analyzer or segmentation outputs
+
 TOOL_DEPENDENCIES: Dict[str, List[str]] = {
     "Single_Cell_Cropper_Tool": ["Nuclei_Segmenter_Tool", "Cell_Segmenter_Tool", "Organoid_Segmenter_Tool"],  # Cropper needs segmentation
     "Cell_State_Analyzer_Single_Tool": ["Single_Cell_Cropper_Tool"],  # Needs cell crops (single-channel)
     "Cell_State_Analyzer_Multi_Tool": ["Single_Cell_Cropper_Tool"],  # Needs cell crops (multi-channel)
-    "Analysis_Visualizer_Tool": [],  # Can work with any analysis output
+    # Analysis_Visualizer_Tool has flexible dependencies:
+    # - For morphology/comparison queries: REQUIRES Cell_State_Analyzer_*_Tool (feature extraction needed)
+    # - For simple counting: Can work with segmentation results directly
+    # - For cell state visualization: REQUIRES Cell_State_Analyzer_*_Tool
+    "Analysis_Visualizer_Tool": [],  # Flexible: can work with segmentation or analyzer outputs
 }
 
 # Keywords for detecting task domains
@@ -213,27 +225,45 @@ class ToolPriorityManager:
         recommended = []
         used_set = set(used_tools)
         
-        # CRITICAL: If a segmentation tool was just used, prioritize Single_Cell_Cropper_Tool
+        # CRITICAL: Enforce tool dependency chain
         segmentation_tools = ["Cell_Segmenter_Tool", "Nuclei_Segmenter_Tool", "Organoid_Segmenter_Tool"]
+        analyzer_tools = ["Cell_State_Analyzer_Single_Tool", "Cell_State_Analyzer_Multi_Tool"]
         last_tool = used_tools[-1] if used_tools else None
         
+        # Rule 1: If segmentation tool was just used → Single_Cell_Cropper_Tool must be next
         if last_tool in segmentation_tools:
-            # A segmentation tool just completed - Single_Cell_Cropper_Tool must be next
             if "Single_Cell_Cropper_Tool" in filtered_tools and "Single_Cell_Cropper_Tool" not in used_set:
-                # Put Single_Cell_Cropper_Tool at the top
                 recommended.append("Single_Cell_Cropper_Tool")
+        
+        # Rule 2: If Single_Cell_Cropper_Tool was just used → Cell_State_Analyzer_*_Tool must be next
+        if last_tool == "Single_Cell_Cropper_Tool":
+            # Check image channels to recommend appropriate analyzer (single vs multi)
+            # For now, recommend both - planner will choose based on image info
+            for analyzer in analyzer_tools:
+                if analyzer in filtered_tools and analyzer not in used_set:
+                    recommended.append(analyzer)
+        
+        # Rule 3: If Cell_State_Analyzer_*_Tool was just used → Analysis_Visualizer_Tool should be next
+        if last_tool in analyzer_tools:
+            if "Analysis_Visualizer_Tool" in filtered_tools and "Analysis_Visualizer_Tool" not in used_set:
+                recommended.append("Analysis_Visualizer_Tool")
         
         for tool in filtered_tools:
             if tool in used_set:
                 continue
             
-            # Skip if already added (Single_Cell_Cropper_Tool)
+            # Skip if already added by rules above
             if tool in recommended:
                 continue
             
             # Check if dependencies are satisfied
             deps = TOOL_DEPENDENCIES.get(tool, [])
-            if all(dep in used_set for dep in deps):
+            # For Analysis_Visualizer_Tool, check if ANY analyzer was used
+            if tool == "Analysis_Visualizer_Tool":
+                analyzer_used = any(a in used_set for a in analyzer_tools)
+                if analyzer_used:
+                    recommended.append(tool)
+            elif all(dep in used_set for dep in deps):
                 recommended.append(tool)
             elif not deps:  # No dependencies
                 recommended.append(tool)
