@@ -590,8 +590,8 @@ class Single_Cell_Cropper_Tool(BaseTool):
             else:
                 # Should not happen if using ImageData, but handle for backward compatibility
                 cell_crop = original_img[new_minr:new_maxr, new_minc:new_maxc]
-                if cell_crop.ndim == 2:
-                    cell_crop = cell_crop[:, :, np.newaxis]  # Add channel dimension
+                # Keep as 2D for grayscale - don't add channel dimension here
+                # The channel dimension will be handled in the save logic
             
             # Validate crop data
             if cell_crop.size == 0 or np.isnan(cell_crop).any() or np.isinf(cell_crop).any():
@@ -625,18 +625,48 @@ class Single_Cell_Cropper_Tool(BaseTool):
             
             try:
                 # Unified logic: preserve all channel information
-                if is_multi_channel and cell_crop.ndim == 3:
+                if is_multi_channel and cell_crop.ndim == 3 and cell_crop.shape[2] > 1:
                     # Multi-channel image: save as TIFF to preserve all channels
                     # Convert (H, W, C) to (C, H, W) format for ImageJ compatibility
                     # This ensures ImageJ correctly interprets channels (not as Z-stack)
                     cell_crop_chw = np.moveaxis(cell_crop, -1, 0)  # Move channel dimension to first
                     tifffile.imwrite(crop_path, cell_crop_chw, imagej=True)
-                elif len(cell_crop.shape) == 2:
-                    # Grayscale image - convert to PIL and save
+                elif cell_crop.ndim == 2:
+                    # Grayscale image (2D) - convert to PIL and save
+                    # Ensure dtype is uint8 for PIL
+                    if cell_crop.dtype != np.uint8:
+                        cell_crop = np.clip(cell_crop, 0, 255).astype(np.uint8)
                     pil_image = Image.fromarray(cell_crop, mode='L')
+                elif cell_crop.ndim == 3 and cell_crop.shape[2] == 1:
+                    # Single-channel image stored as (H, W, 1) - squeeze and save as grayscale
+                    cell_crop_2d = cell_crop.squeeze(axis=2)
+                    # Ensure dtype is uint8 for PIL
+                    if cell_crop_2d.dtype != np.uint8:
+                        cell_crop_2d = np.clip(cell_crop_2d, 0, 255).astype(np.uint8)
+                    pil_image = Image.fromarray(cell_crop_2d, mode='L')
+                elif cell_crop.ndim == 3 and cell_crop.shape[2] == 3:
+                    # RGB image (3 channels) - convert to PIL and save
+                    # Ensure dtype is uint8 for PIL
+                    if cell_crop.dtype != np.uint8:
+                        cell_crop = np.clip(cell_crop, 0, 255).astype(np.uint8)
+                    pil_image = Image.fromarray(cell_crop, mode='RGB')
+                elif cell_crop.ndim == 3 and cell_crop.shape[2] == 4:
+                    # RGBA image (4 channels) - convert to PIL and save
+                    # Ensure dtype is uint8 for PIL
+                    if cell_crop.dtype != np.uint8:
+                        cell_crop = np.clip(cell_crop, 0, 255).astype(np.uint8)
+                    pil_image = Image.fromarray(cell_crop, mode='RGBA')
                 else:
-                    # Color image (3D but not multi-channel) - convert to PIL and save
-                    pil_image = Image.fromarray(cell_crop)
+                    # Fallback: try to save as grayscale by taking first channel
+                    print(f"Warning: Unexpected crop shape {cell_crop.shape} for cell {idx}, converting to grayscale")
+                    if cell_crop.ndim == 3:
+                        cell_crop_2d = cell_crop[:, :, 0]
+                    else:
+                        cell_crop_2d = cell_crop
+                    # Ensure dtype is uint8 for PIL
+                    if cell_crop_2d.dtype != np.uint8:
+                        cell_crop_2d = np.clip(cell_crop_2d, 0, 255).astype(np.uint8)
+                    pil_image = Image.fromarray(cell_crop_2d, mode='L')
                 
                 # Save with proper format and error handling
                 # Note: Multi-channel images saved with tifffile above, skip PIL save for those
