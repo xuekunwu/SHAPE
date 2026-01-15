@@ -204,8 +204,9 @@ CRITICAL INSTRUCTIONS:
    - "What cell states" or "analyze cell states" → Full cell state analysis (preprocessing → segmentation → cropping → analysis → visualization)
    - "Compare" or "morphology" → Full pipeline (analysis tool extracts features, visualizer displays)
    - Analysis_Visualizer_Tool requires pre-computed results from Cell_State_Analyzer_*_Tool
-3. Select minimum necessary tools
+3. Select minimum necessary tools based on query requirements
 4. Do not skip analysis tool for morphology/comparison queries
+5. Use intelligent planning: Consider whether additional context (e.g., image type analysis) would help, but prioritize efficiency - if the task can be accomplished directly with specialized tools, use them directly
 
 Provide your analysis in structured format:
 - Concise Summary: Brief summary of what the query asks
@@ -330,7 +331,7 @@ This system performs SINGLE-CELL level analysis. For queries involving cell stat
 - Analysis Tools: Cell_State_Analyzer_*_Tool analyzes individual cell/organoid crops - REQUIRES Single_Cell_Cropper_Tool output
 - Visualization Tool: Analysis_Visualizer_Tool ONLY visualizes pre-computed analysis results
 
-**Pipeline Flow (Cell/Organoid State Analysis):**
+**Pipeline Flow:**
 1. Preprocessing (optional) → Image_Preprocessor_Tool
 2. Segmentation → [Cell/Nuclei/Organoid_Segmenter_Tool] → produces masks
 3. Cropping → Single_Cell_Cropper_Tool → REQUIRED: produces individual crop images (one per cell/organoid)
@@ -350,14 +351,21 @@ This system performs SINGLE-CELL level analysis. For queries involving cell stat
 - Morphology/Comparison/States: Full pipeline (Segmentation → Cropping → Analysis → Visualization)
 - Analysis tools analyze individual crops - cannot skip cropping step
 
+**Intelligent Planning Guidelines:**
+- For counting queries: Segmentation tools (Nuclei_Segmenter_Tool, Cell_Segmenter_Tool, Organoid_Segmenter_Tool) are designed to handle counting directly. Consider whether additional image analysis would add value or if direct segmentation is more efficient.
+- For ambiguous image types: Segmentation tools have built-in detection capabilities. Consider whether explicit image analysis would significantly improve results or if direct segmentation with auto-detection is sufficient.
+- Tool selection should balance: (1) Task efficiency - can the task be accomplished directly? (2) Result quality - would additional context improve outcomes? (3) User experience - minimize unnecessary steps while ensuring accuracy.
+- Image_Captioner_Tool can provide valuable context for complex or ambiguous cases, but for standard bioimage workflows, specialized tools often work more efficiently.
+
 INSTRUCTIONS:
 1. Review the query analysis to understand what type of analysis is needed
 2. Check what has been done (PREVIOUS STEPS) and what is still needed
 3. Follow the bioimage analysis chain appropriate for the query type
-4. Select ONE tool that is the logical next step in the pipeline
-5. Ensure dependencies are satisfied (e.g., need segmentation before cropping, need cropping before analysis)
-6. For Cell_State_Analyzer_*_Tool: Do NOT pass original images or masks - tool automatically loads crop images from Single_Cell_Cropper_Tool metadata (query_cache_dir parameter)
-7. Formulate a clear sub-goal explaining what this tool will accomplish, referencing the correct input format
+4. Use intelligent reasoning: Evaluate whether each step adds value or if a more direct approach would be better
+5. Select ONE tool that is the logical next step in the pipeline
+6. Ensure dependencies are satisfied (e.g., need segmentation before cropping, need cropping before analysis)
+7. For Cell_State_Analyzer_*_Tool: Do NOT pass original images or masks - tool automatically loads crop images from Single_Cell_Cropper_Tool metadata (query_cache_dir parameter)
+8. Formulate a clear sub-goal explaining what this tool will accomplish, referencing the correct input format
 
 Output format:
 <justification>: Why this tool is the best next step, referencing the analysis pipeline
