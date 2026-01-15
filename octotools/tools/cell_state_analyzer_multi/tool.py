@@ -220,13 +220,42 @@ class DinoV3Projector(nn.Module):
             ignore_mismatched_sizes=True
         )
     
+    def _update_channel_configs(self, in_channels):
+        """Update all channel-related configs in the model."""
+        # Update backbone config
+        if hasattr(self.backbone, 'config') and hasattr(self.backbone.config, 'num_channels'):
+            if self.backbone.config.num_channels != in_channels:
+                self.backbone.config.num_channels = in_channels
+        
+        # Update patch_embeddings config (dinov2 structure)
+        if hasattr(self.backbone, 'embeddings') and hasattr(self.backbone.embeddings, 'patch_embeddings'):
+            patch_embed = self.backbone.embeddings.patch_embeddings
+            if hasattr(patch_embed, 'config') and hasattr(patch_embed.config, 'num_channels'):
+                if patch_embed.config.num_channels != in_channels:
+                    patch_embed.config.num_channels = in_channels
+    
+    def _extract_cls_token(self, out):
+        """Extract CLS token from model output."""
+        if isinstance(out, torch.Tensor):
+            return out[:, 0, :] if out.dim() == 3 else out
+        elif isinstance(out, dict):
+            feats = out.get('last_hidden_state', out.get('pooler_output'))
+            return feats[:, 0, :] if feats is not None and feats.dim() == 3 else feats
+        elif hasattr(out, 'last_hidden_state'):
+            return out.last_hidden_state[:, 0]
+        elif hasattr(out, 'pooler_output'):
+            return out.pooler_output
+        else:
+            raise ValueError(f"Unexpected output format: {type(out)}")
+    
     def _adapt_patch_embedding(self, in_channels):
         """Adapt patch embedding layer for multi-channel input."""
-        if hasattr(self.backbone, 'config'):
-            if hasattr(self.backbone.config, 'num_channels'):
-                original_channels = self.backbone.config.num_channels
-                self.backbone.config.num_channels = in_channels
-                logger.info(f"Updated backbone.config.num_channels: {original_channels} -> {in_channels}")
+        # Update configs first
+        if hasattr(self.backbone, 'config') and hasattr(self.backbone.config, 'num_channels'):
+            original_channels = self.backbone.config.num_channels
+            if original_channels != in_channels:
+                logger.info(f"Updating model config.num_channels: {original_channels} -> {in_channels}")
+        self._update_channel_configs(in_channels)
         
         # Find patch embedding
         patch_embed = (self.backbone.patch_embed if hasattr(self.backbone, 'patch_embed') else
@@ -243,6 +272,7 @@ class DinoV3Projector(nn.Module):
         
         if old_proj.in_channels == in_channels:
             logger.info(f"Patch embedding already has {in_channels} channels, no adaptation needed")
+            self._update_channel_configs(in_channels)  # Still update configs
             return
         
         # Create new projection layer
@@ -271,10 +301,8 @@ class DinoV3Projector(nn.Module):
             logger.warning("Could not find proj or projection attribute in patch_embed")
             return
         
-        # Ensure config is still updated (redundant but safe)
-        if hasattr(self.backbone, 'config') and hasattr(self.backbone.config, 'num_channels'):
-            self.backbone.config.num_channels = in_channels
-                        
+        # Update all configs
+        self._update_channel_configs(in_channels)
         logger.info(f"✅ Adapted patch embedding: {old_proj.in_channels} -> {in_channels} channels")
     
     def forward(self, x):
@@ -285,58 +313,29 @@ class DinoV3Projector(nn.Module):
         if x.shape[1] != self.in_channels:
             raise ValueError(f"Channel mismatch: expected {self.in_channels}, got {x.shape[1]}")
         
-        # Ensure config is correct before forward pass
-        if hasattr(self.backbone, 'config') and hasattr(self.backbone.config, 'num_channels'):
-            if self.backbone.config.num_channels != self.in_channels:
-                logger.warning(f"Config mismatch in forward: config.num_channels={self.backbone.config.num_channels}, expected {self.in_channels}. Updating...")
-                self.backbone.config.num_channels = self.in_channels
+        # Ensure configs are correct before forward pass
+        self._update_channel_configs(self.in_channels)
         
-        # Forward through backbone - handle transformers models that may validate channels
-        # Try pixel_values first (transformers standard), fallback to direct call
+        # Forward through backbone
         try:
-            # Use pixel_values parameter (transformers standard way)
             out = self.backbone(pixel_values=x, output_hidden_states=False)
         except (ValueError, RuntimeError) as e:
             error_msg = str(e).lower()
             if 'channel' in error_msg or ('expected' in error_msg and 'got' in error_msg):
-                # Update config and try again
-                if hasattr(self.backbone, 'config') and hasattr(self.backbone.config, 'num_channels'):
-                    logger.warning(f"Channel error with pixel_values ({e}), updating config and retrying...")
-                    self.backbone.config.num_channels = self.in_channels
-                    # Also try to update patch embedding config if it exists
-                    if hasattr(self.backbone, 'embeddings') and hasattr(self.backbone.embeddings, 'patch_embeddings'):
-                        patch_embed = self.backbone.embeddings.patch_embeddings
-                        if hasattr(patch_embed, 'config') and hasattr(patch_embed.config, 'num_channels'):
-                            patch_embed.config.num_channels = self.in_channels
-                
+                # Update configs and retry
+                logger.warning(f"Channel error in forward ({e}), updating configs and retrying...")
+                self._update_channel_configs(self.in_channels)
                 try:
                     out = self.backbone(pixel_values=x, output_hidden_states=False)
                 except Exception as e2:
                     # Last resort: try direct call
-                    logger.warning(f"pixel_values still failed ({e2}), trying direct call...")
-                    try:
-                        out = self.backbone(x)
-                    except Exception as e3:
-                        logger.error(f"All methods failed. Input shape: {x.shape}, in_channels: {self.in_channels}, config.num_channels: {getattr(getattr(self.backbone, 'config', None), 'num_channels', 'N/A')}")
-                        raise ValueError(f"Channel adaptation failed: {e}. Tried pixel_values and direct call.")
+                    logger.warning(f"pixel_values failed ({e2}), trying direct call...")
+                    out = self.backbone(x)
             else:
                 raise
         
-        # Extract CLS token
-        if isinstance(out, torch.Tensor):
-            feats = out[:, 0, :] if out.dim() == 3 else out
-        elif isinstance(out, dict):
-            feats = out.get('last_hidden_state', out.get('pooler_output'))
-            if feats is not None and feats.dim() == 3:
-                feats = feats[:, 0, :]
-        elif hasattr(out, 'last_hidden_state'):
-            feats = out.last_hidden_state[:, 0]
-        elif hasattr(out, 'pooler_output'):
-            feats = out.pooler_output
-        else:
-            raise ValueError(f"Unexpected output format: {type(out)}")
-        
-        # Project and normalize
+        # Extract CLS token and project
+        feats = self._extract_cls_token(out)
         return F.normalize(self.projector(feats), dim=-1)
 
 
@@ -395,27 +394,23 @@ class Cell_State_Analyzer_Multi_Tool(BaseTool):
         with torch.no_grad():
             for v1, _, n, g in tqdm(dataloader, desc="Extracting features"):
                 v1 = v1.to(self.device)
-                # Use pixel_values parameter to ensure proper channel handling
+                # Ensure configs are correct
+                model._update_channel_configs(model.in_channels)
+                
+                # Forward through backbone
                 try:
                     backbone_output = model.backbone(pixel_values=v1, output_hidden_states=False)
                 except (ValueError, RuntimeError) as e:
-                    # If pixel_values fails, ensure config is updated and try again
-                    if hasattr(model.backbone, 'config') and hasattr(model.backbone.config, 'num_channels'):
-                        model.backbone.config.num_channels = model.in_channels
-                    backbone_output = model.backbone(pixel_values=v1, output_hidden_states=False)
+                    error_msg = str(e).lower()
+                    if 'channel' in error_msg or ('expected' in error_msg and 'got' in error_msg):
+                        logger.warning(f"Channel error in _extract_features ({e}), updating configs and retrying...")
+                        model._update_channel_configs(model.in_channels)
+                        backbone_output = model.backbone(pixel_values=v1, output_hidden_states=False)
+                    else:
+                        raise
                 
                 # Extract CLS token
-                if isinstance(backbone_output, torch.Tensor):
-                    out = backbone_output[:, 0, :] if backbone_output.dim() == 3 else backbone_output
-                elif isinstance(backbone_output, dict):
-                    out = backbone_output.get('last_hidden_state', backbone_output.get('pooler_output'))
-                    if out is not None and out.dim() == 3:
-                        out = out[:, 0, :]
-                elif hasattr(backbone_output, 'last_hidden_state'):
-                    out = backbone_output.last_hidden_state[:, 0]
-                else:
-                    out = backbone_output
-                
+                out = model._extract_cls_token(backbone_output)
                 feats.append(out.cpu())
                 names.extend(n)
                 groups.extend(g)
