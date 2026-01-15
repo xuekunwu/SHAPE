@@ -27,6 +27,7 @@ gradio==5.23.1
 # Deep learning and GPU support
 torch>=2.0.0
 torchvision>=0.15.0
+torchmetrics>=0.11.0  # Required for DINOv3 model evaluation
 
 # Scientific computing and data analysis
 # Updated versions for Python 3.13 compatibility
