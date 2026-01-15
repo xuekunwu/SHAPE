@@ -24,7 +24,7 @@ import glob
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-from huggingface_hub import hf_hub_download, snapshot_download
+from huggingface_hub import hf_hub_download
 import anndata as ad
 import scanpy as sc
 from skimage import io
@@ -154,13 +154,6 @@ class DinoV3Projector(nn.Module):
         model_filename = "dinov3_vitb16_pretrain_lvd1689m-73cec8be.pth"
         hf_token = os.getenv("HUGGINGFACE_TOKEN")
         
-        logger.info(f"Downloading code repository from Hugging Face Hub: {custom_repo_id}")
-        local_repo = snapshot_download(
-            repo_id=custom_repo_id,
-            token=hf_token,
-            local_dir_use_symlinks=False
-        )
-        
         logger.info(f"Downloading weights from Hugging Face Hub: {custom_repo_id}/{model_filename}")
         ckpt_path = hf_hub_download(
             repo_id=custom_repo_id,
@@ -168,8 +161,14 @@ class DinoV3Projector(nn.Module):
             token=hf_token
         )
         
-        # Load model architecture from downloaded repo using torch.hub
-        logger.info(f"Loading model architecture from downloaded repo: {local_repo}")
+        # Load model architecture from local dinov3_code directory (contains hubconf.py)
+        # Use project_root defined at module level (works for both local and Space environments)
+        local_repo = os.path.join(project_root, "dinov3_code")
+        
+        if not os.path.exists(local_repo):
+            raise ValueError(f"dinov3_code directory not found at: {local_repo}")
+        
+        logger.info(f"Loading model architecture from local repo: {local_repo}")
         self.backbone = torch.hub.load(local_repo, backbone_name, source="local", pretrained=False)
         
         # Load weights
