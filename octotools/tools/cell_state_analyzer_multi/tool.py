@@ -24,7 +24,6 @@ import glob
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-from huggingface_hub import hf_hub_download
 import anndata as ad
 import scanpy as sc
 from skimage import io
@@ -148,14 +147,10 @@ class DinoV3Projector(nn.Module):
         if in_channels is None:
             raise ValueError("in_channels must be specified (cannot be None). Channel count should be detected from input images.")
         self.in_channels = in_channels
-        feat_dim = 384  # dinov3_vits16 / dinov2-small uses 384 dimensions
+        feat_dim = 384  # dinov3_vits16 / dinov3-small uses 384 dimensions
         
-        # Load backbone
+        # Load backbone (using torch.hub to avoid transformers config issues)
         self.backbone = self._load_backbone(backbone_name)
-        if hasattr(self.backbone, 'config') and hasattr(self.backbone.config, 'num_channels'):
-            if self.backbone.config.num_channels != in_channels:
-                logger.info(f"Updating model config.num_channels before adaptation: {self.backbone.config.num_channels} -> {in_channels}")
-                self.backbone.config.num_channels = in_channels
         
         # Adapt patch embedding for multi-channel input
         self._adapt_patch_embedding(in_channels)
@@ -178,165 +173,62 @@ class DinoV3Projector(nn.Module):
         )
     
     def _load_backbone(self, backbone_name):
-        """Load DINOv3 backbone from Hugging Face Hub."""
-        from transformers import AutoModel
-        
-        custom_repo_id = "5xuekun/dinov3_vits16"
-        model_filename = "dinov3_vitb16_pretrain_lvd1689m-73cec8be.pth"
-        architecture_repo_id = "facebook/dinov2-small"
-        hf_token = os.getenv("HUGGINGFACE_TOKEN")
-        
-        try:
-            if True:  # hf_hub_download is already imported
-                weights_path = hf_hub_download(custom_repo_id, model_filename, token=hf_token)
-                # Load model WITHOUT validating input (we'll adapt it later)
-            base_model = AutoModel.from_pretrained(
-                architecture_repo_id,
-                token=hf_token,
-                    trust_remote_code=True,
-                    ignore_mismatched_sizes=True  # Allow size mismatches during loading
+        """Load DINOv3 backbone from local repo and weights."""
+        local_repo = os.getenv("DINOV3_LOCAL_REPO")
+        if not local_repo or not os.path.exists(local_repo):
+            raise ValueError(
+                f"DINOV3_LOCAL_REPO environment variable not set or path not found: {local_repo}. "
+                f"Please set DINOV3_LOCAL_REPO to the local path of dinov3 code repository."
             )
-            
-            state_dict = torch.load(weights_path, map_location='cpu')
-            if isinstance(state_dict, dict):
-                state_dict = state_dict.get("teacher") or state_dict.get("model") or state_dict
-            
-            # Filter matching keys
-                model_dict = base_model.state_dict()
-                filtered_dict = {k: v for k, v in state_dict.items() 
-                               if k in model_dict and v.shape == model_dict[k].shape}
-                
-                base_model.load_state_dict(filtered_dict, strict=False)
-                logger.info(f"✅ Loaded DINOv3 weights from {model_filename}")
-                return base_model
-        except Exception as e:
-            logger.warning(f"Failed to load custom model: {e}, using fallback")
         
-        # Fallback - also disable validation
-        return AutoModel.from_pretrained(
-            architecture_repo_id, 
-            token=hf_token, 
-            trust_remote_code=True,
-            ignore_mismatched_sizes=True
-        )
-    
-    def _update_channel_configs(self, in_channels):
-        """Update all channel-related configs in the model."""
-        # Update backbone config
-        if hasattr(self.backbone, 'config') and hasattr(self.backbone.config, 'num_channels'):
-            if self.backbone.config.num_channels != in_channels:
-                self.backbone.config.num_channels = in_channels
+        ckpt_path = os.getenv("DINOV3_CKPT_PATH")
+        if not ckpt_path or not os.path.exists(ckpt_path):
+            raise ValueError(
+                f"DINOV3_CKPT_PATH environment variable not set or file not found: {ckpt_path}. "
+                f"Please set DINOV3_CKPT_PATH to the local path of dinov3 weights file."
+            )
         
-        # Update patch_embeddings config (dinov2 structure)
-        if hasattr(self.backbone, 'embeddings') and hasattr(self.backbone.embeddings, 'patch_embeddings'):
-            patch_embed = self.backbone.embeddings.patch_embeddings
-            if hasattr(patch_embed, 'config') and hasattr(patch_embed.config, 'num_channels'):
-                if patch_embed.config.num_channels != in_channels:
-                    patch_embed.config.num_channels = in_channels
-    
-    def _extract_cls_token(self, out):
-        """Extract CLS token from model output."""
-        if isinstance(out, torch.Tensor):
-            return out[:, 0, :] if out.dim() == 3 else out
-        elif isinstance(out, dict):
-            feats = out.get('last_hidden_state', out.get('pooler_output'))
-            return feats[:, 0, :] if feats is not None and feats.dim() == 3 else feats
-        elif hasattr(out, 'last_hidden_state'):
-            return out.last_hidden_state[:, 0]
-        elif hasattr(out, 'pooler_output'):
-            return out.pooler_output
-        else:
-            raise ValueError(f"Unexpected output format: {type(out)}")
+        logger.info(f"Loading model from local repo: {local_repo}")
+        base_model = torch.hub.load(local_repo, backbone_name, source="local", pretrained=False)
+        
+        logger.info(f"Loading weights from local path: {ckpt_path}")
+        state_dict = torch.load(ckpt_path, map_location="cpu")
+        if "teacher" in state_dict:
+            state_dict = state_dict["teacher"]
+        base_model.load_state_dict(state_dict, strict=False)
+        
+        logger.info(f"✅ Loaded DINOv3 from local repo and weights")
+        return base_model
     
     def _adapt_patch_embedding(self, in_channels):
         """Adapt patch embedding layer for multi-channel input."""
-        # Update configs first
-        if hasattr(self.backbone, 'config') and hasattr(self.backbone.config, 'num_channels'):
-            original_channels = self.backbone.config.num_channels
-            if original_channels != in_channels:
-                logger.info(f"Updating model config.num_channels: {original_channels} -> {in_channels}")
-        self._update_channel_configs(in_channels)
-        
-        # Find patch embedding
-        patch_embed = (self.backbone.patch_embed if hasattr(self.backbone, 'patch_embed') else
-                      (self.backbone.embeddings.patch_embeddings if hasattr(self.backbone, 'embeddings') else None))
-        
-        if patch_embed is None:
-            logger.warning("Could not find patch embedding layer")
-            return
-        
-        old_proj = getattr(patch_embed, 'proj', None) or getattr(patch_embed, 'projection', None)
-        if old_proj is None:
-            logger.warning("Could not find projection layer in patch embedding")
-            return
-        
-        if old_proj.in_channels == in_channels:
-            logger.info(f"Patch embedding already has {in_channels} channels, no adaptation needed")
-            self._update_channel_configs(in_channels)  # Still update configs
-            return
-        
-        # Create new projection layer
-        new_proj = nn.Conv2d(
-            in_channels=in_channels,
-            out_channels=old_proj.out_channels,
-            kernel_size=old_proj.kernel_size,
-            stride=old_proj.stride,
-            padding=old_proj.padding,
-            bias=old_proj.bias is not None,
-        )
-        
-        # Inherit weights
-        with torch.no_grad():
-            c = min(old_proj.in_channels, in_channels)
-            new_proj.weight[:, :c] = old_proj.weight[:, :c]
-            if old_proj.bias is not None:
-                new_proj.bias.copy_(old_proj.bias)
-        
-        # Replace layer
-        if hasattr(patch_embed, 'proj'):
+        patch_embed = self.backbone.patch_embed
+        old_proj = patch_embed.proj
+
+        if old_proj.in_channels != in_channels:
+            new_proj = nn.Conv2d(
+                in_channels=in_channels,
+                out_channels=old_proj.out_channels,
+                kernel_size=old_proj.kernel_size,
+                stride=old_proj.stride,
+                padding=old_proj.padding,
+                bias=old_proj.bias is not None,
+            )
+
+            with torch.no_grad():
+                # inherit as much as possible from RGB weights
+                c = min(old_proj.in_channels, in_channels)
+                new_proj.weight[:, :c] = old_proj.weight[:, :c]
+                if old_proj.bias is not None:
+                    new_proj.bias.copy_(old_proj.bias)
+
             patch_embed.proj = new_proj
-        elif hasattr(patch_embed, 'projection'):
-            patch_embed.projection = new_proj
-        else:
-            logger.warning("Could not find proj or projection attribute in patch_embed")
-            return
-        
-        # Update all configs
-        self._update_channel_configs(in_channels)
-        logger.info(f"✅ Adapted patch embedding: {old_proj.in_channels} -> {in_channels} channels")
+            logger.info(f"✅ Adapted patch embedding: {old_proj.in_channels} -> {in_channels} channels")
     
     def forward(self, x):
-        """Forward pass: (B, C, H, W) -> (B, proj_dim)"""
-        if x.dim() == 3:
-            x = x.unsqueeze(0)
-        
-        if x.shape[1] != self.in_channels:
-            raise ValueError(f"Channel mismatch: expected {self.in_channels}, got {x.shape[1]}")
-        
-        # Ensure configs are correct before forward pass
-        self._update_channel_configs(self.in_channels)
-        
-        # Forward through backbone
-        try:
-            out = self.backbone(pixel_values=x, output_hidden_states=False)
-        except (ValueError, RuntimeError) as e:
-            error_msg = str(e).lower()
-            if 'channel' in error_msg or ('expected' in error_msg and 'got' in error_msg):
-                # Update configs and retry
-                logger.warning(f"Channel error in forward ({e}), updating configs and retrying...")
-                self._update_channel_configs(self.in_channels)
-                try:
-                    out = self.backbone(pixel_values=x, output_hidden_states=False)
-                except Exception as e2:
-                    # Last resort: try direct call
-                    logger.warning(f"pixel_values failed ({e2}), trying direct call...")
-                    out = self.backbone(x)
-            else:
-                raise
-        
-        # Extract CLS token and project
-        feats = self._extract_cls_token(out)
-        return F.normalize(self.projector(feats), dim=-1)
+        feats = self.backbone(x)  # CLS token
+        z = self.projector(feats)
+        return F.normalize(z, dim=-1)
 
 
 def contrastive_loss(z1, z2, temperature=0.1):
@@ -394,23 +286,7 @@ class Cell_State_Analyzer_Multi_Tool(BaseTool):
         with torch.no_grad():
             for v1, _, n, g in tqdm(dataloader, desc="Extracting features"):
                 v1 = v1.to(self.device)
-                # Ensure configs are correct
-                model._update_channel_configs(model.in_channels)
-                
-                # Forward through backbone
-                try:
-                    backbone_output = model.backbone(pixel_values=v1, output_hidden_states=False)
-                except (ValueError, RuntimeError) as e:
-                    error_msg = str(e).lower()
-                    if 'channel' in error_msg or ('expected' in error_msg and 'got' in error_msg):
-                        logger.warning(f"Channel error in _extract_features ({e}), updating configs and retrying...")
-                        model._update_channel_configs(model.in_channels)
-                        backbone_output = model.backbone(pixel_values=v1, output_hidden_states=False)
-                    else:
-                        raise
-                
-                # Extract CLS token
-                out = model._extract_cls_token(backbone_output)
+                out = model.backbone(v1)  # CLS token
                 feats.append(out.cpu())
                 names.extend(n)
                 groups.extend(g)
