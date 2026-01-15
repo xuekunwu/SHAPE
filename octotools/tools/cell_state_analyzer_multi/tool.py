@@ -149,7 +149,7 @@ class DinoV3Projector(nn.Module):
             raise ValueError("in_channels must be specified (cannot be None). Channel count should be detected from input images.")
         self.in_channels = in_channels
         
-        # Download code repository and weights from Hugging Face Hub
+        # Download weights from Hugging Face Hub
         custom_repo_id = "5xuekun/dinov3_vits16"
         model_filename = "dinov3_vitb16_pretrain_lvd1689m-73cec8be.pth"
         hf_token = os.getenv("HUGGINGFACE_TOKEN")
@@ -161,15 +161,10 @@ class DinoV3Projector(nn.Module):
             token=hf_token
         )
         
-        # Load model architecture from local dinov3_code directory (contains hubconf.py)
-        # Use project_root defined at module level (works for both local and Space environments)
-        local_repo = os.path.join(project_root, "dinov3_code")
-        
-        if not os.path.exists(local_repo):
-            raise ValueError(f"dinov3_code directory not found at: {local_repo}")
-        
-        logger.info(f"Loading model architecture from local repo: {local_repo}")
-        self.backbone = torch.hub.load(local_repo, backbone_name, source="local", pretrained=False)
+        # Load model architecture from GitHub (facebookresearch/dinov3 contains hubconf.py)
+        hub_repo = "facebookresearch/dinov3"
+        logger.info(f"Loading model architecture from GitHub: {hub_repo}")
+        self.backbone = torch.hub.load(hub_repo, backbone_name, pretrained=False, source="github")
         
         # Load weights
         logger.info(f"Loading weights from local path: {ckpt_path}")
