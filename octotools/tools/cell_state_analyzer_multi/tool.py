@@ -21,42 +21,20 @@ from typing import List, Dict, Optional
 from tqdm import tqdm
 import glob
 
-# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Optional dependencies
-try:
-    from huggingface_hub import hf_hub_download
-    HF_HUB_AVAILABLE = True
-except ImportError:
-    HF_HUB_AVAILABLE = False
-    logger.warning("huggingface_hub not available")
-
-try:
-    import anndata as ad
-    import scanpy as sc
-    ANNDATA_AVAILABLE = True
-except ImportError:
-    ANNDATA_AVAILABLE = False
-    logger.warning("anndata/scanpy not available")
-
-try:
-    from skimage import io
-    SKIMAGE_AVAILABLE = True
-except ImportError:
-    SKIMAGE_AVAILABLE = False
-
-# Add project root to path
+from huggingface_hub import hf_hub_download
+import anndata as ad
+import scanpy as sc
+from skimage import io
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(current_dir))))
 sys.path.insert(0, project_root)
-
 from octotools.tools.base import BaseTool
 from octotools.models.utils import VisualizationConfig
 from octotools.utils.image_processor import ImageProcessor
 import matplotlib.pyplot as plt
-
 
 # ====================== Dataset ======================
 class MultiChannelCellCropDataset(Dataset):
@@ -74,31 +52,26 @@ class MultiChannelCellCropDataset(Dataset):
         path = self.image_paths[idx]
         group = self.groups[idx]
         
-        # Load image using ImageProcessor (handles all formats)
-        try:
-            img_data = ImageProcessor.load_image(path)
-            img = img_data.data  # (H, W, C)
-            if img.ndim == 2:
-                img = img[:, :, np.newaxis]
-            # Convert to (C, H, W) for PyTorch
-            img = np.transpose(img, (2, 0, 1)) if img.ndim == 3 else img
-        except Exception as e:
-            if SKIMAGE_AVAILABLE:
-                img = io.imread(path)
-                if img.ndim == 2:
-                    img = img[None, ...]
-                elif img.ndim == 3:
-                    h, w, c = img.shape
-                    img = np.transpose(img, (2, 0, 1)) if (c <= 4 and h > c) else img
-            else:
-                raise ValueError(f"Failed to load {path}: {e}")
+        # Load image using skimage.io (consistent with reference implementation)
+        img = io.imread(path)
+        
+        # (H,W,C) or (C,H,W) → (C,H,W)
+        if img.ndim == 2:                     # single channel
+            img = img[None, ...]
+        elif img.ndim == 3:
+            # Check if first dimension is small (1,2,3) - likely (C,H,W)
+            # Otherwise assume (H,W,C) and transpose
+            if img.shape[0] not in (1, 2, 3):
+                img = img.transpose(2, 0, 1)  # (H, W, C) → (C, H, W)
         
         # Select channels if specified
         if self.selected_channels is not None:
             img = img[self.selected_channels]
         
-        # Normalize to [-1, 1]
+        # Convert to tensor and normalize
         img = torch.from_numpy(img).float()
+        
+        # Normalize: if max > 1, scale to [0, 1], then to [-1, 1]
         if img.max() > 1:
             img = img / 255.0
         img = (img - 0.5) / 0.5
@@ -110,7 +83,8 @@ class MultiChannelCellCropDataset(Dataset):
         else:
             v1 = v2 = img
         
-        return v1, v2, Path(path).stem, group
+        name = Path(path).stem
+        return v1, v2, name, group
 
 
 # ====================== Transform ======================
@@ -205,7 +179,7 @@ class DinoV3Projector(nn.Module):
         hf_token = os.getenv("HUGGINGFACE_TOKEN")
         
         try:
-            if HF_HUB_AVAILABLE:
+            if True:  # hf_hub_download is already imported
                 weights_path = hf_hub_download(custom_repo_id, model_filename, token=hf_token)
                 # Load model WITHOUT validating input (we'll adapt it later)
                 base_model = AutoModel.from_pretrained(
@@ -589,7 +563,9 @@ class Cell_State_Analyzer_Multi_Tool(BaseTool):
         feats, names, groups_extracted = self._extract_features(model, eval_loader)
         
         # Create AnnData
-        if not ANNDATA_AVAILABLE:
+        if False:  # anndata/scanpy are already imported
+            pass
+        else:
             return {"error": "anndata/scanpy not available"}
         
         adata = ad.AnnData(X=feats)
