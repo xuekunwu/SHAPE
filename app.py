@@ -961,7 +961,7 @@ def _collect_visual_outputs(result, visual_outputs_list, downloadable_files_list
                             # Skip zip files from deliverables (handled separately above)
                             if not (isinstance(path, str) and path.lower().endswith('.zip')):
                                 add_path(path)
-                    if "visual_outputs" in img_result:  # Changed from elif to if - check both deliverables and visual_outputs
+                    elif "visual_outputs" in img_result:
                         for path in img_result["visual_outputs"]:
                             add_path(path)
                     # Collect from individual keys (exclude processed_image_path and mask_path)
@@ -975,21 +975,13 @@ def _collect_visual_outputs(result, visual_outputs_list, downloadable_files_list
             if "deliverables" in result:
                 for path in result["deliverables"]:
                     add_path(path)
-            if "visual_outputs" in result:  # Changed from elif to if - check both deliverables and visual_outputs
+            elif "visual_outputs" in result:
                 for path in result["visual_outputs"]:
                     add_path(path)
             # Also check individual keys for single results (exclude processed_image_path and mask_path)
             for key in ["overlay_path", "output_path"]:
                 if key in result:
                     add_path(result[key])
-    
-    # Debug: log collected files
-    if visual_output_files:
-        print(f"📸 Collected {len(visual_output_files)} visual output file(s) from tool result")
-        for f in visual_output_files[:5]:  # Show first 5
-            print(f"   - {os.path.basename(f)}")
-        if len(visual_output_files) > 5:
-            print(f"   ... and {len(visual_output_files) - 5} more")
     
     # Process collected files
     for file_path in visual_output_files:
@@ -1005,14 +997,9 @@ def _collect_visual_outputs(result, visual_outputs_list, downloadable_files_list
             if "processed" in filename and "_processed" in filename:
                 # Skip processed images from Image_Preprocessor_Tool
                 continue
-            # Skip raw mask files (TIFF format), but keep overlay and viz images
             if "mask" in filename and "overlay" not in filename and "viz" not in filename:
                 # Skip segmentation masks from Segmenter_Tool (but keep overlay visualizations)
-                # Only skip if it's a TIFF mask file, not PNG overlay
-                if file_path.lower().endswith('.tif') or file_path.lower().endswith('.tiff'):
-                    continue
-                # For PNG files with "mask" in name but not overlay/viz, also skip (e.g., mask visualization PNGs that aren't overlays)
-                # But overlay files should have "overlay" in name, so they won't be skipped here
+                continue
                 
             # Support image files and data files (h5ad for AnnData)
             if not file_path.lower().endswith(('.png', '.jpg', '.jpeg', '.tif', '.tiff', '.h5ad')):
@@ -1026,12 +1013,6 @@ def _collect_visual_outputs(result, visual_outputs_list, downloadable_files_list
                 file_path.lower().endswith('.h5ad') or
                 file_path.lower().endswith('.zip') or
                 'segmentation_overlay' in filename_lower_check or
-                'cell_overlay' in filename_lower_check or  # Cell_Segmenter_Tool overlay
-                'organoid_overlay' in filename_lower_check or  # Organoid_Segmenter_Tool overlay
-                'nuclei_overlay' in filename_lower_check or  # Nuclei_Segmenter_Tool overlay
-                'cell_mask' in filename_lower_check or  # Cell_Segmenter_Tool mask
-                'organoid_mask' in filename_lower_check or  # Organoid_Segmenter_Tool mask
-                'nuclei_mask' in filename_lower_check or  # Nuclei_Segmenter_Tool mask
                 'loss_curve' in filename_lower_check or
                 'umap_cluster' in filename_lower_check or
                 'cluster_proportion' in filename_lower_check or
@@ -1056,9 +1037,32 @@ def _collect_visual_outputs(result, visual_outputs_list, downloadable_files_list
             filename = os.path.basename(file_path)
             filename_lower = filename.lower()
             
+            # Check if it's a multi-channel TIFF file
+            is_tiff = filename_lower.endswith('.tif') or filename_lower.endswith('.tiff')
+            is_multi_channel = False
+            
+            if is_tiff:
+                try:
+                    # Try loading with tifffile to check if multi-channel
+                    img_full = tifffile.imread(file_path)
+                    # Check if multi-channel (shape: (H, W, C) or (C, H, W))
+                    if img_full.ndim == 3:
+                        if img_full.shape[2] > 1 and img_full.shape[2] <= 4:  # (H, W, C) with multiple channels
+                            is_multi_channel = True
+                        elif img_full.shape[0] > 1 and img_full.shape[0] <= 4:  # (C, H, W) with multiple channels
+                            is_multi_channel = True
+                    elif img_full.ndim == 4:
+                        # 4D: could be (Z, H, W, C) or (C, Z, H, W)
+                        if img_full.shape[3] > 1 and img_full.shape[3] <= 4:  # (Z, H, W, C)
+                            is_multi_channel = True
+                        elif img_full.shape[0] > 1 and img_full.shape[0] <= 4:  # (C, Z, H, W)
+                            is_multi_channel = True
+                except Exception as tiff_error:
+                    print(f"Warning: Failed to check TIFF channels for {file_path}: {tiff_error}")
+            
             # Check if this is a multi-channel visualization file (from Image_Preprocessor_Tool)
             # If it has "multi_channel_" in the filename, display it directly without splitting
-            if "multi_channel_" in filename_lower:
+            if "multi_channel_" in filename.lower():
                 # This is already a multi-channel visualization, display as-is
                 try:
                     img_pil = Image.open(file_path)
@@ -1067,9 +1071,6 @@ def _collect_visual_outputs(result, visual_outputs_list, downloadable_files_list
                 except Exception as e:
                     print(f"Warning: Failed to load multi-channel visualization {file_path}: {e}")
                     # Fall through to default processing
-            
-            # Use unified ImageProcessor to check and load images
-            is_multi_channel = ImageProcessor.is_multi_channel_image(file_path)
             
             # For multi-channel TIFFs (not visualizations), skip splitting
             # They should be handled by tools that create multi_channel_ visualizations

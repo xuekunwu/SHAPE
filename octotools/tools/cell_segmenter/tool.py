@@ -446,7 +446,10 @@ class Cell_Segmenter_Tool(BaseTool):
                 "summary": f"{n_cells} cells identified and segmented successfully.",
                 "cell_count": n_cells,
                 "visual_outputs": [output_path, mask_path],
+                "deliverables": [output_path],  # Add overlay to deliverables for better collection
                 "mask_path": mask_path,  # Explicitly include mask_path for downstream tools
+                "overlay_path": output_path,  # Explicit overlay_path key for collection
+                "output_path": output_path,  # Explicit output_path key for collection
                 "image_id": image_identifier,  # Add image_id for matching in downstream tools
                 "image_identifier": image_identifier,  # Alias for compatibility
                 "model_used": f"CellposeModel ({self.model_type})",
