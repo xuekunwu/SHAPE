@@ -36,53 +36,89 @@ from octotools.models.utils import VisualizationConfig
 from octotools.utils.image_processor import ImageProcessor
 import matplotlib.pyplot as plt
 
+# ====================== Normalization ======================
+def channel_norm(x, eps=1e-6):
+    x = x.clone()
+    for c in range(x.shape[0]):
+        v = x[c]
+        p1, p99 = torch.quantile(v, 0.01), torch.quantile(v, 0.99)
+        x[c] = torch.clamp((v - p1) / (p99 - p1 + eps), 0, 1)
+    return x
+
 # ====================== Dataset ======================
 class MultiChannelCellCropDataset(Dataset):
-    """Dataset for multi-channel cell crop images. Supports arbitrary number of channels."""
     def __init__(self, image_paths, groups=None, transform=None, selected_channels=None):
         self.image_paths = image_paths
         self.groups = groups if groups else ["default"] * len(image_paths)
         self.transform = transform
         self.selected_channels = selected_channels
-    
+        self.detected_channels = None  # Will be set when first image is loaded
+        
     def __len__(self):
         return len(self.image_paths)
+    
+    def get_detected_channels(self):
+        """Get detected number of channels from first image."""
+        if self.detected_channels is None:
+            # Load first image to detect channels
+            if len(self.image_paths) > 0:
+                img = io.imread(self.image_paths[0])
+                if img.ndim == 2:
+                    raise ValueError(
+                        f"Single-channel image detected at {self.image_paths[0]}. "
+                        f"Please use Cell_State_Analyzer_Single_Tool for single-channel images."
+                    )
+                elif img.ndim == 3:
+                    if img.shape[-1] <= 10:  # (H, W, C)
+                        self.detected_channels = img.shape[-1]
+                    else:  # (C, H, W)
+                        self.detected_channels = img.shape[0]
+                else:
+                    raise ValueError(f"Unexpected image dimensions: {img.ndim}D at {self.image_paths[0]}")
+            else:
+                raise ValueError("No images in dataset")
+        return self.detected_channels
     
     def __getitem__(self, idx):
         path = self.image_paths[idx]
         group = self.groups[idx]
         
-        # Load image using skimage.io (consistent with reference implementation)
+        # Load cropped cell image from Single_Cell_Cropper_Tool output
         img = io.imread(path)
+        if img.ndim == 2:
+            raise ValueError(
+                f"Single-channel image detected at {path}. "
+                f"Please use Cell_State_Analyzer_Single_Tool for single-channel images."
+            )
         
         # (H,W,C) or (C,H,W) → (C,H,W)
-        if img.ndim == 2:                     # single channel
-            img = img[None, ...]
-        elif img.ndim == 3:
-            # Check if first dimension is small (1,2,3) - likely (C,H,W)
-            # Otherwise assume (H,W,C) and transpose
-            if img.shape[0] not in (1, 2, 3):
-                img = img.transpose(2, 0, 1)  # (H, W, C) → (C, H, W)
+        if img.ndim == 3:
+            if img.shape[-1] <= 10:           # (H, W, C)
+                img = img.transpose(2, 0, 1)
         
-        # Select channels if specified
+        # Detect and store channels on first load (after transpose to C,H,W)
+        if self.detected_channels is None:
+            self.detected_channels = img.shape[0]
+            logger.debug(f"Detected {self.detected_channels} channels from image {idx}")
+        
+        # Apply channel selection if specified
         if self.selected_channels is not None:
+            if max(self.selected_channels) >= self.detected_channels:
+                raise ValueError(f"selected_channels {self.selected_channels} contains indices >= detected_channels {self.detected_channels} at {path}")
             img = img[self.selected_channels]
-        
-        # Convert to tensor and normalize
+
         img = torch.from_numpy(img).float()
         
-        # Normalize: if max > 1, scale to [0, 1], then to [-1, 1]
-        if img.max() > 1:
-            img = img / 255.0
+        # Normalize using channel-wise percentile normalization
+        img = channel_norm(img)
         img = (img - 0.5) / 0.5
-        
-        # Apply transforms (two views for contrastive learning)
+
         if self.transform:
             v1 = self.transform(img)
             v2 = self.transform(img)
         else:
             v1 = v2 = img
-        
+
         name = Path(path).stem
         return v1, v2, name, group
 
@@ -120,26 +156,18 @@ class MultiChannelTransform(nn.Module):
         
         return x
 
-
 # ====================== Model ======================
 class DinoV3Projector(nn.Module):
-    """DINOv3 model with projection head. Supports arbitrary number of input channels."""
-    def __init__(self, backbone_name="dinov3_vits16", proj_dim=256, in_channels=3,
+    def __init__(self, backbone_name="dinov3_vits16", proj_dim=256, in_channels=None,
                  freeze_patch_embed=False, freeze_blocks=0):
         super().__init__()
+        if in_channels is None:
+            raise ValueError("in_channels must be specified (cannot be None). Channel count should be detected from input images.")
         self.in_channels = in_channels
-        
-        feat_dim_map = {
-            "dinov3_vits16": 384,
-            "dinov3_vitb16": 768,
-            "dinov3_vitl16": 1024,
-        }
+        feat_dim = 384  # dinov3_vits16 / dinov2-small uses 384 dimensions
         
         # Load backbone
         self.backbone = self._load_backbone(backbone_name)
-        
-        # CRITICAL: Update config immediately after loading to prevent validation errors
-        # Transformers may validate input channels during forward, so config must match
         if hasattr(self.backbone, 'config') and hasattr(self.backbone.config, 'num_channels'):
             if self.backbone.config.num_channels != in_channels:
                 logger.info(f"Updating model config.num_channels before adaptation: {self.backbone.config.num_channels} -> {in_channels}")
@@ -158,11 +186,7 @@ class DinoV3Projector(nn.Module):
                 for p in blk.parameters():
                     p.requires_grad = False
         
-        # Projection head
-        feat_dim = feat_dim_map.get(backbone_name, 384)
-        if hasattr(self.backbone, 'config') and hasattr(self.backbone.config, 'hidden_size'):
-            feat_dim = self.backbone.config.hidden_size
-        
+        # Projection head - use fixed 384 dim for dinov3_vits16
         self.projector = nn.Sequential(
             nn.Linear(feat_dim, feat_dim),
             nn.GELU(),
@@ -182,18 +206,18 @@ class DinoV3Projector(nn.Module):
             if True:  # hf_hub_download is already imported
                 weights_path = hf_hub_download(custom_repo_id, model_filename, token=hf_token)
                 # Load model WITHOUT validating input (we'll adapt it later)
-                base_model = AutoModel.from_pretrained(
-                    architecture_repo_id, 
-                    token=hf_token, 
+            base_model = AutoModel.from_pretrained(
+                architecture_repo_id,
+                token=hf_token,
                     trust_remote_code=True,
                     ignore_mismatched_sizes=True  # Allow size mismatches during loading
-                )
-                
-                state_dict = torch.load(weights_path, map_location='cpu')
-                if isinstance(state_dict, dict):
-                    state_dict = state_dict.get("teacher") or state_dict.get("model") or state_dict
-                
-                # Filter matching keys
+            )
+            
+            state_dict = torch.load(weights_path, map_location='cpu')
+            if isinstance(state_dict, dict):
+                state_dict = state_dict.get("teacher") or state_dict.get("model") or state_dict
+            
+            # Filter matching keys
                 model_dict = base_model.state_dict()
                 filtered_dict = {k: v for k, v in state_dict.items() 
                                if k in model_dict and v.shape == model_dict[k].shape}
@@ -214,8 +238,6 @@ class DinoV3Projector(nn.Module):
     
     def _adapt_patch_embedding(self, in_channels):
         """Adapt patch embedding layer for multi-channel input."""
-        # CRITICAL: Update config FIRST before any operations
-        # This prevents transformers from validating with wrong channel count
         if hasattr(self.backbone, 'config'):
             if hasattr(self.backbone.config, 'num_channels'):
                 original_channels = self.backbone.config.num_channels
@@ -268,7 +290,7 @@ class DinoV3Projector(nn.Module):
         # Ensure config is still updated (redundant but safe)
         if hasattr(self.backbone, 'config') and hasattr(self.backbone.config, 'num_channels'):
             self.backbone.config.num_channels = in_channels
-        
+                        
         logger.info(f"✅ Adapted patch embedding: {old_proj.in_channels} -> {in_channels} channels")
     
     def forward(self, x):
@@ -345,8 +367,6 @@ class Cell_State_Analyzer_Multi_Tool(BaseTool):
                 "learning_rate": "float - Learning rate (default: 3e-5)",
                 "cluster_resolution": "float - Clustering resolution (default: 0.5)",
                 "query_cache_dir": "str - Output directory",
-                "in_channels": "int - Number of input channels (auto-detect from first crop if None)",
-                "selected_channels": "List[int] - Channel indices to use (all channels if None)",
             },
             output_type="dict - Analysis results with AnnData object containing UMAP coordinates and cluster assignments",
             demo_commands=[{
@@ -425,7 +445,7 @@ class Cell_State_Analyzer_Multi_Tool(BaseTool):
             
             if avg_loss <= early_stop_loss or no_improve >= patience:
                 break
-        
+            
         return history, best_path
     
     def _load_cell_data_from_metadata(self, query_cache_dir):
@@ -454,7 +474,7 @@ class Cell_State_Analyzer_Multi_Tool(BaseTool):
             if data.get('execution_status') == 'no_crops_generated':
                 skipped.append({'image': img_id})
                 continue
-            
+                
             crops = data.get('cell_crops_paths', [])
             metadata = data.get('cell_metadata', [])
             group = data.get('group', 'default')
@@ -470,7 +490,7 @@ class Cell_State_Analyzer_Multi_Tool(BaseTool):
     
     def execute(self, cell_crops=None, cell_metadata=None, max_epochs=25, early_stop_loss=0.5,
                 batch_size=16, learning_rate=3e-5, cluster_resolution=0.5, query_cache_dir=None,
-                in_channels=None, selected_channels=None, freeze_patch_embed=False, freeze_blocks=0):
+                freeze_patch_embed=False, freeze_blocks=0):
         """Execute analysis."""
         logger.info("🚀 Starting cell state analysis...")
         
@@ -486,30 +506,6 @@ class Cell_State_Analyzer_Multi_Tool(BaseTool):
         num_crops = len(cell_crops)
         logger.info(f"Processing {num_crops} cell crops")
         
-        # Detect channels
-        if in_channels is None:
-            try:
-                img_data = ImageProcessor.load_image(cell_crops[0])
-                in_channels = img_data.num_channels
-                logger.info(f"Auto-detected {in_channels} channels from first crop: {cell_crops[0]}")
-                if in_channels <= 0:
-                    raise ValueError(f"Invalid channel count: {in_channels}")
-            except Exception as e:
-                logger.error(f"Failed to detect channels from {cell_crops[0] if cell_crops else 'N/A'}: {e}")
-                in_channels = 2
-                logger.warning(f"Defaulting to {in_channels} channels. If this is incorrect, specify in_channels parameter.")
-        
-        # Set selected_channels
-        if selected_channels is None:
-            selected_channels = list(range(in_channels))
-        else:
-            selected_channels = [ch for ch in selected_channels if 0 <= ch < in_channels]
-            if not selected_channels:
-                raise ValueError(f"Invalid selected_channels for {in_channels} channels")
-        
-        actual_in_channels = len(selected_channels)
-        logger.info(f"Using {actual_in_channels} channels: {selected_channels}")
-        
         # Setup
         use_zero_shot = num_crops < 50
         output_dir = os.path.join(query_cache_dir or "solver_cache/temp", "cell_state_analysis")
@@ -518,17 +514,31 @@ class Cell_State_Analyzer_Multi_Tool(BaseTool):
         # Prepare groups
         groups = [m.get('group', 'default') if isinstance(m, dict) else 'default' for m in cell_metadata]
         
-        # Create datasets
+        # Create eval dataset to detect channels from actual images
         eval_dataset = MultiChannelCellCropDataset(cell_crops, groups, 
                                                   transform=self._get_transform(train=False),
-                                                  selected_channels=selected_channels)
+                                                  selected_channels=None)
+        
+        # Detect channels from dataset (reads first image)
+        detected_channels = eval_dataset.get_detected_channels()
+        logger.info(f"Auto-detected {detected_channels} channels from first crop")
+        
+        # Use all detected channels
+        selected_channels = list(range(detected_channels))
+        logger.info(f"Using all {detected_channels} detected channels: {selected_channels}")
+        
+        # Update dataset with selected_channels
+        eval_dataset.selected_channels = selected_channels
+        
+        in_channels = detected_channels  # Number of channels to use in model
+        
         eval_loader = DataLoader(eval_dataset, batch_size=min(batch_size, num_crops), shuffle=False, num_workers=0)
         
-        # Initialize model
+        # Initialize model with detected channels
         model = DinoV3Projector(
             backbone_name="dinov3_vits16",
             proj_dim=256,
-            in_channels=actual_in_channels,
+            in_channels=in_channels,
             freeze_patch_embed=freeze_patch_embed,
             freeze_blocks=freeze_blocks
         ).to(self.device)
@@ -542,6 +552,9 @@ class Cell_State_Analyzer_Multi_Tool(BaseTool):
             train_dataset = MultiChannelCellCropDataset(cell_crops, groups,
                                                        transform=self._get_transform(train=True),
                                                        selected_channels=selected_channels)
+            # Ensure train dataset has same detected_channels (for consistency)
+            train_dataset.detected_channels = eval_dataset.detected_channels
+            logger.info(f"Train dataset configured: {len(selected_channels)} selected channels from {train_dataset.detected_channels} detected channels")
             train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
             
             history, best_path = self._train_model(model, train_loader, max_epochs, early_stop_loss,
@@ -558,16 +571,11 @@ class Cell_State_Analyzer_Multi_Tool(BaseTool):
                 loss_path = os.path.join(output_dir, "loss_curve.png")
                 plt.savefig(loss_path)
                 plt.close()
-        
-        # Extract features
+            
+            # Extract features
         feats, names, groups_extracted = self._extract_features(model, eval_loader)
         
         # Create AnnData
-        if False:  # anndata/scanpy are already imported
-            pass
-        else:
-            return {"error": "anndata/scanpy not available"}
-        
         adata = ad.AnnData(X=feats)
         adata.obs["group"] = groups_extracted if len(groups_extracted) == adata.n_obs else groups[:adata.n_obs]
         adata.obs["image_name"] = names if len(names) == adata.n_obs else ['unknown'] * adata.n_obs
