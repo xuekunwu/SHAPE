@@ -29,6 +29,13 @@ torch>=2.0.0
 torchvision>=0.15.0
 torchmetrics>=0.11.0  # Required for DINOv3 model evaluation
 
+# DINOv3 dependencies (required when loading model from GitHub)
+ftfy>=6.0.0  # Text processing for dino.txt tokenizer
+omegaconf>=2.3.0  # Configuration management
+regex>=2022.0.0  # Text processing for dino.txt tokenizer
+submitit>=1.4.0  # Distributed training support
+termcolor>=2.0.0  # Colored terminal output for logging
+
 # Scientific computing and data analysis
 # Updated versions for Python 3.13 compatibility
 # Note: numpy is installed above in build dependencies section
