@@ -8,8 +8,9 @@ All images are represented as (H, W, C) format where C >= 1
 from dataclasses import dataclass
 from typing import Optional, List, Dict, Tuple
 import numpy as np
-import tifffile
-from PIL import Image
+import tifffile  # Still needed for saving multi-channel TIFF
+from PIL import Image  # Still needed for saving single-channel images
+from skimage import io  # Unified image loading (consistent with reference implementation)
 import os
 
 
@@ -33,8 +34,8 @@ class ImageData:
         """
         Load image from file path, automatically detect and handle multi-channel
         
-        Unified logic:
-        1. Load image (TIFF/PIL)
+        Unified logic (consistent with reference implementation):
+        1. Load image using skimage.io.imread (handles TIFF, PNG, JPEG, etc.)
         2. Normalize to (H, W, C) format
         3. Detect channel count
         4. Infer channel names (if not provided)
@@ -42,25 +43,19 @@ class ImageData:
         if not os.path.exists(path):
             raise FileNotFoundError(f"Image file not found: {path}")
         
-        path_lower = path.lower()
-        is_tiff = path_lower.endswith('.tif') or path_lower.endswith('.tiff')
-        
-        if is_tiff:
-            # Load with tifffile to handle multi-channel TIFF
+        # Use skimage.io.imread for unified loading (consistent with reference implementation)
+        try:
+            img_array = io.imread(path)
+            return cls._from_array(img_array, channel_names=channel_names, source_path=path)
+        except Exception as e:
+            # Fallback to PIL if skimage fails
+            print(f"Warning: skimage.io.imread failed for {path}, trying PIL: {e}")
             try:
-                img_full = tifffile.imread(path)
-                return cls._from_array(img_full, channel_names=channel_names, source_path=path)
-            except Exception as e:
-                # Fallback to PIL if tifffile fails
-                print(f"Warning: tifffile failed for {path}, trying PIL: {e}")
                 img = Image.open(path)
                 img_array = np.array(img)
                 return cls._from_array(img_array, channel_names=channel_names, source_path=path)
-        else:
-            # Load with PIL for other formats
-            img = Image.open(path)
-            img_array = np.array(img)
-            return cls._from_array(img_array, channel_names=channel_names, source_path=path)
+            except Exception as e2:
+                raise ValueError(f"Failed to load image from {path}: {e2}")
     
     @classmethod
     def _from_array(cls, img_array: np.ndarray, channel_names: Optional[List[str]] = None, source_path: Optional[str] = None) -> 'ImageData':
@@ -73,21 +68,15 @@ class ImageData:
             img_array = img_array[:, :, np.newaxis]
         elif img_array.ndim == 3:
             # 3D: determine if (H, W, C) or (C, H, W)
-            h, w, c = img_array.shape
-            if c > 1 and c <= 4:
-                # Likely (H, W, C) - already in correct format
-                pass
-            elif h <= 4 and w > h:
-                # Likely (C, H, W) - transpose to (H, W, C)
+            # Reference implementation logic (for PyTorch, target: C,H,W):
+            #   if img.shape[0] not in (1,2,3): img.permute(2,0,1)  # (H,W,C) -> (C,H,W)
+            # Our target is (H,W,C), so inverted logic:
+            #   if img.shape[0] in (1,2,3): transpose(1,2,0)  # (C,H,W) -> (H,W,C)
+            #   else: already (H,W,C)
+            if img_array.shape[0] in (1, 2, 3):
+                # First dimension is small (1,2,3), likely (C, H, W) - transpose to (H, W, C)
                 img_array = np.transpose(img_array, (1, 2, 0))
-            else:
-                # Ambiguous: assume (H, W, C) if last dim is small, else (C, H, W)
-                if c <= 4:
-                    # Assume (H, W, C)
-                    pass
-                else:
-                    # Assume (C, H, W)
-                    img_array = np.transpose(img_array, (1, 2, 0))
+            # Otherwise, shape[0] is large, likely (H, W, C) - already in correct format
         elif img_array.ndim == 4:
             # 4D: could be (Z, H, W, C) or (C, Z, H, W)
             # Use first slice for 4D images

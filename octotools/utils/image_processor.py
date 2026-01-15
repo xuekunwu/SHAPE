@@ -26,6 +26,9 @@ class ImageProcessor:
         """
         Unified image loading interface
         
+        Uses skimage.io.imread for consistent image loading (handles TIFF, PNG, JPEG, etc.)
+        Consistent with reference implementation for multi-channel image processing.
+        
         Args:
             path: Path to image file
             channel_names: Optional list of channel names (e.g., ['bright-field', 'GFP'])
