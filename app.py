@@ -1013,6 +1013,12 @@ def _collect_visual_outputs(result, visual_outputs_list, downloadable_files_list
                 file_path.lower().endswith('.h5ad') or
                 file_path.lower().endswith('.zip') or
                 'segmentation_overlay' in filename_lower_check or
+                'cell_overlay' in filename_lower_check or  # Cell_Segmenter_Tool overlay
+                'organoid_overlay' in filename_lower_check or  # Organoid_Segmenter_Tool overlay
+                'nuclei_overlay' in filename_lower_check or  # Nuclei_Segmenter_Tool overlay
+                'cell_mask' in filename_lower_check or  # Cell_Segmenter_Tool mask
+                'organoid_mask' in filename_lower_check or  # Organoid_Segmenter_Tool mask
+                'nuclei_mask' in filename_lower_check or  # Nuclei_Segmenter_Tool mask
                 'loss_curve' in filename_lower_check or
                 'umap_cluster' in filename_lower_check or
                 'cluster_proportion' in filename_lower_check or
