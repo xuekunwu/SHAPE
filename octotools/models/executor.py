@@ -157,8 +157,10 @@ try:
     cell_crops, cell_metadata, skipped_images = tool._load_cell_data_from_metadata(query_cache_dir_parent)
     
     if cell_crops and len(cell_crops) > 0:
-            # Execute the tool with loaded data (merged from all metadata files)
-            # Note: in_channels will be auto-detected from first crop if not specified
+        # Execute the tool with loaded data (merged from all metadata files)
+        # Note: in_channels/selected_channels only for Multi_Tool (not Single_Tool)
+        if tool_name == "Cell_State_Analyzer_Multi_Tool":
+            # Multi-channel tool: supports in_channels and selected_channels
             execution = tool.execute(
                 cell_crops=cell_crops, 
                 cell_metadata=cell_metadata, 
@@ -170,6 +172,18 @@ try:
                 query_cache_dir=query_cache_dir_parent,
                 in_channels=None,  # Auto-detect from crops
                 selected_channels=None  # Use all channels
+            )
+        else:
+            # Single-channel tool: does NOT accept in_channels/selected_channels
+            execution = tool.execute(
+                cell_crops=cell_crops, 
+                cell_metadata=cell_metadata, 
+                max_epochs=25,
+                early_stop_loss=0.5,
+                batch_size=16,
+                learning_rate=3e-5,
+                cluster_resolution=0.5,
+                query_cache_dir=query_cache_dir_parent
             )
     else:
         execution = {{"error": "No valid cell crops found in metadata", "status": "failed"}}
