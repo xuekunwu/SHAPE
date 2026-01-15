@@ -961,7 +961,7 @@ def _collect_visual_outputs(result, visual_outputs_list, downloadable_files_list
                             # Skip zip files from deliverables (handled separately above)
                             if not (isinstance(path, str) and path.lower().endswith('.zip')):
                                 add_path(path)
-                    elif "visual_outputs" in img_result:
+                    if "visual_outputs" in img_result:  # Changed from elif to if - check both deliverables and visual_outputs
                         for path in img_result["visual_outputs"]:
                             add_path(path)
                     # Collect from individual keys (exclude processed_image_path and mask_path)
@@ -975,13 +975,21 @@ def _collect_visual_outputs(result, visual_outputs_list, downloadable_files_list
             if "deliverables" in result:
                 for path in result["deliverables"]:
                     add_path(path)
-            elif "visual_outputs" in result:
+            if "visual_outputs" in result:  # Changed from elif to if - check both deliverables and visual_outputs
                 for path in result["visual_outputs"]:
                     add_path(path)
             # Also check individual keys for single results (exclude processed_image_path and mask_path)
             for key in ["overlay_path", "output_path"]:
                 if key in result:
                     add_path(result[key])
+    
+    # Debug: log collected files
+    if visual_output_files:
+        print(f"📸 Collected {len(visual_output_files)} visual output file(s) from tool result")
+        for f in visual_output_files[:5]:  # Show first 5
+            print(f"   - {os.path.basename(f)}")
+        if len(visual_output_files) > 5:
+            print(f"   ... and {len(visual_output_files) - 5} more")
     
     # Process collected files
     for file_path in visual_output_files:
@@ -997,9 +1005,14 @@ def _collect_visual_outputs(result, visual_outputs_list, downloadable_files_list
             if "processed" in filename and "_processed" in filename:
                 # Skip processed images from Image_Preprocessor_Tool
                 continue
+            # Skip raw mask files (TIFF format), but keep overlay and viz images
             if "mask" in filename and "overlay" not in filename and "viz" not in filename:
                 # Skip segmentation masks from Segmenter_Tool (but keep overlay visualizations)
-                continue
+                # Only skip if it's a TIFF mask file, not PNG overlay
+                if file_path.lower().endswith('.tif') or file_path.lower().endswith('.tiff'):
+                    continue
+                # For PNG files with "mask" in name but not overlay/viz, also skip (e.g., mask visualization PNGs that aren't overlays)
+                # But overlay files should have "overlay" in name, so they won't be skipped here
                 
             # Support image files and data files (h5ad for AnnData)
             if not file_path.lower().endswith(('.png', '.jpg', '.jpeg', '.tif', '.tiff', '.h5ad')):
