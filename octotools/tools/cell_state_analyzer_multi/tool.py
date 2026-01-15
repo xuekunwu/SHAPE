@@ -60,67 +60,80 @@ class MultiChannelCellCropDataset(Dataset):
     def get_detected_channels(self):
         """Get detected number of channels from first image."""
         if self.detected_channels is None:
-            # Load first image to detect channels
-            if len(self.image_paths) > 0:
-                img = io.imread(self.image_paths[0])
-                if img.ndim == 2:
-                    raise ValueError(
-                        f"Single-channel image detected at {self.image_paths[0]}. "
-                        f"Please use Cell_State_Analyzer_Single_Tool for single-channel images."
-                    )
-                elif img.ndim == 3:
-                    if img.shape[-1] <= 10:  # (H, W, C)
-                        self.detected_channels = img.shape[-1]
-                    else:  # (C, H, W)
-                        self.detected_channels = img.shape[0]
-                else:
-                    raise ValueError(f"Unexpected image dimensions: {img.ndim}D at {self.image_paths[0]}")
-            else:
+            if not self.image_paths:
                 raise ValueError("No images in dataset")
+            
+            img = io.imread(self.image_paths[0])
+            if img.ndim == 2:
+                raise ValueError(
+                    f"Single-channel image detected at {self.image_paths[0]}. "
+                    f"Please use Cell_State_Analyzer_Single_Tool for single-channel images."
+                )
+            elif img.ndim == 3:
+                # io.imread may return (H, W, C) or (C, H, W)
+                # Typical cell crops: height/width > 10, channels 2-10
+                if img.shape[0] <= 10 and img.shape[-1] > 10:
+                    # (C, H, W) format
+                    self.detected_channels = img.shape[0]
+                elif img.shape[-1] <= 10 and img.shape[0] > 10:
+                    # (H, W, C) format
+                    self.detected_channels = img.shape[-1]
+                else:
+                    # Ambiguous - use heuristic
+                    self.detected_channels = img.shape[0] if img.shape[0] < img.shape[-1] else img.shape[-1]
+            else:
+                raise ValueError(f"Unexpected image dimensions: {img.ndim}D at {self.image_paths[0]}")
         return self.detected_channels
     
     def __getitem__(self, idx):
         path = self.image_paths[idx]
         group = self.groups[idx]
         
-        # Load cropped cell image from Single_Cell_Cropper_Tool output
+        # Load image using io.imread (works for TIFF, PNG, JPEG)
         img = io.imread(path)
+        
         if img.ndim == 2:
             raise ValueError(
                 f"Single-channel image detected at {path}. "
                 f"Please use Cell_State_Analyzer_Single_Tool for single-channel images."
             )
         
-        # (H,W,C) or (C,H,W) → (C,H,W)
+        # Convert to (C, H, W) format
+        # io.imread may return (H, W, C) or (C, H, W) depending on format
         if img.ndim == 3:
-            if img.shape[-1] <= 10:           # (H, W, C)
+            # Check if already (C, H, W) or needs conversion from (H, W, C)
+            if img.shape[0] <= 10 and img.shape[-1] > 10:
+                # Already (C, H, W) - no conversion needed
+                pass
+            elif img.shape[-1] <= 10 and img.shape[0] > 10:
+                # (H, W, C) - convert to (C, H, W)
                 img = img.transpose(2, 0, 1)
+            else:
+                # Ambiguous - use same logic as detection
+                if img.shape[0] < img.shape[-1]:
+                    # Assume (C, H, W) - no conversion
+                    pass
+                else:
+                    # Assume (H, W, C) - convert
+                    img = img.transpose(2, 0, 1)
         
-        # Detect and store channels on first load (after transpose to C,H,W)
-        if self.detected_channels is None:
-            self.detected_channels = img.shape[0]
-            logger.debug(f"Detected {self.detected_channels} channels from image {idx}")
-        
-        # Apply channel selection if specified
+        # Apply channel selection
         if self.selected_channels is not None:
-            if max(self.selected_channels) >= self.detected_channels:
-                raise ValueError(f"selected_channels {self.selected_channels} contains indices >= detected_channels {self.detected_channels} at {path}")
             img = img[self.selected_channels]
 
+        # Normalize
         img = torch.from_numpy(img).float()
-        
-        # Normalize using channel-wise percentile normalization
         img = channel_norm(img)
         img = (img - 0.5) / 0.5
 
+        # Apply transforms
         if self.transform:
             v1 = self.transform(img)
             v2 = self.transform(img)
         else:
             v1 = v2 = img
 
-        name = Path(path).stem
-        return v1, v2, name, group
+        return v1, v2, Path(path).stem, group
 
 
 # ====================== Transform ======================
@@ -450,6 +463,10 @@ class Cell_State_Analyzer_Multi_Tool(BaseTool):
     
     def _load_cell_data_from_metadata(self, query_cache_dir):
         """Load cell crops and metadata from metadata files."""
+        # Normalize query_cache_dir (remove 'tool_cache' if present)
+        if query_cache_dir.endswith('tool_cache') or query_cache_dir.endswith(os.path.sep + 'tool_cache'):
+            query_cache_dir = os.path.dirname(query_cache_dir.rstrip(os.sep))
+        
         tool_cache_dir = os.path.join(query_cache_dir, "tool_cache")
         metadata_files = glob.glob(os.path.join(tool_cache_dir, 'cell_crops_metadata_*.json'))
         
@@ -468,7 +485,7 @@ class Cell_State_Analyzer_Multi_Tool(BaseTool):
             except Exception as e:
                 logger.warning(f"Error reading {f}: {e}")
         
-        # Merge all crops
+        # Collect all crops and metadata
         all_crops, all_metadata, skipped = [], [], []
         for img_id, data in metadata_by_image.items():
             if data.get('execution_status') == 'no_crops_generated':
@@ -514,31 +531,27 @@ class Cell_State_Analyzer_Multi_Tool(BaseTool):
         # Prepare groups
         groups = [m.get('group', 'default') if isinstance(m, dict) else 'default' for m in cell_metadata]
         
-        # Create eval dataset to detect channels from actual images
-        eval_dataset = MultiChannelCellCropDataset(cell_crops, groups, 
-                                                  transform=self._get_transform(train=False),
-                                                  selected_channels=None)
+        # Create dataset and detect channels from first image
+        eval_dataset = MultiChannelCellCropDataset(
+            cell_crops, groups, 
+            transform=self._get_transform(train=False),
+            selected_channels=None  # Will be set after detection
+        )
         
-        # Detect channels from dataset (reads first image)
+        # Detect channels using dataset's method
         detected_channels = eval_dataset.get_detected_channels()
         logger.info(f"Auto-detected {detected_channels} channels from first crop")
         
         # Use all detected channels
         selected_channels = list(range(detected_channels))
-        logger.info(f"Using all {detected_channels} detected channels: {selected_channels}")
-        
-        # Update dataset with selected_channels
         eval_dataset.selected_channels = selected_channels
-        
-        in_channels = detected_channels  # Number of channels to use in model
-        
         eval_loader = DataLoader(eval_dataset, batch_size=min(batch_size, num_crops), shuffle=False, num_workers=0)
         
         # Initialize model with detected channels
         model = DinoV3Projector(
             backbone_name="dinov3_vits16",
             proj_dim=256,
-            in_channels=in_channels,
+            in_channels=detected_channels,
             freeze_patch_embed=freeze_patch_embed,
             freeze_blocks=freeze_blocks
         ).to(self.device)
@@ -549,12 +562,12 @@ class Cell_State_Analyzer_Multi_Tool(BaseTool):
             history, loss_path = [], None
         else:
             logger.info("Starting training...")
-            train_dataset = MultiChannelCellCropDataset(cell_crops, groups,
-                                                       transform=self._get_transform(train=True),
-                                                       selected_channels=selected_channels)
-            # Ensure train dataset has same detected_channels (for consistency)
-            train_dataset.detected_channels = eval_dataset.detected_channels
-            logger.info(f"Train dataset configured: {len(selected_channels)} selected channels from {train_dataset.detected_channels} detected channels")
+            train_dataset = MultiChannelCellCropDataset(
+                cell_crops, groups,
+                transform=self._get_transform(train=True),
+                selected_channels=selected_channels
+            )
+            train_dataset.detected_channels = detected_channels
             train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
             
             history, best_path = self._train_model(model, train_loader, max_epochs, early_stop_loss,
