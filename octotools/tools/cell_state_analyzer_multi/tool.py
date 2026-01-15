@@ -24,6 +24,7 @@ import glob
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+from huggingface_hub import hf_hub_download
 import anndata as ad
 import scanpy as sc
 from skimage import io
@@ -173,31 +174,32 @@ class DinoV3Projector(nn.Module):
         )
     
     def _load_backbone(self, backbone_name):
-        """Load DINOv3 backbone from local repo and weights."""
-        local_repo = os.getenv("DINOV3_LOCAL_REPO")
-        if not local_repo or not os.path.exists(local_repo):
-            raise ValueError(
-                f"DINOV3_LOCAL_REPO environment variable not set or path not found: {local_repo}. "
-                f"Please set DINOV3_LOCAL_REPO to the local path of dinov3 code repository."
-            )
+        """Load DINOv3 backbone using torch.hub and weights from Hugging Face Hub."""
+        # Download weights from Hugging Face Hub
+        custom_repo_id = "5xuekun/dinov3_vits16"
+        model_filename = "dinov3_vitb16_pretrain_lvd1689m-73cec8be.pth"
+        hf_token = os.getenv("HUGGINGFACE_TOKEN")
         
-        ckpt_path = os.getenv("DINOV3_CKPT_PATH")
-        if not ckpt_path or not os.path.exists(ckpt_path):
-            raise ValueError(
-                f"DINOV3_CKPT_PATH environment variable not set or file not found: {ckpt_path}. "
-                f"Please set DINOV3_CKPT_PATH to the local path of dinov3 weights file."
-            )
+        logger.info(f"Downloading weights from Hugging Face Hub: {custom_repo_id}/{model_filename}")
+        weights_path = hf_hub_download(
+            repo_id=custom_repo_id,
+            filename=model_filename,
+            token=hf_token
+        )
         
-        logger.info(f"Loading model from local repo: {local_repo}")
-        base_model = torch.hub.load(local_repo, backbone_name, source="local", pretrained=False)
+        # Load model architecture from GitHub using torch.hub
+        hub_repo = "facebookresearch/dinov2"
+        logger.info(f"Loading model architecture from torch.hub: {hub_repo}")
+        base_model = torch.hub.load(hub_repo, backbone_name, pretrained=False, source="github")
         
-        logger.info(f"Loading weights from local path: {ckpt_path}")
-        state_dict = torch.load(ckpt_path, map_location="cpu")
+        # Load weights
+        logger.info(f"Loading weights from local path: {weights_path}")
+        state_dict = torch.load(weights_path, map_location="cpu")
         if "teacher" in state_dict:
             state_dict = state_dict["teacher"]
         base_model.load_state_dict(state_dict, strict=False)
         
-        logger.info(f"✅ Loaded DINOv3 from local repo and weights")
+        logger.info(f"✅ Loaded DINOv3 from torch.hub and Hugging Face Hub weights")
         return base_model
     
     def _adapt_patch_embedding(self, in_channels):

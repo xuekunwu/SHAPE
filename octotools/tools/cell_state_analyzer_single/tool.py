@@ -114,7 +114,7 @@ class DinoV3Projector(nn.Module):
         # Load DINOv3 backbone from Hugging Face Hub
         from transformers import AutoModel
         hf_token = os.getenv("HUGGINGFACE_TOKEN")
-        architecture_repo_id = "facebook/dinov2-small"  # Small model for ViT-S/16 (384 dim)
+        architecture_repo_id = "facebook/dinov3-small"  # Small model for ViT-S/16 (384 dim)
         
         # Download and load weights from Hugging Face Hub
         custom_repo_id = "5xuekun/dinov3_vits16"
