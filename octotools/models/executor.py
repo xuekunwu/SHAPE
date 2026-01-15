@@ -110,6 +110,10 @@ class Executor:
             # Escape backslashes for Windows paths in Python string
             metadata_dir_str = self.tool_cache_dir.replace("\\", "\\\\")
             query_cache_dir_str = self.query_cache_dir.replace("\\", "\\\\")
+            
+            # Determine if this is Multi_Tool (needs in_channels/selected_channels) or Single_Tool
+            is_multi_tool = (tool_name == "Cell_State_Analyzer_Multi_Tool")
+            
             return ToolCommand(
                 analysis=f"Using dynamic metadata file discovery for {tool_label}",
                 explanation=f"Automatically finding the most recent metadata file and loading cell data with improved format handling for {tool_label}",
@@ -159,7 +163,7 @@ try:
     if cell_crops and len(cell_crops) > 0:
         # Execute the tool with loaded data (merged from all metadata files)
         # Note: in_channels/selected_channels only for Multi_Tool (not Single_Tool)
-        if tool_name == "Cell_State_Analyzer_Multi_Tool":
+        if {is_multi_tool}:
             # Multi-channel tool: supports in_channels and selected_channels
             execution = tool.execute(
                 cell_crops=cell_crops, 
