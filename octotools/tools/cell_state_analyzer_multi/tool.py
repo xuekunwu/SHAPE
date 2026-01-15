@@ -70,11 +70,8 @@ class MultiChannelCellCropDataset(Dataset):
                     f"Please use Cell_State_Analyzer_Single_Tool for single-channel images."
                 )
             elif img.ndim == 3:
-                # io.imread may return (H, W, C)
-                # Typical cell crops: height/width > 10, channels 2-10
-                if img.shape[0] <= 10 and img.shape[-1] > 10:
-                    # (C, H, W) format
-                    self.detected_channels = img.shape[0]
+                # Image format is fixed as (C, H, W) - channels in first dimension
+                self.detected_channels = img.shape[0]
         return self.detected_channels
     
     def __getitem__(self, idx):
@@ -89,26 +86,7 @@ class MultiChannelCellCropDataset(Dataset):
                 f"Single-channel image detected at {path}. "
                 f"Please use Cell_State_Analyzer_Single_Tool for single-channel images."
             )
-        
-        # Convert to (C, H, W) format
-        # io.imread may return (H, W, C) or (C, H, W) depending on format
-        if img.ndim == 3:
-            print(f"Image shape at {path}: {img.shape}, ndim={img.ndim}, dtype={img.dtype}")
-            # Check if already (C, H, W) or needs conversion from (H, W, C)
-            if img.shape[0] <= 10 and img.shape[-1] > 10:
-                # Already (C, H, W) - no conversion needed
-                pass
-            elif img.shape[-1] <= 10 and img.shape[0] > 10:
-                # (H, W, C) - convert to (C, H, W)
-                img = img.transpose(2, 0, 1)
-            else:
-                # Ambiguous - use same logic as detection
-                if img.shape[0] < img.shape[-1]:
-                    # Assume (C, H, W) - no conversion
-                    pass
-                else:
-                    # Assume (H, W, C) - convert
-                    img = img.transpose(2, 0, 1)
+        # io.imread returns (C, H, W) format for TIFF files saved by Single_Cell_Cropper_Tool
         
         # Apply channel selection
         if self.selected_channels is not None:
@@ -307,25 +285,40 @@ class DinoV3Projector(nn.Module):
         if x.shape[1] != self.in_channels:
             raise ValueError(f"Channel mismatch: expected {self.in_channels}, got {x.shape[1]}")
         
+        # Ensure config is correct before forward pass
+        if hasattr(self.backbone, 'config') and hasattr(self.backbone.config, 'num_channels'):
+            if self.backbone.config.num_channels != self.in_channels:
+                logger.warning(f"Config mismatch in forward: config.num_channels={self.backbone.config.num_channels}, expected {self.in_channels}. Updating...")
+                self.backbone.config.num_channels = self.in_channels
+        
         # Forward through backbone - handle transformers models that may validate channels
+        # Try pixel_values first (transformers standard), fallback to direct call
         try:
-            out = self.backbone(x)
+            # Use pixel_values parameter (transformers standard way)
+            out = self.backbone(pixel_values=x, output_hidden_states=False)
         except (ValueError, RuntimeError) as e:
             error_msg = str(e).lower()
             if 'channel' in error_msg or ('expected' in error_msg and 'got' in error_msg):
-                # Transformers model may still be checking config - try with pixel_values
-                if hasattr(self.backbone, 'forward'):
-                    logger.warning(f"Direct call failed ({e}), trying with pixel_values parameter")
-                    # Update config one more time before retry
-                    if hasattr(self.backbone, 'config') and hasattr(self.backbone.config, 'num_channels'):
-                        self.backbone.config.num_channels = self.in_channels
+                # Update config and try again
+                if hasattr(self.backbone, 'config') and hasattr(self.backbone.config, 'num_channels'):
+                    logger.warning(f"Channel error with pixel_values ({e}), updating config and retrying...")
+                    self.backbone.config.num_channels = self.in_channels
+                    # Also try to update patch embedding config if it exists
+                    if hasattr(self.backbone, 'embeddings') and hasattr(self.backbone.embeddings, 'patch_embeddings'):
+                        patch_embed = self.backbone.embeddings.patch_embeddings
+                        if hasattr(patch_embed, 'config') and hasattr(patch_embed.config, 'num_channels'):
+                            patch_embed.config.num_channels = self.in_channels
+                
+                try:
+                    out = self.backbone(pixel_values=x, output_hidden_states=False)
+                except Exception as e2:
+                    # Last resort: try direct call
+                    logger.warning(f"pixel_values still failed ({e2}), trying direct call...")
                     try:
-                        out = self.backbone(pixel_values=x, output_hidden_states=False)
-                    except Exception as e2:
-                        logger.error(f"Both methods failed: {e2}")
-                        raise ValueError(f"Channel adaptation failed: {e}. Tried both direct call and pixel_values.")
-                else:
-                    raise
+                        out = self.backbone(x)
+                    except Exception as e3:
+                        logger.error(f"All methods failed. Input shape: {x.shape}, in_channels: {self.in_channels}, config.num_channels: {getattr(getattr(self.backbone, 'config', None), 'num_channels', 'N/A')}")
+                        raise ValueError(f"Channel adaptation failed: {e}. Tried pixel_values and direct call.")
             else:
                 raise
         
@@ -402,13 +395,26 @@ class Cell_State_Analyzer_Multi_Tool(BaseTool):
         with torch.no_grad():
             for v1, _, n, g in tqdm(dataloader, desc="Extracting features"):
                 v1 = v1.to(self.device)
-                out = model.backbone(v1)
+                # Use pixel_values parameter to ensure proper channel handling
+                try:
+                    backbone_output = model.backbone(pixel_values=v1, output_hidden_states=False)
+                except (ValueError, RuntimeError) as e:
+                    # If pixel_values fails, ensure config is updated and try again
+                    if hasattr(model.backbone, 'config') and hasattr(model.backbone.config, 'num_channels'):
+                        model.backbone.config.num_channels = model.in_channels
+                    backbone_output = model.backbone(pixel_values=v1, output_hidden_states=False)
                 
                 # Extract CLS token
-                if isinstance(out, torch.Tensor):
-                    out = out[:, 0, :] if out.dim() == 3 else out
-                elif hasattr(out, 'last_hidden_state'):
-                    out = out.last_hidden_state[:, 0]
+                if isinstance(backbone_output, torch.Tensor):
+                    out = backbone_output[:, 0, :] if backbone_output.dim() == 3 else backbone_output
+                elif isinstance(backbone_output, dict):
+                    out = backbone_output.get('last_hidden_state', backbone_output.get('pooler_output'))
+                    if out is not None and out.dim() == 3:
+                        out = out[:, 0, :]
+                elif hasattr(backbone_output, 'last_hidden_state'):
+                    out = backbone_output.last_hidden_state[:, 0]
+                else:
+                    out = backbone_output
                 
                 feats.append(out.cpu())
                 names.extend(n)
