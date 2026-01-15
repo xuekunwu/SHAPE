@@ -107,14 +107,14 @@ class SingleChannelCellCropDataset(Dataset):
 
 
 class DinoV3Projector(nn.Module):
-    """DINOv3 model with projection head for contrastive learning."""
-    def __init__(self, backbone_name="dinov3_vitb16", proj_dim=256):
+    """DINOv3 model with projection head for contrastive learning. Uses dinov3_vits16 (384 dim)."""
+    def __init__(self, backbone_name="dinov3_vits16", proj_dim=256):
         super().__init__()
         
         # Load DINOv3 backbone from Hugging Face Hub
         from transformers import AutoModel
         hf_token = os.getenv("HUGGINGFACE_TOKEN")
-        architecture_repo_id = "facebook/dinov2-base"  # Base model for ViT-B/16
+        architecture_repo_id = "facebook/dinov2-small"  # Small model for ViT-S/16 (384 dim)
         
         # Download and load weights from Hugging Face Hub
         custom_repo_id = "5xuekun/dinov3_vits16"
@@ -140,15 +140,8 @@ class DinoV3Projector(nn.Module):
         )
         self.backbone.load_state_dict(state_dict, strict=False)
         
-        feat_dim_map = {
-            "dinov3_vits16": 384,
-            "dinov3_vits16plus": 384,
-            "dinov3_vitb16": 768,
-            "dinov3_vitl16": 1024,
-            "dinov3_vith16plus": 1280,
-            "dinov3_vit7b16": 4096,
-        }
-        feat_dim = feat_dim_map.get(backbone_name)
+        # Force use dinov3_vits16 (384 dim) - architecture is dinov2-small
+        feat_dim = 384  # dinov3_vits16 / dinov2-small uses 384 dimensions
         
         self.projector = nn.Sequential(
             nn.Linear(feat_dim, 512),
@@ -258,6 +251,13 @@ class Cell_State_Analyzer_Single_Tool(BaseTool):
             for v1, _, names, grps in tqdm(dataloader, desc="Extracting CLS features"):
                 v1 = v1.to(device)
                 out = model.backbone(v1)
+                
+                # Extract CLS token
+                if isinstance(out, torch.Tensor):
+                    out = out[:, 0, :] if out.dim() == 3 else out
+                elif hasattr(out, 'last_hidden_state'):
+                    out = out.last_hidden_state[:, 0]
+                
                 feats.append(out.cpu())
                 img_names.extend(names)
                 groups.extend(grps)
@@ -414,7 +414,7 @@ class Cell_State_Analyzer_Single_Tool(BaseTool):
         eval_dataset = SingleChannelCellCropDataset(cell_crops, groups, transform=eval_transform)
         eval_loader = DataLoader(eval_dataset, batch_size=min(batch_size, num_crops), shuffle=False, num_workers=0)
         
-        # Initialize model
+        # Initialize model - uses dinov3_vits16 (384 dim)
         model = DinoV3Projector(backbone_name="dinov3_vits16", proj_dim=256).to(self.device)
         
         # Train or zero-shot
