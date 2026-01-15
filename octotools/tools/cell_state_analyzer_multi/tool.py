@@ -70,19 +70,11 @@ class MultiChannelCellCropDataset(Dataset):
                     f"Please use Cell_State_Analyzer_Single_Tool for single-channel images."
                 )
             elif img.ndim == 3:
-                # io.imread may return (H, W, C) or (C, H, W)
+                # io.imread may return (H, W, C)
                 # Typical cell crops: height/width > 10, channels 2-10
                 if img.shape[0] <= 10 and img.shape[-1] > 10:
                     # (C, H, W) format
                     self.detected_channels = img.shape[0]
-                elif img.shape[-1] <= 10 and img.shape[0] > 10:
-                    # (H, W, C) format
-                    self.detected_channels = img.shape[-1]
-                else:
-                    # Ambiguous - use heuristic
-                    self.detected_channels = img.shape[0] if img.shape[0] < img.shape[-1] else img.shape[-1]
-            else:
-                raise ValueError(f"Unexpected image dimensions: {img.ndim}D at {self.image_paths[0]}")
         return self.detected_channels
     
     def __getitem__(self, idx):
@@ -101,6 +93,7 @@ class MultiChannelCellCropDataset(Dataset):
         # Convert to (C, H, W) format
         # io.imread may return (H, W, C) or (C, H, W) depending on format
         if img.ndim == 3:
+            print(f"Image shape at {path}: {img.shape}, ndim={img.ndim}, dtype={img.dtype}")
             # Check if already (C, H, W) or needs conversion from (H, W, C)
             if img.shape[0] <= 10 and img.shape[-1] > 10:
                 # Already (C, H, W) - no conversion needed
