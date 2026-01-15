@@ -24,7 +24,7 @@ import glob
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-from huggingface_hub import hf_hub_download
+from huggingface_hub import hf_hub_download, snapshot_download
 import anndata as ad
 import scanpy as sc
 from skimage import io
@@ -148,10 +148,36 @@ class DinoV3Projector(nn.Module):
         if in_channels is None:
             raise ValueError("in_channels must be specified (cannot be None). Channel count should be detected from input images.")
         self.in_channels = in_channels
-        feat_dim = 384  # dinov3_vits16 / dinov3-small uses 384 dimensions
         
-        # Load backbone (using torch.hub to avoid transformers config issues)
-        self.backbone = self._load_backbone(backbone_name)
+        # Download code repository and weights from Hugging Face Hub
+        custom_repo_id = "5xuekun/dinov3_vits16"
+        model_filename = "dinov3_vitb16_pretrain_lvd1689m-73cec8be.pth"
+        hf_token = os.getenv("HUGGINGFACE_TOKEN")
+        
+        logger.info(f"Downloading code repository from Hugging Face Hub: {custom_repo_id}")
+        local_repo = snapshot_download(
+            repo_id=custom_repo_id,
+            token=hf_token,
+            local_dir_use_symlinks=False
+        )
+        
+        logger.info(f"Downloading weights from Hugging Face Hub: {custom_repo_id}/{model_filename}")
+        ckpt_path = hf_hub_download(
+            repo_id=custom_repo_id,
+            filename=model_filename,
+            token=hf_token
+        )
+        
+        # Load model architecture from downloaded repo using torch.hub
+        logger.info(f"Loading model architecture from downloaded repo: {local_repo}")
+        self.backbone = torch.hub.load(local_repo, backbone_name, source="local", pretrained=False)
+        
+        # Load weights
+        logger.info(f"Loading weights from local path: {ckpt_path}")
+        state_dict = torch.load(ckpt_path, map_location="cpu")
+        if "teacher" in state_dict:
+            state_dict = state_dict["teacher"]
+        self.backbone.load_state_dict(state_dict, strict=False)
         
         # Adapt patch embedding for multi-channel input
         self._adapt_patch_embedding(in_channels)
@@ -166,41 +192,22 @@ class DinoV3Projector(nn.Module):
                 for p in blk.parameters():
                     p.requires_grad = False
         
-        # Projection head - use fixed 384 dim for dinov3_vits16
+        # Projection head - use feat_dim_map like reference code
+        feat_dim_map = {
+            "dinov3_vits16": 384,
+            "dinov3_vits16plus": 384,
+            "dinov3_vitb16": 768,
+            "dinov3_vitl16": 1024,
+            "dinov3_vith16plus": 1280,
+            "dinov3_vit7b16": 4096,
+        }
+        feat_dim = feat_dim_map[backbone_name]
+        
         self.projector = nn.Sequential(
             nn.Linear(feat_dim, feat_dim),
             nn.GELU(),
             nn.Linear(feat_dim, proj_dim),
         )
-    
-    def _load_backbone(self, backbone_name):
-        """Load DINOv3 backbone using torch.hub and weights from Hugging Face Hub."""
-        # Download weights from Hugging Face Hub
-        custom_repo_id = "5xuekun/dinov3_vits16"
-        model_filename = "dinov3_vitb16_pretrain_lvd1689m-73cec8be.pth"
-        hf_token = os.getenv("HUGGINGFACE_TOKEN")
-        
-        logger.info(f"Downloading weights from Hugging Face Hub: {custom_repo_id}/{model_filename}")
-        weights_path = hf_hub_download(
-            repo_id=custom_repo_id,
-            filename=model_filename,
-            token=hf_token
-        )
-        
-        # Load model architecture from GitHub using torch.hub
-        hub_repo = "facebookresearch/dinov2"
-        logger.info(f"Loading model architecture from torch.hub: {hub_repo}")
-        base_model = torch.hub.load(hub_repo, backbone_name, pretrained=False, source="github")
-        
-        # Load weights
-        logger.info(f"Loading weights from local path: {weights_path}")
-        state_dict = torch.load(weights_path, map_location="cpu")
-        if "teacher" in state_dict:
-            state_dict = state_dict["teacher"]
-        base_model.load_state_dict(state_dict, strict=False)
-        
-        logger.info(f"✅ Loaded DINOv3 from torch.hub and Hugging Face Hub weights")
-        return base_model
     
     def _adapt_patch_embedding(self, in_channels):
         """Adapt patch embedding layer for multi-channel input."""
