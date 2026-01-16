@@ -431,6 +431,32 @@ Output format:
         if not isinstance(query_analysis, str):
             query_analysis = str(query_analysis) if query_analysis else ""
         
+        # Check for termination signals from tools BEFORE calling LLM
+        # If any tool explicitly recommends termination, respect that decision
+        actions = memory.get_actions(llm_safe=True)
+        for action in actions:
+            result = action.get('result', {})
+            if isinstance(result, dict):
+                # Check for termination_recommended field
+                if result.get('termination_recommended', False):
+                    termination_reason = result.get('termination_reason', '')
+                    summary = result.get('summary', '')
+                    tool_name = action.get('tool_name', 'Unknown Tool')
+                    
+                    # Build analysis message explaining why termination is recommended
+                    analysis = (
+                        f"**Tool Termination Signal Detected:**\n\n"
+                        f"Tool '{tool_name}' has explicitly recommended termination because the analysis results "
+                        f"cannot answer the query requirements.\n\n"
+                        f"**Reason:**\n{termination_reason}\n\n"
+                        f"**Tool Summary:**\n{summary}\n\n"
+                        f"**Recommendation:** Terminate analysis and inform user about the limitations. "
+                        f"This is not an error, but a signal that the current data/configuration cannot answer the query."
+                    )
+                    
+                    # Return stop signal immediately
+                    return MemoryVerification(analysis=analysis, stop_signal=True)
+        
         image_info = self.get_image_info(image) if not bytes_mode else {}
         
         prompt = f"""Verify if the following steps contain sufficient information to answer the query.
