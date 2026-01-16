@@ -401,7 +401,17 @@ Output format:
             last_action = actions[-1]
             last_result = last_action.get('result', {})
             if isinstance(last_result, dict):
+                # If last tool declares no required_next_tools and can_terminate_after_chain, prevent further tool selection
                 required_next = last_result.get('required_next_tools', [])
+                can_terminate = last_result.get('can_terminate_after_chain', False)
+                
+                if not required_next and can_terminate:
+                    # Tool chain is complete, prevent further tool selection
+                    # Return None to signal completion (this will be handled by the caller)
+                    logger.info(f"Tool chain complete after {last_action.get('tool_name', 'Unknown')}, preventing further tool selection")
+                    # Note: We can't return None here as it would break the flow
+                    # Instead, we'll let verificate_memory handle termination
+                
                 if required_next:
                     # Find the first required tool that hasn't been used
                     for req_tool in required_next:
@@ -530,12 +540,20 @@ CRITICAL: Understand the query type and verify ONLY what is explicitly asked:
 - If query asks "compare" → Verify that comparison analysis is complete → STOP if complete
 - DO NOT require information beyond what is explicitly asked in the query
 
+CRITICAL: Tool Chain Completion Rules:
+- If Analysis_Visualizer_Tool has been executed → The analysis pipeline is COMPLETE → STOP
+- Analysis_Visualizer_Tool is the final step in the cell state analysis pipeline (Segmentation → Cropping → Cell_State_Analyzer → Analysis_Visualizer)
+- After Analysis_Visualizer_Tool completes, no further tools are needed for the analysis workflow
+- DO NOT re-run Cell_State_Analyzer after Analysis_Visualizer_Tool has completed
+
 CRITICAL CHECKLIST FOR STOPPING:
 - Has the MAIN query been answered EXACTLY as asked? If yes, STOP immediately.
 - For "how many cells" queries: If cell count is available (from segmentation), STOP.
 - For "what cell states" queries: If cell state analysis (clustering + visualization) is complete, STOP.
+- If Analysis_Visualizer_Tool has been executed → STOP (pipeline complete)
 - Are there analysis results, visualizations, counts, or statistics that DIRECTLY answer the query? If yes, STOP.
 - DO NOT continue just because there are unused tools available.
+- DO NOT re-run tools that have already completed their workflow.
 
 Determine if the query can be answered with the information available, or if more steps are needed."""
         

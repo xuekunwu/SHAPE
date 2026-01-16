@@ -718,7 +718,9 @@ class Analysis_Visualizer_Tool(BaseTool):
             "num_clusters": adata.obs[cluster_key].nunique() if cluster_key in adata.obs else 0,
             "cluster_key": cluster_key,
             "cluster_statistics": cluster_stats,
-            "morphological_patterns": {k: v.get('morphological_pattern', '') for k, v in cluster_stats.items() if 'morphological_pattern' in v}
+            "morphological_patterns": {k: v.get('morphological_pattern', '') for k, v in cluster_stats.items() if 'morphological_pattern' in v},
+            "required_next_tools": [],  # No further tools required - analysis pipeline is complete
+            "can_terminate_after_chain": True  # Tool chain is complete, can terminate after this
         }
     
     def _create_publication_umap_by_cluster(self, adata, cluster_key: str, resolution: float,
@@ -1455,7 +1457,9 @@ class Analysis_Visualizer_Tool(BaseTool):
                         "std": float(np.std(v)) if isinstance(v, list) else None,
                         "n": len(v) if isinstance(v, list) else 1
                     } for group, v in data_by_group.items()
-                }
+                },
+                "required_next_tools": [],  # No further tools required - analysis pipeline is complete
+                "can_terminate_after_chain": True  # Tool chain is complete, can terminate after this
             }
             
             return result
