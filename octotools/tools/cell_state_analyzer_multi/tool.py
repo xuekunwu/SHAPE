@@ -508,14 +508,46 @@ class Cell_State_Analyzer_Multi_Tool(BaseTool):
         adata.write(adata_path)
         
         # Generate summary based on analysis type
+        # Check if results are sufficient to answer group comparison queries
+        insufficient_for_comparison = False
+        comparison_limitations = []
+        termination_recommended = False
+        termination_reason = None
+        
+        if is_single_group:
+            insufficient_for_comparison = True
+            comparison_limitations.append("All cells are labeled as 'default' - no group labels available for comparison")
+            # If query requires group comparison, recommend termination
+            termination_recommended = True
+            termination_reason = (
+                "**Cannot perform group comparison analysis:** All cells are in a single group ('default'). "
+                "Group comparison queries cannot be answered with the current data.\n\n"
+                "**Recommendation:** Terminate analysis and inform user that group labels are required for comparison queries.\n\n"
+                "**Solution:** Provide treatment/group labels when uploading images to enable group comparison analysis."
+            )
+        
+        if num_crops < 10:
+            insufficient_for_comparison = True
+            comparison_limitations.append(f"Very small sample size ({num_crops} cells) - may be insufficient for robust statistical comparisons")
+        
+        if use_zero_shot and not history:
+            comparison_limitations.append("Zero-shot inference mode (no training) - features may not be optimal for comparison")
+        
         if is_single_group:
             summary = f"Single-group analysis completed. {num_crops} cells analyzed. "
             summary += f"{len(history)} epochs trained" if history else "Zero-shot inference (no training)"
-            summary += ". Group comparison not available (all cells in single group)."
+            summary += "\n\n⚠️ **Limitations for Group Comparison Queries:**\n"
+            summary += "- All cells are in a single group ('default') - group comparison analysis cannot be performed\n"
+            summary += "- To enable group comparison, provide treatment/group labels when uploading images\n"
+            summary += "- Current analysis provides single-group clustering and UMAP visualization only"
+            if termination_recommended:
+                summary += f"\n\n🛑 **Termination Recommendation:**\n{termination_reason}"
         else:
             summary = f"Multi-group analysis completed. {num_crops} cells across {len(unique_groups)} groups. "
             summary += f"{len(history)} epochs trained" if history else "Zero-shot inference (no training)"
             summary += f". Groups: {', '.join(sorted(unique_groups))}"
+            if comparison_limitations:
+                summary += "\n\n⚠️ **Note:** " + "; ".join(comparison_limitations)
         
         return {
             "summary": summary,
@@ -529,7 +561,11 @@ class Cell_State_Analyzer_Multi_Tool(BaseTool):
             "cluster_resolution": cluster_resolution,
             "analysis_type": "cell_state_analysis",
             "num_groups": len(unique_groups),
-            "groups": sorted(unique_groups) if not is_single_group else ["default"]
+            "groups": sorted(unique_groups) if not is_single_group else ["default"],
+            "insufficient_for_comparison": insufficient_for_comparison,
+            "comparison_limitations": comparison_limitations if comparison_limitations else None,
+            "termination_recommended": termination_recommended,
+            "termination_reason": termination_reason
         }
 
 
