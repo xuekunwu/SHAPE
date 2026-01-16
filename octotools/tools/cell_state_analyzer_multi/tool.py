@@ -142,7 +142,7 @@ class MultiChannelTransform(nn.Module):
 
 # ====================== Model ======================
 class DinoV3Projector(nn.Module):
-    def __init__(self, backbone_name="dinov3_vits16", proj_dim=256, in_channels=None,
+    def __init__(self, backbone_name="dinov3_vitb16", proj_dim=256, in_channels=None,
                  freeze_patch_embed=False, freeze_blocks=0):
         super().__init__()
         if in_channels is None:
@@ -422,7 +422,7 @@ class Cell_State_Analyzer_Multi_Tool(BaseTool):
         
         # Initialize model with detected channels
         model = DinoV3Projector(
-            backbone_name="dinov3_vits16",
+            backbone_name="dinov3_vitb16",
             proj_dim=256,
             in_channels=detected_channels,
             freeze_patch_embed=freeze_patch_embed,
