@@ -564,8 +564,9 @@ class Cell_State_Analyzer_Multi_Tool(BaseTool):
             "groups": sorted(unique_groups) if not is_single_group else ["default"],
             "insufficient_for_comparison": insufficient_for_comparison,
             "comparison_limitations": comparison_limitations if comparison_limitations else None,
-            "termination_recommended": termination_recommended,
-            "termination_reason": termination_reason
+            "can_terminate_after_chain": termination_recommended,  # Can terminate after tool chain completes
+            "termination_reason": termination_reason,
+            "required_next_tools": ["Analysis_Visualizer_Tool"]  # This tool requires Analysis_Visualizer_Tool to complete the workflow
         }
 
 

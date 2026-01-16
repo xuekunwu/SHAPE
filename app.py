@@ -1077,24 +1077,22 @@ def _collect_visual_outputs(result, visual_outputs_list, downloadable_files_list
             if is_multi_channel:
                 # Skip splitting - tools should create multi_channel_ visualizations if needed
                 continue
-            
-            # Regular image loading (non-multi-channel TIFF or other formats)
-            # Use unified ImageProcessor for consistent loading
-            image = ImageProcessor.load_for_display(file_path)
-            if image is None:
-                continue
-            
-            if image.size[0] == 0 or image.size[1] == 0:
-                continue
-            
-            # Validate image data
-            try:
-                img_array = np.array(image)
-                if img_array.size == 0 or np.isnan(img_array).any():
+            else:
+                # Regular image loading (non-multi-channel TIFF or other formats)
+                try:
+                    image = Image.open(file_path)
+                    if image.size[0] == 0 or image.size[1] == 0:
+                        continue
+                    
+                    if image.mode not in ['RGB', 'L', 'RGBA']:
+                        image = image.convert('RGB')
+                    
+                    img_array = np.array(image)
+                    if img_array.size == 0 or np.isnan(img_array).any():
+                        continue
+                except Exception as e:
+                    print(f"Warning: Failed to load image {file_path}: {e}")
                     continue
-            except Exception as e:
-                print(f"Warning: Failed to validate image {file_path}: {e}")
-                continue
                 
                 # Extract image identifier from filename (consistent naming: tool_type_imageid.ext)
                 # Patterns: nuclei_overlay_<image_id>.png, nuclei_mask_<image_id>.png, <image_id>_default_processed.png

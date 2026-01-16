@@ -391,6 +391,36 @@ Output format:
             result = next_step
             self.last_usage = {}
         
+        # Post-LLM enforcement: Check tool-declared dependencies
+        # Intelligent approach: Tools declare their required_next_tools, Planner enforces them
+        actions = memory.get_actions(llm_safe=True)
+        used_tools = [a.get('tool_name', '') for a in actions if 'tool_name' in a]
+        
+        # Check the last tool's result for required_next_tools
+        if actions:
+            last_action = actions[-1]
+            last_result = last_action.get('result', {})
+            if isinstance(last_result, dict):
+                required_next = last_result.get('required_next_tools', [])
+                if required_next:
+                    # Find the first required tool that hasn't been used
+                    for req_tool in required_next:
+                        if req_tool not in used_tools:
+                            # Force the required tool as next step
+                            if hasattr(result, 'tool_name'):
+                                if result.tool_name != req_tool:
+                                    logger.info(f"Enforcing {req_tool} as required by {last_action.get('tool_name', 'Unknown')}")
+                                    result.tool_name = req_tool
+                                    result.sub_goal = f"Complete workflow by running {req_tool} as required by previous tool"
+                                    result.justification = f"{req_tool} is required by {last_action.get('tool_name', 'Unknown')} to complete the analysis workflow"
+                            elif isinstance(result, dict):
+                                if result.get('tool_name') != req_tool:
+                                    logger.info(f"Enforcing {req_tool} as required by {last_action.get('tool_name', 'Unknown')}")
+                                    result['tool_name'] = req_tool
+                                    result['sub_goal'] = f"Complete workflow by running {req_tool} as required by previous tool"
+                                    result['justification'] = f"{req_tool} is required by {last_action.get('tool_name', 'Unknown')} to complete the analysis workflow"
+                            break  # Only enforce the first uncompleted required tool
+        
         return result
     
     def _format_tools_list(self, available_tools: List[str], used_tools: List[str]) -> str:
@@ -432,30 +462,53 @@ Output format:
             query_analysis = str(query_analysis) if query_analysis else ""
         
         # Check for termination signals from tools BEFORE calling LLM
-        # If any tool explicitly recommends termination, respect that decision
+        # Intelligent approach: Tools declare their dependencies via required_next_tools
+        # Only allow termination after all required_next_tools are completed
         actions = memory.get_actions(llm_safe=True)
+        used_tools = [a.get('tool_name', '') for a in actions if 'tool_name' in a]
+        
+        # Check if any tool has uncompleted required_next_tools
+        has_uncompleted_requirements = False
         for action in actions:
             result = action.get('result', {})
             if isinstance(result, dict):
-                # Check for termination_recommended field
-                if result.get('termination_recommended', False):
-                    termination_reason = result.get('termination_reason', '')
-                    summary = result.get('summary', '')
-                    tool_name = action.get('tool_name', 'Unknown Tool')
-                    
-                    # Build analysis message explaining why termination is recommended
-                    analysis = (
-                        f"**Tool Termination Signal Detected:**\n\n"
-                        f"Tool '{tool_name}' has explicitly recommended termination because the analysis results "
-                        f"cannot answer the query requirements.\n\n"
-                        f"**Reason:**\n{termination_reason}\n\n"
-                        f"**Tool Summary:**\n{summary}\n\n"
-                        f"**Recommendation:** Terminate analysis and inform user about the limitations. "
-                        f"This is not an error, but a signal that the current data/configuration cannot answer the query."
-                    )
-                    
-                    # Return stop signal immediately
-                    return MemoryVerification(analysis=analysis, stop_signal=True)
+                required_next = result.get('required_next_tools', [])
+                if required_next:
+                    # Check if all required tools have been used
+                    for req_tool in required_next:
+                        if req_tool not in used_tools:
+                            has_uncompleted_requirements = True
+                            break
+                    if has_uncompleted_requirements:
+                        break
+        
+        # If there are uncompleted required_next_tools, don't check termination yet
+        if not has_uncompleted_requirements:
+            # Check for termination signals only after all required_next_tools are completed
+            for action in actions:
+                result = action.get('result', {})
+                if isinstance(result, dict):
+                    # Check for can_terminate_after_chain field (new name, more semantic)
+                    # Also support legacy termination_recommended for backward compatibility
+                    can_terminate = result.get('can_terminate_after_chain', False) or result.get('termination_recommended', False)
+                    if can_terminate:
+                        termination_reason = result.get('termination_reason', '')
+                        summary = result.get('summary', '')
+                        tool_name = action.get('tool_name', 'Unknown Tool')
+                        
+                        # Build analysis message explaining why termination is recommended
+                        analysis = (
+                            f"**Tool Termination Signal Detected:**\n\n"
+                            f"Tool '{tool_name}' has indicated that after completing the tool chain, "
+                            f"the analysis results cannot fully answer the query requirements.\n\n"
+                            f"**Reason:**\n{termination_reason}\n\n"
+                            f"**Tool Summary:**\n{summary}\n\n"
+                            f"**Recommendation:** Terminate analysis and inform user about the limitations. "
+                            f"This is not an error, but a signal that the current data/configuration cannot answer the query."
+                        )
+                        
+                        # Return stop signal
+                        return MemoryVerification(analysis=analysis, stop_signal=True)
         
         image_info = self.get_image_info(image) if not bytes_mode else {}
         
@@ -545,16 +598,28 @@ Instructions:
 2. Consider results from each tool execution
 3. Incorporate relevant information from memory
 4. Generate a well-organized, step-by-step final output
+5. CRITICAL: The Summary section always provide a summary even if results are incomplete
 
 Output Structure:
 1. Summary: Brief overview of query and main findings
+   - If results are complete: summarize the key findings
+   - If results are incomplete: summarize what was found and what is missing
+   - Always include morphological features if available (area, perimeter, circularity, etc.)
 2. Detailed Analysis: Step-by-step process breakdown
 3. Key Findings: Most important discoveries
+   - Include morphological measurements if available
+   - Include statistical comparisons if performed
 4. Answer to Query: Direct, clear answer to original question
 5. Additional Insights: Relevant information beyond direct answer
 6. Conclusion: Summary and potential next steps
 
-Provide a clear, complete answer to the query based on the analysis results."""
+CRITICAL: The Summary section MUST NOT be empty. Even if results are incomplete, provide a summary of:
+- What analysis was performed
+- What morphological features were extracted (if any)
+- What statistical comparisons were made (if any)
+- What limitations exist (if any)
+
+Provide a clear answer to the query based on the analysis results."""
         
         input_data = [prompt]
         if image_info and 'image_path' in image_info:
