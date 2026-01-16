@@ -403,6 +403,8 @@ class Cell_State_Analyzer_Multi_Tool(BaseTool):
         
         # Prepare groups
         groups = [m.get('group', 'default') if isinstance(m, dict) else 'default' for m in cell_metadata]
+        unique_groups = set(groups)
+        is_single_group = len(unique_groups) == 1
         
         # Create dataset and detect channels from first image
         eval_dataset = MultiChannelCellCropDataset(
@@ -477,8 +479,18 @@ class Cell_State_Analyzer_Multi_Tool(BaseTool):
         adata_path = os.path.join(output_dir, "cell_state_analyzed.h5ad")
         adata.write(adata_path)
         
+        # Generate summary based on analysis type
+        if is_single_group:
+            summary = f"Single-group analysis completed. {num_crops} cells analyzed. "
+            summary += f"{len(history)} epochs trained" if history else "Zero-shot inference (no training)"
+            summary += ". Group comparison not available (all cells in single group)."
+        else:
+            summary = f"Multi-group analysis completed. {num_crops} cells across {len(unique_groups)} groups. "
+            summary += f"{len(history)} epochs trained" if history else "Zero-shot inference (no training)"
+            summary += f". Groups: {', '.join(sorted(unique_groups))}"
+        
         return {
-            "summary": f"Analysis completed. {num_crops} cells, {len(history)} epochs" if history else f"Zero-shot: {num_crops} cells",
+            "summary": summary,
             "cell_count": num_crops,
             "mode": "training" if not use_zero_shot else "zero-shot",
             "epochs_trained": len(history),
@@ -487,7 +499,9 @@ class Cell_State_Analyzer_Multi_Tool(BaseTool):
             "deliverables": [adata_path] + ([loss_path] if history and loss_path else []),
             "cluster_key": cluster_key,
             "cluster_resolution": cluster_resolution,
-            "analysis_type": "cell_state_analysis"
+            "analysis_type": "cell_state_analysis",
+            "num_groups": len(unique_groups),
+            "groups": sorted(unique_groups) if not is_single_group else ["default"]
         }
 
 

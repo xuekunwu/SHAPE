@@ -445,9 +445,9 @@ class Cell_Segmenter_Tool(BaseTool):
             return {
                 "summary": f"{n_cells} cells identified and segmented successfully.",
                 "cell_count": n_cells,
-                "visual_outputs": [output_path, mask_path],
+                "visual_outputs": [output_path],  # Only include overlay image for visual display (not mask file)
                 "deliverables": [output_path],  # Add overlay to deliverables for better collection
-                "mask_path": mask_path,  # Explicitly include mask_path for downstream tools
+                "mask_path": mask_path,  # Explicitly include mask_path for downstream tools (not for visual display)
                 "overlay_path": output_path,  # Explicit overlay_path key for collection
                 "output_path": output_path,  # Explicit output_path key for collection
                 "image_id": image_identifier,  # Add image_id for matching in downstream tools

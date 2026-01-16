@@ -28,10 +28,8 @@ logger = logging.getLogger(__name__)
 
 try:
     from huggingface_hub import hf_hub_download
-    HF_HUB_AVAILABLE = True
 except ImportError:
-    HF_HUB_AVAILABLE = False
-    logger.warning("huggingface_hub not available. Some features may not work.")
+    raise ImportError("huggingface_hub is required for model weight download")
 
 try:
     import anndata as ad
@@ -107,63 +105,54 @@ class SingleChannelCellCropDataset(Dataset):
 
 
 class DinoV3Projector(nn.Module):
-    """DINOv3 model with projection head for contrastive learning. Uses dinov3_vits16 (384 dim)."""
-    def __init__(self, backbone_name="dinov3_vits16", proj_dim=256):
+    """DINOv3 model with projection head for contrastive learning. Uses same loading strategy as multi-channel version."""
+    def __init__(self, backbone_name="dinov3_vitb16", proj_dim=256):
         super().__init__()
         
-        # Load DINOv3 backbone from Hugging Face Hub
-        from transformers import AutoModel
-        hf_token = os.getenv("HUGGINGFACE_TOKEN")
-        architecture_repo_id = "facebook/dinov3-small"  # Small model for ViT-S/16 (384 dim)
-        
-        # Download and load weights from Hugging Face Hub
+        # Download weights from Hugging Face Hub
         custom_repo_id = "5xuekun/dinov3_vits16"
         model_filename = "dinov3_vitb16_pretrain_lvd1689m-73cec8be.pth"
+        hf_token = os.getenv("HUGGINGFACE_TOKEN")
         
-        if HF_HUB_AVAILABLE:
-            weights_path = hf_hub_download(
-                repo_id=custom_repo_id,
-                filename=model_filename,
-                token=hf_token
-            )
-            state_dict = torch.load(weights_path, map_location="cpu")
-            if "teacher" in state_dict:
-                state_dict = state_dict["teacher"]
-        else:
-            raise ImportError("huggingface_hub not available")
-        
-        # Load model architecture and weights
-        self.backbone = AutoModel.from_pretrained(
-            architecture_repo_id,
-            token=hf_token,
-            trust_remote_code=True
+        logger.info(f"Downloading weights from Hugging Face Hub: {custom_repo_id}/{model_filename}")
+        ckpt_path = hf_hub_download(
+            repo_id=custom_repo_id,
+            filename=model_filename,
+            token=hf_token
         )
+        
+        # Load model architecture from GitHub (facebookresearch/dinov3 contains hubconf.py)
+        hub_repo = "facebookresearch/dinov3"
+        logger.info(f"Loading model architecture from GitHub: {hub_repo}")
+        self.backbone = torch.hub.load(hub_repo, backbone_name, pretrained=False, source="github")
+        
+        # Load weights
+        logger.info(f"Loading weights from local path: {ckpt_path}")
+        state_dict = torch.load(ckpt_path, map_location="cpu")
+        if "teacher" in state_dict:
+            state_dict = state_dict["teacher"]
         self.backbone.load_state_dict(state_dict, strict=False)
         
-        # Force use dinov3_vits16 (384 dim) - architecture is dinov2-small
-        feat_dim = 384  # dinov3_vits16 / dinov2-small uses 384 dimensions
+        # Projection head - use feat_dim_map like multi-channel version
+        feat_dim_map = {
+            "dinov3_vits16": 384,
+            "dinov3_vits16plus": 384,
+            "dinov3_vitb16": 768,
+            "dinov3_vitl16": 1024,
+            "dinov3_vith16plus": 1280,
+            "dinov3_vit7b16": 4096,
+        }
+        feat_dim = feat_dim_map[backbone_name]
         
         self.projector = nn.Sequential(
-            nn.Linear(feat_dim, 512),
-            nn.ReLU(inplace=True),
-            nn.Linear(512, proj_dim)
+            nn.Linear(feat_dim, feat_dim),
+            nn.GELU(),
+            nn.Linear(feat_dim, proj_dim),
         )
     
     def forward(self, x):
-        """Forward pass: extract CLS token and project."""
-        out = self.backbone(x)
-        
-        # Extract CLS token from backbone output
-        if isinstance(out, torch.Tensor):
-            # If tensor, check if it's [B, N, D] or [B, D]
-            z = out[:, 0, :] if out.dim() == 3 else out
-        elif hasattr(out, 'last_hidden_state'):
-            z = out.last_hidden_state[:, 0]
-        else:
-            # Fallback: assume it's already CLS token
-            z = out
-        
-        z = self.projector(z)
+        feats = self.backbone(x)  # CLS token
+        z = self.projector(feats)
         return F.normalize(z, dim=-1)
 
 
@@ -238,35 +227,28 @@ class Cell_State_Analyzer_Single_Tool(BaseTool):
             transforms.Normalize([0.4636, 0.5032, 0.5822], [0.2483, 0.2660, 0.2907])
         ])
     
-    def _extract_features(self, model, dataloader, device):
-        """Extract CLS features from the model backbone."""
+    def _extract_features(self, model, dataloader):
+        """Extract CLS features from model."""
         model.eval()
-        feats, img_names, groups = [], [], []
-        has_proj = hasattr(model, "projector")
-        if has_proj:
-            proj_backup = model.projector
-            model.projector = torch.nn.Identity()
+        feats, names, groups = [], [], []
+        proj_backup = model.projector
+        model.projector = nn.Identity()
         
         with torch.no_grad():
-            for v1, _, names, grps in tqdm(dataloader, desc="Extracting CLS features"):
-                v1 = v1.to(device)
-                out = model.backbone(v1)
+            for v1, _, n, g in tqdm(dataloader, desc="Extracting features"):
+                v1 = v1.to(self.device)
+                
+                # Forward through backbone
+                backbone_output = model.backbone(v1)
                 
                 # Extract CLS token
-                if isinstance(out, torch.Tensor):
-                    out = out[:, 0, :] if out.dim() == 3 else out
-                elif hasattr(out, 'last_hidden_state'):
-                    out = out.last_hidden_state[:, 0]
-                
+                out = backbone_output  # Assuming backbone directly returns CLS token
                 feats.append(out.cpu())
-                img_names.extend(names)
-                groups.extend(grps)
+                names.extend(n)
+                groups.extend(g)
         
-        if has_proj:
-            model.projector = proj_backup
-        feats_all = torch.cat(feats, dim=0).numpy()
-        logger.info(f"✅ Extracted CLS features: {feats_all.shape}")
-        return feats_all, img_names, groups
+        model.projector = proj_backup
+        return torch.cat(feats, dim=0).numpy(), names, groups
     
     def _train_model(self, model, train_loader, max_epochs, early_stop_loss, learning_rate, output_dir, training_logs=None, patience=5):
         """Train the model with contrastive learning."""
@@ -414,8 +396,8 @@ class Cell_State_Analyzer_Single_Tool(BaseTool):
         eval_dataset = SingleChannelCellCropDataset(cell_crops, groups, transform=eval_transform)
         eval_loader = DataLoader(eval_dataset, batch_size=min(batch_size, num_crops), shuffle=False, num_workers=0)
         
-        # Initialize model - uses dinov3_vits16 (384 dim)
-        model = DinoV3Projector(backbone_name="dinov3_vits16", proj_dim=256).to(self.device)
+        # Initialize model - uses dinov3_vitb16 (768 dim) to match weights
+        model = DinoV3Projector(backbone_name="dinov3_vitb16", proj_dim=256).to(self.device)
         
         # Train or zero-shot
         if use_zero_shot:
@@ -443,7 +425,7 @@ class Cell_State_Analyzer_Single_Tool(BaseTool):
                 plt.close()
         
         # Extract features
-        feats, names, groups_extracted = self._extract_features(model, eval_loader, self.device)
+        feats, names, groups_extracted = self._extract_features(model, eval_loader)
         
         # Create AnnData
         if not ANNDATA_AVAILABLE:

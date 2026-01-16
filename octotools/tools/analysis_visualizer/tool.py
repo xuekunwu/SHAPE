@@ -1435,6 +1435,10 @@ class Analysis_Visualizer_Tool(BaseTool):
             else:
                 raise ValueError(f"Unsupported chart type: {chart_type}")
             
+            # Ensure output_path is in visual_outputs (for compatibility with _collect_visual_outputs)
+            if output_path and output_path not in visual_outputs:
+                visual_outputs.append(output_path)
+            
             # Prepare result
             result = {
                 "summary": f"Successfully created {chart_type} chart comparing {comparison_metric} across {n_groups} groups",
@@ -1443,7 +1447,7 @@ class Analysis_Visualizer_Tool(BaseTool):
                 "groups": groups,
                 "n_groups": n_groups,
                 "visual_outputs": visual_outputs,
-                "output_path": output_path,
+                "output_path": output_path,  # Also include as separate key for compatibility
                 "statistical_test": stats_result if stats_result else {"message": "No statistical test performed"},
                 "data_summary": {
                     group: {
