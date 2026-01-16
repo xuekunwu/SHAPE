@@ -359,6 +359,8 @@ class Cell_State_Analyzer_Multi_Tool(BaseTool):
                 logger.warning(f"Error reading {f}: {e}")
         
         # Collect all crops and metadata
+        # Filter to only include TIFF format files (multi-channel crops from Single_Cell_Cropper_Tool)
+        # Exclude PNG/JPEG files (overlays, visualizations, or single-channel crops)
         all_crops, all_metadata, skipped = [], [], []
         for img_id, data in metadata_by_image.items():
             if data.get('execution_status') == 'no_crops_generated':
@@ -369,12 +371,38 @@ class Cell_State_Analyzer_Multi_Tool(BaseTool):
             metadata = data.get('cell_metadata', [])
             group = data.get('group', 'default')
             
-            all_crops.extend(crops)
-            for m in metadata:
-                if isinstance(m, dict):
+            # Filter crops to only include TIFF format files
+            tiff_crops = []
+            tiff_indices = []
+            for idx, crop_path in enumerate(crops):
+                if isinstance(crop_path, str):
+                    crop_path_lower = crop_path.lower()
+                    # Only include TIFF format files (multi-channel crops)
+                    if crop_path_lower.endswith('.tif') or crop_path_lower.endswith('.tiff'):
+                        tiff_crops.append(crop_path)
+                        tiff_indices.append(idx)
+            
+            if not tiff_crops:
+                logger.warning(f"No TIFF format crops found for image {img_id}. Skipping.")
+                skipped.append({'image': img_id, 'reason': 'no_tiff_crops'})
+                continue
+            
+            all_crops.extend(tiff_crops)
+            # Match metadata to filtered crops
+            filtered_metadata = []
+            for idx in tiff_indices:
+                if idx < len(metadata) and isinstance(metadata[idx], dict):
+                    m = metadata[idx].copy()
                     m.setdefault('group', group)
                     m.setdefault('image_name', img_id)
-            all_metadata.extend(metadata if metadata else [{'group': group, 'image_name': img_id}] * len(crops))
+                    filtered_metadata.append(m)
+                else:
+                    filtered_metadata.append({'group': group, 'image_name': img_id})
+            
+            all_metadata.extend(filtered_metadata)
+        
+        if not all_crops:
+            raise ValueError("No TIFF format crop files found in metadata. Cell_State_Analyzer_Multi_Tool requires multi-channel TIFF crops from Single_Cell_Cropper_Tool.")
         
         return all_crops, all_metadata, skipped
     

@@ -343,6 +343,7 @@ class Cell_State_Analyzer_Single_Tool(BaseTool):
                 logger.warning(f"Error reading {f}: {e}")
         
         # Merge all crops
+        # Filter to exclude overlay and visualization files (only include actual crop files)
         all_crops, all_metadata, skipped = [], [], []
         for img_id, data in metadata_by_image.items():
             if data.get('execution_status') == 'no_crops_generated':
@@ -353,15 +354,45 @@ class Cell_State_Analyzer_Single_Tool(BaseTool):
             metadata = data.get('cell_metadata', [])
             group = data.get('group', 'default')
             
-            all_crops.extend(crops)
-            for m in metadata:
-                if isinstance(m, dict):
+            # Filter crops to exclude overlay and visualization files
+            # Crop files should contain 'crop' in filename and not contain 'overlay', 'viz', 'mask_viz'
+            filtered_crops = []
+            filtered_indices = []
+            for idx, crop_path in enumerate(crops):
+                if isinstance(crop_path, str):
+                    crop_filename_lower = os.path.basename(crop_path).lower()
+                    # Exclude overlay, visualization, and mask files
+                    if ('overlay' in crop_filename_lower or 
+                        'viz' in crop_filename_lower or 
+                        'mask_viz' in crop_filename_lower or
+                        'summary' in crop_filename_lower):
+                        continue
+                    # Include files that contain 'crop' in filename (actual crop files)
+                    if 'crop' in crop_filename_lower:
+                        filtered_crops.append(crop_path)
+                        filtered_indices.append(idx)
+            
+            if not filtered_crops:
+                logger.warning(f"No valid crop files found for image {img_id} (all files appear to be overlays/visualizations). Skipping.")
+                skipped.append({'image': img_id, 'reason': 'no_valid_crops'})
+                continue
+            
+            all_crops.extend(filtered_crops)
+            # Match metadata to filtered crops
+            filtered_metadata = []
+            for idx in filtered_indices:
+                if idx < len(metadata) and isinstance(metadata[idx], dict):
+                    m = metadata[idx].copy()
                     m.setdefault('group', group)
                     m.setdefault('image_name', img_id)
-            all_metadata.extend(metadata if metadata else [{'group': group, 'image_name': img_id}] * len(crops))
+                    filtered_metadata.append(m)
+                else:
+                    filtered_metadata.append({'group': group, 'image_name': img_id})
+            
+            all_metadata.extend(filtered_metadata)
         
         if not all_crops:
-            raise ValueError(f"No cell crops found in metadata files")
+            raise ValueError(f"No valid crop files found in metadata files (only overlays/visualizations found). Cell_State_Analyzer_Single_Tool requires actual crop files from Single_Cell_Cropper_Tool.")
         
         return all_crops, all_metadata, skipped
     
