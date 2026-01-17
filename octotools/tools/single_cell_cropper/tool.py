@@ -240,9 +240,27 @@ class Single_Cell_Cropper_Tool(BaseTool):
                     else:
                         print(f"❌ Alternative path also does not exist: {alt_mask_path}")
             
-            # Prioritize tifffile for .tif files to preserve 16-bit label values
+            # Load mask based on file format
+            # Priority: .npy (NumPy array, preserves original data) > .tif/.tiff (16-bit TIFF) > other formats
             mask_path_lower = nuclei_mask.lower()
-            if mask_path_lower.endswith('.tif') or mask_path_lower.endswith('.tiff'):
+            if mask_path_lower.endswith('.npy'):
+                # Load .npy format (preferred for analysis, preserves original array data)
+                try:
+                    mask = np.load(nuclei_mask)
+                    # Ensure mask is 2D
+                    if len(mask.shape) > 2:
+                        mask = mask.squeeze()
+                    # Preserve original dtype if uint8/uint16, otherwise convert to uint16
+                    if mask.dtype not in [np.uint8, np.uint16]:
+                        mask = mask.astype(np.uint16)
+                    elif mask.dtype == np.uint8:
+                        # Convert uint8 to uint16 for consistency (preserves all label values)
+                        mask = mask.astype(np.uint16)
+                except Exception as e:
+                    print(f"❌ Failed to load mask with np.load: {e}")
+                    mask = None
+            elif mask_path_lower.endswith('.tif') or mask_path_lower.endswith('.tiff'):
+                # Load .tif/.tiff format (16-bit TIFF, preserves label values up to 65535)
                 try:
                     mask = tifffile.imread(nuclei_mask)
                     # Ensure mask is 2D and convert to appropriate dtype
