@@ -242,47 +242,29 @@ class Single_Cell_Cropper_Tool(BaseTool):
             
             # Load mask based on file format
             # Priority: .npy (NumPy array, preserves original data) > .tif/.tiff (16-bit TIFF) > other formats
+            mask = None
             mask_path_lower = nuclei_mask.lower()
+            
             if mask_path_lower.endswith('.npy'):
-                # Load .npy format (preferred for analysis, preserves original array data)
-                try:
-                    mask = np.load(nuclei_mask)
-                    # Ensure mask is 2D
-                    if len(mask.shape) > 2:
-                        mask = mask.squeeze()
-                    # Preserve original dtype if uint8/uint16, otherwise convert to uint16
-                    if mask.dtype not in [np.uint8, np.uint16]:
-                        mask = mask.astype(np.uint16)
-                    elif mask.dtype == np.uint8:
-                        # Convert uint8 to uint16 for consistency (preserves all label values)
-                        mask = mask.astype(np.uint16)
-                except Exception as e:
-                    print(f"❌ Failed to load mask with np.load: {e}")
-                    mask = None
+                # .npy format (preferred, preserves original array data)
+                mask = np.load(nuclei_mask)
             elif mask_path_lower.endswith('.tif') or mask_path_lower.endswith('.tiff'):
-                # Load .tif/.tiff format (16-bit TIFF, preserves label values up to 65535)
+                # .tif/.tiff format (16-bit TIFF, preserves label values up to 65535)
                 try:
                     mask = tifffile.imread(nuclei_mask)
-                    # Ensure mask is 2D and convert to appropriate dtype
-                    if len(mask.shape) > 2:
-                        mask = mask.squeeze()
-                    # Preserve uint16 for label masks (>255 labels), convert others to uint16 for consistency
-                    if mask.dtype not in [np.uint8, np.uint16]:
-                        mask = mask.astype(np.uint16)
-                    elif mask.dtype == np.uint8:
-                        # Convert uint8 to uint16 to preserve all values (backward compatibility)
-                        mask = mask.astype(np.uint16)
                 except Exception as e:
                     print(f"Warning: Failed to load mask with tifffile: {e}, trying cv2")
                     mask = cv2.imread(nuclei_mask, cv2.IMREAD_GRAYSCALE)
-                    if mask is not None:
-                        mask = mask.astype(np.uint16)  # Convert to uint16 for consistency
             else:
-                # For PNG/other formats, use cv2 (may lose labels >255 in old masks)
-                # Convert to uint16 for consistency with label mask handling
+                # PNG/other formats (may lose labels >255 in old masks)
                 mask = cv2.imread(nuclei_mask, cv2.IMREAD_GRAYSCALE)
-                if mask is not None:
-                    mask = mask.astype(np.uint16)  # Convert to uint16 to handle any labels up to 65535
+            
+            # Unified post-processing: ensure 2D array and convert to uint16
+            if mask is not None:
+                mask = np.asarray(mask)
+                if len(mask.shape) > 2:
+                    mask = mask.squeeze()
+                mask = mask.astype(np.uint16)  # Convert to uint16 for consistency (supports up to 65535 labels)
             
             if mask is None:
                 metadata_path = save_error_metadata("mask_load_failed", f"Failed to load segmentation mask: {nuclei_mask}")
