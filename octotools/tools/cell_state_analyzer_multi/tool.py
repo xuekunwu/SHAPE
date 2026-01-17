@@ -325,11 +325,14 @@ class Cell_State_Analyzer_Multi_Tool(BaseTool):
             if avg_loss < best_loss:
                 best_loss = avg_loss
                 torch.save(model.state_dict(), best_path)
+                logger.info(f"🔥 New best model saved (Loss = {best_loss:.4f})")
                 no_improve = 0
             else:
                 no_improve += 1
             
-            if avg_loss <= early_stop_loss or no_improve >= patience:
+            # Early stopping: no improvement for consecutive epochs
+            if no_improve >= patience:
+                logger.info(f"✅ Early stopping: No improvement for {patience} consecutive epochs (loss did not decrease)")
                 break
             
         return history, best_path

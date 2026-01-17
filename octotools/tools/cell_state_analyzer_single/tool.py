@@ -293,12 +293,9 @@ class Cell_State_Analyzer_Single_Tool(BaseTool):
             else:
                 epochs_without_improvement += 1
             
-            if avg_loss <= early_stop_loss:
-                logger.info(f"✅ Early stopping: Loss = {avg_loss:.4f} <= {early_stop_loss}")
-                break
-            
+            # Early stopping: no improvement for consecutive epochs
             if epochs_without_improvement >= patience:
-                logger.info(f"✅ Early stopping: No improvement for {patience} epochs")
+                logger.info(f"✅ Early stopping: No improvement for {patience} consecutive epochs (loss did not decrease)")
                 break
         
         return history, best_model_path, training_logs
