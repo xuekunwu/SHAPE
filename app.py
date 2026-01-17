@@ -885,6 +885,67 @@ def _create_unified_crops_zip(per_image_results: List[Dict[str, Any]], tool_cach
         return None
 
 
+def _create_unified_masks_zip(mask_paths: List[str], tool_cache_dir: str, mask_type: str = "masks") -> Optional[str]:
+    """
+    Create a unified zip file containing all .npy mask files, organized by image_id.
+    
+    Args:
+        mask_paths: List of paths to .npy mask files
+        tool_cache_dir: Directory to save the unified zip file
+        mask_type: Type of masks (e.g., "masks", "organoid_masks", "cell_masks")
+        
+    Returns:
+        Path to unified zip file, or None if failed
+    """
+    import zipfile
+    
+    try:
+        if not mask_paths:
+            return None
+        
+        # Collect all valid mask files
+        valid_masks = []
+        for mask_path in mask_paths:
+            if mask_path and isinstance(mask_path, str) and mask_path.lower().endswith('.npy'):
+                if os.path.exists(mask_path):
+                    # Extract image_id from filename (format: {mask_type}_{image_id}.npy)
+                    filename = os.path.basename(mask_path)
+                    # Try to extract image_id from filename pattern
+                    # Example: organoid_mask_1512b4d41f084baeb671c3aedbeca026.npy
+                    parts = filename.rsplit('_', 1)
+                    if len(parts) == 2 and parts[1].endswith('.npy'):
+                        image_id = parts[1][:-4]  # Remove .npy extension
+                        zip_path = f"{image_id}/{filename}"
+                    else:
+                        # Fallback: use filename as zip path
+                        zip_path = filename
+                    valid_masks.append((mask_path, zip_path))
+        
+        if not valid_masks:
+            return None
+        
+        # Create unified zip file
+        unified_zip_path = os.path.join(tool_cache_dir, f"unified_{mask_type}.zip")
+        
+        with zipfile.ZipFile(unified_zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            # Add all mask files organized by image_id
+            for mask_path, zip_path in valid_masks:
+                zipf.write(mask_path, zip_path)
+        
+        if os.path.exists(unified_zip_path) and os.path.getsize(unified_zip_path) > 0:
+            print(f"✅ Created unified masks zip: {unified_zip_path} ({os.path.getsize(unified_zip_path)} bytes, {len(valid_masks)} masks)")
+            return unified_zip_path
+        else:
+            print("⚠️ Failed to create unified masks zip")
+            return None
+            
+    except Exception as e:
+        print(f"⚠️ Error creating unified masks zip: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+
 def _collect_visual_outputs(result, visual_outputs_list, downloadable_files_list=None):
     """
     Collect visual outputs from tool result and add to visual_outputs_list.
@@ -943,6 +1004,7 @@ def _collect_visual_outputs(result, visual_outputs_list, downloadable_files_list
                 print(f"✅ Added crops zip to downloadable files: {zip_path}")
         
         # Handle per_image structure (multi-image results) - for non-cropper tools
+        all_mask_paths = []  # Collect all .npy mask files for unified zip
         if "per_image" in result:
             for img_result in result["per_image"]:
                 if isinstance(img_result, dict):
@@ -968,12 +1030,12 @@ def _collect_visual_outputs(result, visual_outputs_list, downloadable_files_list
                     for key in ["overlay_path", "output_path"]:
                         if key in img_result:
                             add_path(img_result[key])
-                    # Collect .npy mask files for downloadable files
-                    for key in ["mask_path", "mask_npy_path"]:
+                    # Collect .npy mask files for unified zip
+                    for key in ["mask_path", "mask_npy_path", "organoid_mask_path", "cell_mask_path", "nuclei_mask_path"]:
                         if key in img_result:
                             path = img_result[key]
                             if path and isinstance(path, str) and path.lower().endswith('.npy'):
-                                add_path(path)
+                                all_mask_paths.append(path)
         else:
             # Single image result: collect from top level
             # Check deliverables first (preferred), then visual_outputs for backward compatibility
@@ -988,12 +1050,34 @@ def _collect_visual_outputs(result, visual_outputs_list, downloadable_files_list
             for key in ["overlay_path", "output_path"]:
                 if key in result:
                     add_path(result[key])
-            # Collect .npy mask files for downloadable files
-            for key in ["mask_path", "mask_npy_path"]:
+            # Collect .npy mask files for unified zip
+            for key in ["mask_path", "mask_npy_path", "organoid_mask_path", "cell_mask_path", "nuclei_mask_path"]:
                 if key in result:
                     path = result[key]
                     if path and isinstance(path, str) and path.lower().endswith('.npy'):
-                        add_path(path)
+                        all_mask_paths.append(path)
+        
+        # Create unified zip for all .npy mask files (similar to crops)
+        if all_mask_paths and downloadable_files_list is not None:
+            # Determine tool_cache_dir from first mask path
+            first_mask_path = all_mask_paths[0]
+            if os.path.exists(first_mask_path):
+                tool_cache_dir = os.path.dirname(first_mask_path)
+                # Determine mask type from filename pattern
+                first_filename = os.path.basename(first_mask_path).lower()
+                if 'organoid' in first_filename:
+                    mask_type = "organoid_masks"
+                elif 'cell' in first_filename:
+                    mask_type = "cell_masks"
+                elif 'nuclei' in first_filename:
+                    mask_type = "nuclei_masks"
+                else:
+                    mask_type = "masks"
+                
+                unified_masks_zip = _create_unified_masks_zip(all_mask_paths, tool_cache_dir, mask_type)
+                if unified_masks_zip and os.path.exists(unified_masks_zip):
+                    downloadable_files_list.append(unified_masks_zip)
+                    print(f"✅ Added unified masks zip to downloadable files: {unified_masks_zip}")
     
     # Process collected files
     for file_path in visual_output_files:
