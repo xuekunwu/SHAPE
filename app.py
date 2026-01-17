@@ -964,10 +964,16 @@ def _collect_visual_outputs(result, visual_outputs_list, downloadable_files_list
                     elif "visual_outputs" in img_result:
                         for path in img_result["visual_outputs"]:
                             add_path(path)
-                    # Collect from individual keys (exclude processed_image_path and mask_path)
+                    # Collect from individual keys (exclude processed_image_path, but include mask_path for .npy files)
                     for key in ["overlay_path", "output_path"]:
                         if key in img_result:
                             add_path(img_result[key])
+                    # Collect .npy mask files for downloadable files
+                    for key in ["mask_path", "mask_npy_path"]:
+                        if key in img_result:
+                            path = img_result[key]
+                            if path and isinstance(path, str) and path.lower().endswith('.npy'):
+                                add_path(path)
         else:
             # Single image result: collect from top level
             # Check deliverables first (preferred), then visual_outputs for backward compatibility
@@ -978,10 +984,16 @@ def _collect_visual_outputs(result, visual_outputs_list, downloadable_files_list
             elif "visual_outputs" in result:
                 for path in result["visual_outputs"]:
                     add_path(path)
-            # Also check individual keys for single results (exclude processed_image_path and mask_path)
+            # Also check individual keys for single results (exclude processed_image_path, but include mask_path for .npy files)
             for key in ["overlay_path", "output_path"]:
                 if key in result:
                     add_path(result[key])
+            # Collect .npy mask files for downloadable files
+            for key in ["mask_path", "mask_npy_path"]:
+                if key in result:
+                    path = result[key]
+                    if path and isinstance(path, str) and path.lower().endswith('.npy'):
+                        add_path(path)
     
     # Process collected files
     for file_path in visual_output_files:
@@ -998,11 +1010,13 @@ def _collect_visual_outputs(result, visual_outputs_list, downloadable_files_list
                 # Skip processed images from Image_Preprocessor_Tool
                 continue
             if "mask" in filename and "overlay" not in filename and "viz" not in filename:
-                # Skip segmentation masks from Segmenter_Tool (but keep overlay visualizations)
-                continue
+                # Skip .tif mask files from Segmenter_Tool (they are in visual_outputs for display)
+                # But allow .npy mask files (they should be in downloadable files)
+                if not filename.endswith('.npy'):
+                    continue
                 
-            # Support image files and data files (h5ad for AnnData)
-            if not file_path.lower().endswith(('.png', '.jpg', '.jpeg', '.tif', '.tiff', '.h5ad')):
+            # Support image files and data files (h5ad, npy for AnnData/masks)
+            if not file_path.lower().endswith(('.png', '.jpg', '.jpeg', '.tif', '.tiff', '.h5ad', '.npy')):
                 continue
             if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
                 continue
