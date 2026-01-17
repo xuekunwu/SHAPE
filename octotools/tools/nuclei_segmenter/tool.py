@@ -358,14 +358,19 @@ class Nuclei_Segmenter_Tool(BaseTool):
             # Count nuclei (unique mask values, excluding background 0)
             n_nuclei = len(np.unique(mask)) - 1 if mask is not None else 0
             
-            # Save mask as separate visualization with professional styling using image identifier
-            # Use .tif format with 16-bit depth to preserve all label values (supports up to 65535 nuclei)
-            mask_path = os.path.join(output_dir, f"nuclei_mask_{image_identifier}.tif")
+            # Save mask in two formats:
+            # 1. .tif format for visual display in Visual Outputs (16-bit TIFF preserves all label values)
+            # 2. .npy format for morphological analysis in Downloadable Files (original array data)
+            mask_tif_path = os.path.join(output_dir, f"nuclei_mask_{image_identifier}.tif")
+            mask_npy_path = os.path.join(output_dir, f"nuclei_mask_{image_identifier}.npy")
             
-            # Save the original mask array as 16-bit TIFF to preserve all label values
-            # Cellpose masks are integer labels (0=background, 1-N for N nuclei), which can exceed 255
+            # Save .tif format for visual display (16-bit preserves all label values, supports up to 65535 nuclei)
             mask_uint16 = mask.astype(np.uint16)
-            tifffile.imwrite(mask_path, mask_uint16)
+            tifffile.imwrite(mask_tif_path, mask_uint16)
+            
+            # Save .npy format for morphological analysis (preserves original array data)
+            # Cellpose masks are integer labels (0=background, 1-N for N nuclei)
+            np.save(mask_npy_path, mask)
             
             # Also save a visualization version for display with professional styling
             viz_mask_path = os.path.join(output_dir, f"nuclei_mask_viz_{image_identifier}.png")
@@ -385,9 +390,10 @@ class Nuclei_Segmenter_Tool(BaseTool):
             return {
                 "summary": f"{n_nuclei} cells identified and segmented successfully.",
                 "cell_count": n_nuclei,
-                "visual_outputs": [output_path, mask_path],
+                "visual_outputs": [output_path, mask_tif_path],  # Overlay and .tif mask for visual display
                 "deliverables": [output_path],  # Add overlay to deliverables for better collection
-                "mask_path": mask_path,  # Explicitly include mask_path for downstream tools
+                "mask_path": mask_npy_path,  # .npy format for morphological analysis (for downstream tools)
+                "mask_tif_path": mask_tif_path,  # .tif format for visual display
                 "overlay_path": output_path,  # Explicit overlay_path key for collection
                 "output_path": output_path,  # Explicit output_path key for collection
                 "image_id": image_identifier,  # Add image_id for matching in downstream tools

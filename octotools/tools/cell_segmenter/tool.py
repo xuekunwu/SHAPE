@@ -406,26 +406,36 @@ class Cell_Segmenter_Tool(BaseTool):
             # Count cells (unique mask values, excluding background 0)
             n_cells = len(np.unique(mask)) - 1 if mask is not None else 0
             
-            # Save mask as separate visualization with professional styling using image identifier
-            # Use .tif format with 16-bit depth to preserve all label values (supports up to 65535 cells)
-            mask_path = os.path.join(output_dir, f"cell_mask_{image_identifier}.tif")
-            # Ensure absolute path: if output_dir is already absolute, mask_path will be absolute
+            # Save mask in two formats:
+            # 1. .tif format for visual display in Visual Outputs (16-bit TIFF preserves all label values)
+            # 2. .npy format for morphological analysis in Downloadable Files (original array data)
+            mask_tif_path = os.path.join(output_dir, f"cell_mask_{image_identifier}.tif")
+            mask_npy_path = os.path.join(output_dir, f"cell_mask_{image_identifier}.npy")
+            # Ensure absolute path: if output_dir is already absolute, mask paths will be absolute
             # If output_dir is relative, resolve it relative to query_cache_dir
-            if not os.path.isabs(mask_path):
+            if not os.path.isabs(mask_tif_path):
                 if query_cache_dir and os.path.isabs(query_cache_dir):
-                    mask_path = os.path.join(query_cache_dir, "output_visualizations", f"cell_mask_{image_identifier}.tif")
+                    mask_tif_path = os.path.join(query_cache_dir, "output_visualizations", f"cell_mask_{image_identifier}.tif")
+                    mask_npy_path = os.path.join(query_cache_dir, "output_visualizations", f"cell_mask_{image_identifier}.npy")
                 else:
-                    mask_path = os.path.abspath(mask_path)
-            mask_path = os.path.normpath(mask_path)  # Normalize path separators
+                    mask_tif_path = os.path.abspath(mask_tif_path)
+                    mask_npy_path = os.path.abspath(mask_npy_path)
+            mask_tif_path = os.path.normpath(mask_tif_path)  # Normalize path separators
+            mask_npy_path = os.path.normpath(mask_npy_path)  # Normalize path separators
             
-            # Save the original mask array as 16-bit TIFF to preserve all label values
-            # Cellpose masks are integer labels (0=background, 1-N for N cells), which can exceed 255
+            # Save .tif format for visual display (16-bit preserves all label values, supports up to 65535 cells)
             mask_uint16 = mask.astype(np.uint16)
-            tifffile.imwrite(mask_path, mask_uint16)
+            tifffile.imwrite(mask_tif_path, mask_uint16)
             
-            # Verify file was saved
-            if not os.path.exists(mask_path):
-                raise FileNotFoundError(f"Failed to save mask file: {mask_path}")
+            # Save .npy format for morphological analysis (preserves original array data)
+            # Cellpose masks are integer labels (0=background, 1-N for N cells)
+            np.save(mask_npy_path, mask)
+            
+            # Verify files were saved
+            if not os.path.exists(mask_tif_path):
+                raise FileNotFoundError(f"Failed to save mask TIF file: {mask_tif_path}")
+            if not os.path.exists(mask_npy_path):
+                raise FileNotFoundError(f"Failed to save mask NPY file: {mask_npy_path}")
             
             # Also save a visualization version for display with professional styling
             viz_mask_path = os.path.join(output_dir, f"cell_mask_viz_{image_identifier}.png")
@@ -445,9 +455,10 @@ class Cell_Segmenter_Tool(BaseTool):
             return {
                 "summary": f"{n_cells} cells identified and segmented successfully.",
                 "cell_count": n_cells,
-                "visual_outputs": [output_path],  # Only include overlay image for visual display (not mask file)
+                "visual_outputs": [output_path, mask_tif_path],  # Overlay and .tif mask for visual display
                 "deliverables": [output_path],  # Add overlay to deliverables for better collection
-                "mask_path": mask_path,  # Explicitly include mask_path for downstream tools (not for visual display)
+                "mask_path": mask_npy_path,  # .npy format for morphological analysis (for downstream tools)
+                "mask_tif_path": mask_tif_path,  # .tif format for visual display
                 "overlay_path": output_path,  # Explicit overlay_path key for collection
                 "output_path": output_path,  # Explicit output_path key for collection
                 "image_id": image_identifier,  # Add image_id for matching in downstream tools

@@ -1007,11 +1007,12 @@ def _collect_visual_outputs(result, visual_outputs_list, downloadable_files_list
             if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
                 continue
             
-            # Handle .h5ad files, zip files, and specific visualization files separately - add to downloadable files list
+            # Handle .h5ad files, zip files, segmentation mask files (.npy), and specific visualization files separately - add to downloadable files list
             filename_lower_check = os.path.basename(file_path).lower()
             is_downloadable_file = (
                 file_path.lower().endswith('.h5ad') or
                 file_path.lower().endswith('.zip') or
+                file_path.lower().endswith('.npy') or  # NumPy arrays (e.g., segmentation masks for morphological analysis)
                 'segmentation_overlay' in filename_lower_check or
                 'loss_curve' in filename_lower_check or
                 'umap_cluster' in filename_lower_check or
@@ -1027,8 +1028,8 @@ def _collect_visual_outputs(result, visual_outputs_list, downloadable_files_list
                 # Add to downloadable files list if provided
                 if downloadable_files_list is not None:
                     downloadable_files_list.append(file_path)
-                # For .h5ad and .zip files, skip adding to visual outputs (no placeholder image)
-                if file_path.lower().endswith('.h5ad') or file_path.lower().endswith('.zip'):
+                # For .h5ad, .zip, and .npy files, skip adding to visual outputs (no placeholder image)
+                if file_path.lower().endswith('.h5ad') or file_path.lower().endswith('.zip') or file_path.lower().endswith('.npy'):
                     continue
                 # For visualization images, continue to add to visual outputs for preview
                 # (fall through to image processing below)

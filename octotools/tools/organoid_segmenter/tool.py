@@ -527,22 +527,27 @@ class Organoid_Segmenter_Tool(BaseTool):
             VisualizationConfig.save_professional_figure(fig, overlay_path)
             plt.close(fig)
             
-            # Save mask as separate visualization with professional styling using image identifier
-            # Use .tif format with 16-bit depth to preserve all label values (supports up to 65535 organoids)
-            mask_path = os.path.join(output_dir, f"organoid_mask_{image_identifier}.tif")
+            # Save mask in two formats:
+            # 1. .tif format for visual display in Visual Outputs (16-bit TIFF preserves all label values)
+            # 2. .npy format for morphological analysis in Downloadable Files (original array data)
+            mask_tif_path = os.path.join(output_dir, f"organoid_mask_{image_identifier}.tif")
+            mask_npy_path = os.path.join(output_dir, f"organoid_mask_{image_identifier}.npy")
             
-            # Save the original mask array as 16-bit TIFF to preserve all label values
-            # Cellpose masks are integer labels (0=background, 1-N for N organoids), which can exceed 255
+            # Save .tif format for visual display (16-bit preserves all label values, supports up to 65535 organoids)
             mask_uint16 = mask.astype(np.uint16)
-            tifffile.imwrite(mask_path, mask_uint16)
+            tifffile.imwrite(mask_tif_path, mask_uint16)
+            
+            # Save .npy format for morphological analysis (preserves original array data)
+            # Cellpose masks are integer labels (0=background, 1-N for N organoids)
+            np.save(mask_npy_path, mask)
             
             # Clear CUDA cache if using GPU
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
                 
-            # Build visual outputs list - only overlay and mask (no phase contrast)
-            # Overlay is included in deliverables
-            visual_outputs_list = [overlay_path, mask_path]
+            # Build visual outputs list - overlay and .tif mask (for display)
+            # .npy mask will be automatically added to Downloadable Files by app.py
+            visual_outputs_list = [overlay_path, mask_tif_path]
             
             return {
                 "summary": f"{n_organoids} organoids identified and segmented successfully.",
@@ -557,8 +562,9 @@ class Organoid_Segmenter_Tool(BaseTool):
                     "cellprob_threshold": cellprob_threshold,
                     "model_path": self.model_path
                 },
-                "mask_path": mask_path,  # For compatibility with Single_Cell_Cropper_Tool
-                "organoid_mask_path": mask_path,  # Explicit name for organoid masks
+                "mask_path": mask_npy_path,  # .npy format for morphological analysis (for compatibility with downstream tools)
+                "mask_tif_path": mask_tif_path,  # .tif format for visual display
+                "organoid_mask_path": mask_npy_path,  # Explicit name for organoid masks (.npy format)
                 "overlay_path": overlay_path,  # Segmentation overlay path
                 "image_id": image_identifier,  # Add image_id for matching
                 "image_identifier": image_identifier  # Alias for compatibility
