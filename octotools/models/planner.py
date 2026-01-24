@@ -361,18 +361,25 @@ TASK DOMAIN AWARENESS:
 
 **Knowledge Domain (Non-Image Analysis):**
 The system has detected this as a knowledge-based task (literature mining, gene annotation, pathway enrichment, functional analysis, etc.).
-- Use Generalist_Solution_Generator_Tool - it leverages language model capabilities for comprehensive knowledge-based analysis
-- These tasks require knowledge retrieval, reasoning, and interpretation, NOT image processing
-- Examples: "Perform literature mining for gene clusters", "Run GO enrichment analysis", "Find gene function summaries", "Annotate cell type markers"
-- Generalist_Solution_Generator_Tool can handle: literature search guidance, gene annotation, pathway analysis interpretation, functional classification, biological knowledge synthesis, and other text-based bioinformatics tasks
-- The tool will use its language capabilities to provide step-by-step analysis, references, and recommendations
+- **CRITICAL: Use actual search tools FIRST to retrieve real knowledge from databases**
+  - For literature mining: Use Pubmed_Search_Tool to search PubMed for relevant articles
+  - For general knowledge: Use Google_Search_Tool to find current information
+  - For academic papers: Use ArXiv_Paper_Searcher_Tool for preprints
+  - These tools provide REAL, VERIFIABLE information with actual citations
+- **Then use Generalist_Solution_Generator_Tool** to synthesize the search results into comprehensive answers
+- These tasks require knowledge retrieval from external sources, NOT just language model knowledge
+- Examples: "Perform literature mining for gene clusters" → First use Pubmed_Search_Tool to find papers, then use Generalist_Solution_Generator_Tool to synthesize
+- Workflow: Search tools (Pubmed_Search_Tool, Google_Search_Tool) → Generalist_Solution_Generator_Tool (synthesis with references)
 
 **Bioimage Domain (Image Analysis):**
 For image analysis tasks, follow the bioimage analysis chain below.
 
 INSTRUCTIONS:
 1. Review the query analysis and detected domain to understand what type of analysis is needed
-2. For knowledge domain: Use Generalist_Solution_Generator_Tool - it will provide comprehensive answers using language model capabilities
+2. For knowledge domain: 
+   - FIRST: Use search tools (Pubmed_Search_Tool, Google_Search_Tool, ArXiv_Paper_Searcher_Tool) to retrieve REAL knowledge from databases
+   - THEN: Use Generalist_Solution_Generator_Tool to synthesize search results with proper citations
+   - DO NOT use Generalist_Solution_Generator_Tool alone - it should synthesize actual search results
 3. For bioimage domain: Check what has been done (PREVIOUS STEPS) and what is still needed
 4. For bioimage domain: Follow the bioimage analysis chain appropriate for the query type
 5. Use intelligent reasoning: Evaluate whether each step adds value or if a more direct approach would be better

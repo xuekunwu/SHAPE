@@ -179,14 +179,14 @@ class ToolPriorityManager:
         for tool in available_tools:
             priority = self.get_priority(tool)
             
-            # For knowledge domain (non-image analysis tasks), enable Generalist_Solution_Generator_Tool
+            # For knowledge domain (non-image analysis tasks), prioritize search tools
             if domain == 'knowledge':
-                # Knowledge tasks need language-based tools, not image processing tools
-                if tool == 'Generalist_Solution_Generator_Tool':
-                    # Make it available for knowledge tasks
+                # Knowledge tasks need search tools FIRST, then synthesis tools
+                if 'Search' in tool or 'Searcher' in tool or 'Fetcher' in tool:
+                    # Prioritize search tools for knowledge tasks (even if EXCLUDED for bioimage)
                     filtered.append(tool)
-                elif 'Search' in tool or 'Searcher' in tool or 'Fetcher' in tool:
-                    # Also allow search tools for knowledge tasks
+                elif tool == 'Generalist_Solution_Generator_Tool':
+                    # Also allow Generalist_Solution_Generator_Tool for synthesis
                     filtered.append(tool)
                 elif priority == ToolPriority.EXCLUDED:
                     # Exclude image processing tools for knowledge tasks
