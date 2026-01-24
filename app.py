@@ -2771,50 +2771,48 @@ For more information about obtaining an OpenAI API key, visit: https://platform.
         return
 
     # Collect all images from all groups for analysis (let planner decide which to use)
-    if len(state.image_groups) == 0:
-        prompt_msg = "⚠️ Please upload an image into a group before asking a question."
-        new_history = messages + [ChatMessage(role="assistant", content=prompt_msg)]
-        state.conversation = new_history
-        yield new_history, "", [], "**Progress**: Waiting for image upload", [], state
-        return
-    
-    # Collect all images from all groups with group metadata
-    # Optimized for efficient multi-group processing
+    # Allow processing without images - use agent's language capabilities
     all_group_images = []
     group_summary = {}  # Track group statistics
-    for gname, gentry in state.image_groups.items():
-        group_images = gentry.get("images", [])
-        group_summary[gname] = len(group_images)
-        for img in group_images:
-            img_with_group = img.copy()
-            img_with_group["group"] = gname
-            all_group_images.append(img_with_group)
     
-    if not all_group_images:
-        prompt_msg = "⚠️ No images found in any group. Please upload images and assign groups first."
-        new_history = messages + [ChatMessage(role="assistant", content=prompt_msg)]
-        state.conversation = new_history
-        yield new_history, "", [], "**Progress**: Waiting for image upload", [], state
-        return
+    if len(state.image_groups) > 0:
+        # Collect all images from all groups with group metadata
+        # Optimized for efficient multi-group processing
+        for gname, gentry in state.image_groups.items():
+            group_images = gentry.get("images", [])
+            group_summary[gname] = len(group_images)
+            for img in group_images:
+                img_with_group = img.copy()
+                img_with_group["group"] = gname
+                all_group_images.append(img_with_group)
     
-    # Enhanced group context for multi-group comparison using unified function
-    if len(group_summary) > 1:
-        group_data = _collect_group_info(all_group_images)
-        print(f"📊 Multi-group analysis: {group_data['num_groups']} groups detected ({group_data['groups_summary']})")
-    
-    # Use first image as representative for context
-    representative = all_group_images[0]
-    group_name = next(iter(state.image_groups.keys()))  # Use first group name
-    group_images = all_group_images
-    
-    state.image_context = ImageContext(
-        image_id=representative["image_id"],
-        image_path=representative["image_path"],
-        features_path=representative.get("features_path", ""),
-        fingerprint=representative.get("fingerprint", ""),
-        source_type="group"
-    )
-    state.last_group_name = group_name
+    # Handle cases with and without images
+    if all_group_images:
+        # Enhanced group context for multi-group comparison using unified function
+        if len(group_summary) > 1:
+            group_data = _collect_group_info(all_group_images)
+            print(f"📊 Multi-group analysis: {group_data['num_groups']} groups detected ({group_data['groups_summary']})")
+        
+        # Use first image as representative for context
+        representative = all_group_images[0]
+        group_name = next(iter(state.image_groups.keys()))  # Use first group name
+        group_images = all_group_images
+        
+        state.image_context = ImageContext(
+            image_id=representative["image_id"],
+            image_path=representative["image_path"],
+            features_path=representative.get("features_path", ""),
+            fingerprint=representative.get("fingerprint", ""),
+            source_type="group"
+        )
+        state.last_group_name = group_name
+    else:
+        # No images available - use agent's language processing capabilities
+        state.image_context = None
+        group_name = None
+        group_images = []
+        state.last_group_name = None
+        print("ℹ️ No images available - using agent's language processing capabilities")
 
     # Save the query data with resolved group context
     save_query_data(
