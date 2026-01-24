@@ -44,6 +44,7 @@ BIOIMAGE_TOOL_PRIORITIES: Dict[str, ToolPriority] = {
     "Wikipedia_Knowledge_Searcher_Tool": ToolPriority.EXCLUDED,
     "URL_Text_Extractor_Tool": ToolPriority.EXCLUDED,  # Note: URL is all uppercase (as defined in tool class)
     "Relevant_Patch_Zoomer_Tool": ToolPriority.EXCLUDED,  # Not suitable for bioimages
+    "Cell_Cluster_Functional_Hypothesis_Tool": ToolPriority.EXCLUDED,  # For knowledge domain only
 }
 
 # Tool dependency chains for workflow optimization
@@ -96,7 +97,9 @@ KNOWLEDGE_KEYWORDS: Set[str] = {
     'reactome', 'david', 'g:profiler', 'enrichr', 'cellmarker', 'panglaodb',
     'cell type', 'cell identity', 'cluster identity', 'biological classification',
     'orthogonal validation', 'ihc marker', 'if marker', 'validation marker',
-    'no image', 'external analysis', 'text-based', 'knowledge-based'
+    'no image', 'external analysis', 'text-based', 'knowledge-based',
+    'functional hypothesis', 'functional state', 'regulator gene', 'regulator genes',
+    'cell cluster', 'cluster annotation', 'functional inference', 'cluster functional'
 }
 
 
@@ -181,9 +184,12 @@ class ToolPriorityManager:
             
             # For knowledge domain (non-image analysis tasks), prioritize search tools
             if domain == 'knowledge':
-                # Knowledge tasks need search tools FIRST, then synthesis tools
+                # Knowledge tasks need search tools FIRST, then specialized tools, then synthesis tools
                 if 'Search' in tool or 'Searcher' in tool or 'Fetcher' in tool:
                     # Prioritize search tools for knowledge tasks (even if EXCLUDED for bioimage)
+                    filtered.append(tool)
+                elif tool == 'Cell_Cluster_Functional_Hypothesis_Tool':
+                    # High priority for cluster functional hypothesis tool
                     filtered.append(tool)
                 elif tool == 'Generalist_Solution_Generator_Tool':
                     # Also allow Generalist_Solution_Generator_Tool for synthesis
