@@ -357,15 +357,29 @@ This system performs SINGLE-CELL level analysis. For queries involving cell stat
 - Tool selection should balance: (1) Task efficiency - can the task be accomplished directly? (2) Result quality - would additional context improve outcomes? (3) User experience - minimize unnecessary steps while ensuring accuracy.
 - Image_Captioner_Tool can provide valuable context for complex or ambiguous cases, but for standard bioimage workflows, specialized tools often work more efficiently.
 
+TASK DOMAIN AWARENESS:
+
+**Knowledge Domain (Non-Image Analysis):**
+The system has detected this as a knowledge-based task (literature mining, gene annotation, pathway enrichment, functional analysis, etc.).
+- Use Generalist_Solution_Generator_Tool - it leverages language model capabilities for comprehensive knowledge-based analysis
+- These tasks require knowledge retrieval, reasoning, and interpretation, NOT image processing
+- Examples: "Perform literature mining for gene clusters", "Run GO enrichment analysis", "Find gene function summaries", "Annotate cell type markers"
+- Generalist_Solution_Generator_Tool can handle: literature search guidance, gene annotation, pathway analysis interpretation, functional classification, biological knowledge synthesis, and other text-based bioinformatics tasks
+- The tool will use its language capabilities to provide step-by-step analysis, references, and recommendations
+
+**Bioimage Domain (Image Analysis):**
+For image analysis tasks, follow the bioimage analysis chain below.
+
 INSTRUCTIONS:
-1. Review the query analysis to understand what type of analysis is needed
-2. Check what has been done (PREVIOUS STEPS) and what is still needed
-3. Follow the bioimage analysis chain appropriate for the query type
-4. Use intelligent reasoning: Evaluate whether each step adds value or if a more direct approach would be better
-5. Select ONE tool that is the logical next step in the pipeline
-6. Ensure dependencies are satisfied (e.g., need segmentation before cropping, need cropping before analysis)
-7. For Cell_State_Analyzer_*_Tool: Do NOT pass original images or masks - tool automatically loads crop images from Single_Cell_Cropper_Tool metadata (query_cache_dir parameter)
-8. Formulate a clear sub-goal explaining what this tool will accomplish, referencing the correct input format
+1. Review the query analysis and detected domain to understand what type of analysis is needed
+2. For knowledge domain: Use Generalist_Solution_Generator_Tool - it will provide comprehensive answers using language model capabilities
+3. For bioimage domain: Check what has been done (PREVIOUS STEPS) and what is still needed
+4. For bioimage domain: Follow the bioimage analysis chain appropriate for the query type
+5. Use intelligent reasoning: Evaluate whether each step adds value or if a more direct approach would be better
+6. Select ONE tool that is the logical next step for the identified domain
+7. Ensure dependencies are satisfied (e.g., need segmentation before cropping, need cropping before analysis)
+8. For Cell_State_Analyzer_*_Tool: Do NOT pass original images or masks - tool automatically loads crop images from Single_Cell_Cropper_Tool metadata (query_cache_dir parameter)
+9. Formulate a clear sub-goal explaining what this tool will accomplish, referencing the correct input format
 
 Output format:
 <justification>: Why this tool is the best next step, referencing the analysis pipeline

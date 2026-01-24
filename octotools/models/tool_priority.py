@@ -85,6 +85,20 @@ TEXT_EXTRACTION_KEYWORDS: Set[str] = {
     'extract text', 'read url', 'get text from', 'parse webpage'
 }
 
+# Keywords for detecting knowledge-based analysis tasks (non-image)
+KNOWLEDGE_KEYWORDS: Set[str] = {
+    'literature', 'literature mining', 'gene annotation', 'gene function',
+    'pathway enrichment', 'go enrichment', 'functional enrichment',
+    'functional annotation', 'gene cluster', 'marker gene', 'cell type marker',
+    'pubmed', 'database', 'functional analysis', 'biological interpretation',
+    'transcriptomics', 'genomics', 'bioinformatics', 'gene expression',
+    'pathway analysis', 'enrichment analysis', 'gene ontology', 'kegg',
+    'reactome', 'david', 'g:profiler', 'enrichr', 'cellmarker', 'panglaodb',
+    'cell type', 'cell identity', 'cluster identity', 'biological classification',
+    'orthogonal validation', 'ihc marker', 'if marker', 'validation marker',
+    'no image', 'external analysis', 'text-based', 'knowledge-based'
+}
+
 
 class ToolPriorityManager:
     """Manages tool priorities and filtering based on task domain."""
@@ -117,11 +131,16 @@ class ToolPriorityManager:
         Detect the task domain from query and analysis.
         
         Returns:
-            'bioimage', 'search', 'text_extraction', or 'general'
+            'bioimage', 'search', 'text_extraction', 'knowledge', or 'general'
         """
         query_lower = query.lower()
         analysis_lower = query_analysis.lower() if query_analysis else ""
         combined = f"{query_lower} {analysis_lower}"
+        
+        # Check for knowledge-based analysis tasks (non-image: literature, gene annotation, etc.)
+        # This should be checked before bioimage to avoid false positives
+        if any(keyword in combined for keyword in KNOWLEDGE_KEYWORDS):
+            return 'knowledge'
         
         # Check for search tasks
         if any(keyword in combined for keyword in SEARCH_KEYWORDS):
@@ -148,7 +167,7 @@ class ToolPriorityManager:
         
         Args:
             available_tools: List of all available tool names
-            domain: Task domain ('bioimage', 'search', 'text_extraction', 'general')
+            domain: Task domain ('bioimage', 'search', 'text_extraction', 'knowledge', 'general')
             exclude_excluded: Whether to exclude EXCLUDED priority tools
         
         Returns:
@@ -159,6 +178,23 @@ class ToolPriorityManager:
         
         for tool in available_tools:
             priority = self.get_priority(tool)
+            
+            # For knowledge domain (non-image analysis tasks), enable Generalist_Solution_Generator_Tool
+            if domain == 'knowledge':
+                # Knowledge tasks need language-based tools, not image processing tools
+                if tool == 'Generalist_Solution_Generator_Tool':
+                    # Make it available for knowledge tasks
+                    filtered.append(tool)
+                elif 'Search' in tool or 'Searcher' in tool or 'Fetcher' in tool:
+                    # Also allow search tools for knowledge tasks
+                    filtered.append(tool)
+                elif priority == ToolPriority.EXCLUDED:
+                    # Exclude image processing tools for knowledge tasks
+                    excluded.append(tool)
+                elif priority != ToolPriority.EXCLUDED:
+                    # Allow other non-excluded tools
+                    filtered.append(tool)
+                continue
             
             # Exclude EXCLUDED tools if requested
             if exclude_excluded and priority == ToolPriority.EXCLUDED:

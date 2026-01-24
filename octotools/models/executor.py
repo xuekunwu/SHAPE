@@ -398,6 +398,16 @@ execution = tool.execute(
         else:
             group_info = ""
         
+        # Special handling for Generalist_Solution_Generator_Tool for non-image tasks
+        generalist_instruction = ""
+        if tool_name == "Generalist_Solution_Generator_Tool":
+            # For non-image tasks, the prompt should include the full query, context, and sub-goal
+            # Image parameter should be None or omitted if no image is available
+            if not safe_path or safe_path == "":
+                generalist_instruction = "\n\nCRITICAL: Generalist_Solution_Generator_Tool is being used for a non-image analysis task. The prompt parameter should include the full query, context, and sub-goal. Do NOT include an image parameter (set image=None or omit it). The prompt should be comprehensive and include all relevant information from the query, context, and sub-goal."
+            else:
+                generalist_instruction = "\n\nNote: Generalist_Solution_Generator_Tool can accept an optional image parameter. If an image is available, you may include it, but the prompt should still be comprehensive."
+        
         # For other tools, use the standard prompt
         # Include query_cache_dir in context for tools that need it
         query_cache_dir_str = self.query_cache_dir.replace("\\", "\\\\")
@@ -416,6 +426,7 @@ Selected Tool: {tool_name}
 Tool Metadata: {tool_metadata}
 Previous Tool Outputs (summary only, file paths available for tool chaining): {previous_outputs_for_llm}
 Query Cache Directory: {query_cache_dir_str} (use this for query_cache_dir parameter if the tool accepts it)
+{generalist_instruction}
 
 IMPORTANT: When the tool requires an image parameter, you MUST use the exact image path provided above: "{safe_path}"
 {"IMPORTANT: Nuclei_Segmenter_Tool, Cell_Segmenter_Tool, Organoid_Segmenter_Tool, and Image_Preprocessor_Tool accept the image_id parameter for consistent file naming and tracking. Include image_id parameter when available for these tools." if image_id else ""}

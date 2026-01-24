@@ -1742,6 +1742,7 @@ class Solver:
                 # Handle nested prefixes
                 while "No matched tool given: " in actual_tool_name:
                     actual_tool_name = actual_tool_name.split("No matched tool given: ")[-1].strip()
+                
                 error_msg = f"Tool '{actual_tool_name}' could not be matched to any available tool. Available tools: {self.planner.available_tools[:10]}..."
                 tool_execution_failed = True
                 if actual_tool_name not in failed_tool_names:
