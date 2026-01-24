@@ -1684,17 +1684,20 @@ class Solver:
             step_data = {"step_count": step_count, "context": context, "sub_goal": sub_goal, "tool_name": tool_name, "time": round(time.time() - self.start_time, 5)}
             save_module_data(QUERY_ID, f"step_{step_count}_action_prediction", step_data)
             
-            # Detect tool selection loops: if same tool is selected 3+ times consecutively, stop
+            # Detect tool selection loops: if same tool is selected multiple times consecutively, stop
+            # For knowledge domain tasks, allow more consecutive calls (5 instead of 3)
+            detected_domain = getattr(self.planner, 'detected_domain', 'general')
+            is_knowledge_domain = (detected_domain == 'knowledge')
+            loop_threshold = 5 if (is_knowledge_domain and tool_name == 'Generalist_Solution_Generator_Tool') else 3
+            
             if tool_name == last_tool_name:
                 consecutive_same_tool += 1
             else:
                 consecutive_same_tool = 1
                 last_tool_name = tool_name
             
-            tool_selection_history.append(tool_name)
-            
-            # Check for loop: same tool selected 3+ times consecutively
-            if consecutive_same_tool >= 3:
+            # Check for loop: same tool selected threshold+ times consecutively
+            if consecutive_same_tool >= loop_threshold:
                 messages.append(ChatMessage(
                     role="assistant",
                     content=f"⚠️ **Stopping execution:** Tool '{tool_name}' has been selected {consecutive_same_tool} times consecutively. This indicates a potential loop. Stopping to prevent infinite execution.\n\n**Possible reasons:**\n- The tool may not be producing the expected results\n- The verification logic may not be correctly detecting completion\n- The query requirements may be unclear",
@@ -1704,6 +1707,8 @@ class Solver:
                 yield messages, query_analysis, self.visual_outputs_for_gradio, visual_description, progress_msg_loop
                 execution_successful = False
                 break
+            
+            tool_selection_history.append(tool_name)
             
             # Check for overall loop: if same tool sequence repeats (e.g., ToolA -> ToolB -> ToolA -> ToolB)
             if len(tool_selection_history) >= 6:

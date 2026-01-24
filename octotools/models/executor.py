@@ -404,9 +404,9 @@ execution = tool.execute(
             # For non-image tasks, the prompt should include the full query, context, and sub-goal
             # Image parameter should be None or omitted if no image is available
             if not safe_path or safe_path == "":
-                generalist_instruction = "\n\nCRITICAL: Generalist_Solution_Generator_Tool is being used for a non-image analysis task. The prompt parameter should include the full query, context, and sub-goal. Do NOT include an image parameter (set image=None or omit it). The prompt should be comprehensive and include all relevant information from the query, context, and sub-goal."
+                generalist_instruction = "\n\nCRITICAL: Generalist_Solution_Generator_Tool is being used for a non-image analysis task (literature mining, gene annotation, pathway enrichment, etc.).\n- The prompt parameter should include the full query, context, and sub-goal.\n- Do NOT include an image parameter (set image=None or omit it).\n- The prompt should be comprehensive and include all relevant information.\n- MOST IMPORTANT: The response MUST include specific references and citations (PubMed IDs, DOI, journal names, authors, publication years) for any biological knowledge, gene functions, pathways, or cell type markers mentioned.\n- Format references clearly, e.g., 'PMID: 12345678', 'doi:10.1234/example', or 'Author et al., Journal Name, Year'.\n- For gene annotations, include database sources (UniProt, HGNC, CellMarker, etc.)."
             else:
-                generalist_instruction = "\n\nNote: Generalist_Solution_Generator_Tool can accept an optional image parameter. If an image is available, you may include it, but the prompt should still be comprehensive."
+                generalist_instruction = "\n\nNote: Generalist_Solution_Generator_Tool can accept an optional image parameter. If an image is available, you may include it, but the prompt should still be comprehensive. For knowledge-based analysis, include specific references and citations."
         
         # For other tools, use the standard prompt
         # Include query_cache_dir in context for tools that need it

@@ -536,6 +536,10 @@ Output format:
         
         image_info = self.get_image_info(image) if not bytes_mode else {}
         
+        # Check detected domain for knowledge tasks
+        detected_domain = getattr(self, 'detected_domain', 'general')
+        is_knowledge_domain = (detected_domain == 'knowledge')
+        
         prompt = f"""Verify if the following steps contain sufficient information to answer the query.
 
 Conversation so far:
@@ -544,9 +548,19 @@ Conversation so far:
 Query: {question}
 Query Analysis: {query_analysis}
 Image: {image_info}
+Detected Domain: {detected_domain}
 
 Previous Steps:
 {self._format_memory(memory)}
+
+{"**KNOWLEDGE DOMAIN TASK:**" if is_knowledge_domain else ""}
+{"For knowledge-based tasks (literature mining, gene annotation, pathway enrichment, functional analysis):" if is_knowledge_domain else ""}
+{"- Verify if the query has been comprehensively answered with sufficient detail, references, and evidence" if is_knowledge_domain else ""}
+{"- For literature mining: Check if relevant literature, gene functions, and annotations have been provided" if is_knowledge_domain else ""}
+{"- For pathway enrichment: Check if enrichment results, pathways, and biological interpretations have been provided" if is_knowledge_domain else ""}
+{"- For gene annotation: Check if gene functions, cell type associations, and marker information have been provided" if is_knowledge_domain else ""}
+{"- Generalist_Solution_Generator_Tool may be called multiple times to complete different aspects of the task - this is normal" if is_knowledge_domain else ""}
+{"- STOP only when the query has been comprehensively answered with sufficient detail and evidence" if is_knowledge_domain else ""}
 
 CRITICAL: Understand the query type and verify ONLY what is explicitly asked:
 - If query asks "how many cells" → Verify that cell count is available (from segmentation result) → STOP if count exists
