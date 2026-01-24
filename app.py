@@ -2032,7 +2032,10 @@ class Solver:
             # Display the command execution result
             # Include training logs if available (for Cell_State_Analyzer_Tool)
             result_content = ""
-            if isinstance(result, dict):
+            # Check if tool returned formatted output (e.g., Pubmed_Search_Tool)
+            if isinstance(result, dict) and "formatted_output" in result:
+                result_content = result["formatted_output"]
+            elif isinstance(result, dict):
                 if "training_logs" in result and result["training_logs"]:
                     # Show training logs prominently
                     result_content += f"**Training Progress:**\n```\n{result['training_logs']}\n```\n\n"
@@ -2040,6 +2043,9 @@ class Solver:
                     result_content += f"**Summary:**\n{result['summary']}\n\n"
                 # Show full result in JSON for other details
                 result_content += f"**Full Result:**\n```json\n{json.dumps(make_json_serializable(result), indent=4)}\n```"
+            elif isinstance(result, str):
+                # Handle string results (e.g., "No results found")
+                result_content = f"**Result:**\n{result}\n"
             else:
                 result_content = f"**Result:**\n```json\n{json.dumps(make_json_serializable(result), indent=4)}\n```"
             

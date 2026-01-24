@@ -50,35 +50,101 @@ class Pubmed_Search_Tool(BaseTool):
 
     def execute(self, queries, max_results=10):
         try:
-            query_str = f"({'[Title/Abstract] OR '.join(queries) + '[Title/Abstract]'}) AND hasabstract[All Fields] AND fha[Filter]"
+            if not queries or len(queries) == 0:
+                error_msg = "**⚠️ Error:** No queries provided. Please provide at least one search query term."
+                return {"formatted_output": error_msg, "error": "No queries provided", "items": []}
+            
+            # Build query string - use OR logic for multiple queries
+            query_parts = [f"{q}[Title/Abstract]" for q in queries]
+            query_str = f"({' OR '.join(query_parts)}) AND hasabstract[All Fields]"
             max_results = min(max_results, 50)
+            
+            print(f"PubMed search query: {query_str}")
+            print(f"Max results: {max_results}")
 
             results = self.search_query(query_str, max_results=max_results) # API can only get most recent
+            
+            if not results:
+                error_msg = f"**⚠️ No results found.**\n\n**Search Query:** {query_str}\n\n**Suggestions:**\n- Try different search terms\n- Simplify the query\n- Use fewer keywords"
+                return {"formatted_output": error_msg, "error": "No results", "items": [], "query": query_str}
 
             items = []
+            processed_count = 0
             for article in results:
                 try:
-                    article = json.loads(article.toJSON())
-                    pubmed_id = article['pubmed_id'] # get id using pymed then get content using metapub
+                    article_json = json.loads(article.toJSON())
+                    pubmed_id = article_json.get('pubmed_id') or (article_json.get('pubmed_id_list', [None])[0] if article_json.get('pubmed_id_list') else None)
+                    
+                    if not pubmed_id:
+                        # If no ID, skip this article
+                        print(f"Skipping article: no pubmed_id found")
+                        continue
 
-                    article = self.fetch.article_by_pmid(pubmed_id)
-                    items.append({
-                        'title': article.title,
-                        'abstract': article.abstract,
-                        'keywords': article.keywords,
-                        'url': article.url
-                    })
-                except:
+                    article_detail = self.fetch.article_by_pmid(pubmed_id)
+                    if article_detail:
+                        items.append({
+                            'pmid': pubmed_id,
+                            'title': article_detail.title or article_json.get('title', 'N/A'),
+                            'abstract': article_detail.abstract or article_json.get('abstract', 'N/A'),
+                            'keywords': article_detail.keywords or article_json.get('keywords', []),
+                            'url': article_detail.url or f"https://pubmed.ncbi.nlm.nih.gov/{pubmed_id}/",
+                            'authors': article_json.get('authors', []),
+                            'publication_date': article_json.get('publication_date', 'N/A'),
+                            'journal': article_json.get('journal', 'N/A')
+                        })
+                        processed_count += 1
+                    else:
+                        print(f"Could not fetch details for PMID {pubmed_id}")
+                except Exception as e:
+                    print(f"Error processing article: {e}")
+                    import traceback
+                    traceback.print_exc()
                     continue
 
-            if len(items) == 0:
-                return "No results found for search query. Try another query or tool."
+            print(f"Processed {processed_count} articles from {len(list(results))} results")
             
-            return items
+            if len(items) == 0:
+                error_msg = f"**⚠️ Error:** Found {len(list(results))} result(s) but could not process any articles. This may be due to API limitations or article access restrictions.\n\n"
+                error_msg += f"**Search Query:** {query_str}\n\n"
+                error_msg += "**Suggestions:**\n- Try different search terms\n- Simplify the query\n- Use fewer keywords\n- Check if PubMed API is accessible"
+                return {"formatted_output": error_msg, "error": "No valid results", "items": []}
+            
+            # Format results as a readable string
+            formatted_output = f"**📚 Found {len(items)} PubMed article(s):**\n\n"
+            for idx, article in enumerate(items[:10], 1):  # Show first 10 results
+                formatted_output += f"**{idx}. {article.get('title', 'N/A')}**\n"
+                if article.get('pmid'):
+                    formatted_output += f"   - **PMID:** {article['pmid']}\n"
+                    formatted_output += f"   - **URL:** https://pubmed.ncbi.nlm.nih.gov/{article['pmid']}/\n"
+                elif article.get('url'):
+                    formatted_output += f"   - **URL:** {article['url']}\n"
+                if article.get('journal'):
+                    formatted_output += f"   - **Journal:** {article['journal']}\n"
+                if article.get('publication_date'):
+                    formatted_output += f"   - **Date:** {article['publication_date']}\n"
+                if article.get('abstract'):
+                    abstract = article['abstract'][:300] + "..." if len(article['abstract']) > 300 else article['abstract']
+                    formatted_output += f"   - **Abstract:** {abstract}\n"
+                if article.get('keywords'):
+                    keywords = article['keywords'] if isinstance(article['keywords'], list) else [article['keywords']]
+                    formatted_output += f"   - **Keywords:** {', '.join(keywords[:5])}\n"
+                formatted_output += "\n"
+            if len(items) > 10:
+                formatted_output += f"\n*... and {len(items) - 10} more result(s)*\n"
+            
+            # Return both formatted output and raw items for downstream processing
+            return {
+                "formatted_output": formatted_output,
+                "items": items,
+                "count": len(items)
+            }
         
         except Exception as e:
+            error_msg = f"**⚠️ Error searching PubMed:** {e}\n\n**Queries:** {queries}\n\n**Suggestions:**\n- Check your internet connection\n- Verify PubMed API is accessible\n- Try simpler search terms"
             print(f"Error searching PubMed: {e}")
-            return []
+            import traceback
+            traceback.print_exc()
+            return {"formatted_output": error_msg, "error": str(e), "items": [], "queries": queries}
 
     def get_metadata(self):
         metadata = super().get_metadata()

@@ -562,12 +562,14 @@ Previous Steps:
 
 {"**KNOWLEDGE DOMAIN TASK:**" if is_knowledge_domain else ""}
 {"For knowledge-based tasks (literature mining, gene annotation, pathway enrichment, functional analysis):" if is_knowledge_domain else ""}
-{"- Verify if the query has been comprehensively answered with sufficient detail, references, and evidence" if is_knowledge_domain else ""}
-{"- For literature mining: Check if relevant literature, gene functions, and annotations have been provided" if is_knowledge_domain else ""}
-{"- For pathway enrichment: Check if enrichment results, pathways, and biological interpretations have been provided" if is_knowledge_domain else ""}
-{"- For gene annotation: Check if gene functions, cell type associations, and marker information have been provided" if is_knowledge_domain else ""}
-{"- Generalist_Solution_Generator_Tool may be called multiple times to complete different aspects of the task - this is normal" if is_knowledge_domain else ""}
-{"- STOP only when the query has been comprehensively answered with sufficient detail and evidence" if is_knowledge_domain else ""}
+{"- CRITICAL: Knowledge tasks require a TWO-STEP workflow:" if is_knowledge_domain else ""}
+{"  1. Search tools (Pubmed_Search_Tool, Google_Search_Tool) retrieve REAL knowledge from databases" if is_knowledge_domain else ""}
+{"  2. Generalist_Solution_Generator_Tool synthesizes search results into comprehensive answers with citations" if is_knowledge_domain else ""}
+{"- DO NOT stop after only search tools - synthesis step is REQUIRED" if is_knowledge_domain else ""}
+{"- For literature mining: Must have BOTH (1) search results from Pubmed_Search_Tool AND (2) synthesis from Generalist_Solution_Generator_Tool" if is_knowledge_domain else ""}
+{"- For gene annotation: Must have BOTH (1) search results AND (2) synthesized annotations with references" if is_knowledge_domain else ""}
+{"- STOP only when BOTH search AND synthesis steps are complete, with comprehensive answers including references" if is_knowledge_domain else ""}
+{"- If only search tools have been used, CONTINUE to use Generalist_Solution_Generator_Tool for synthesis" if is_knowledge_domain else ""}
 
 CRITICAL: Understand the query type and verify ONLY what is explicitly asked:
 - If query asks "how many cells" → Verify that cell count is available (from segmentation result) → STOP if count exists
