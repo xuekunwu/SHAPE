@@ -408,6 +408,11 @@ execution = tool.execute(
             else:
                 generalist_instruction = "\n\nNote: Generalist_Solution_Generator_Tool can accept an optional image parameter. If an image is available, you may include it, but the prompt should still be comprehensive. For knowledge-based analysis, include specific references and citations."
         
+        # Special handling for Pubmed_Search_Tool
+        pubmed_instruction = ""
+        if tool_name == "Pubmed_Search_Tool":
+            pubmed_instruction = "\n\nNote: Pubmed_Search_Tool automatically tries OR query first, then AND if no results, then individual searches. Use max_results=20-30 for comprehensive searches."
+        
         # For other tools, use the standard prompt
         # Include query_cache_dir in context for tools that need it
         query_cache_dir_str = self.query_cache_dir.replace("\\", "\\\\")
@@ -426,7 +431,7 @@ Selected Tool: {tool_name}
 Tool Metadata: {tool_metadata}
 Previous Tool Outputs (summary only, file paths available for tool chaining): {previous_outputs_for_llm}
 Query Cache Directory: {query_cache_dir_str} (use this for query_cache_dir parameter if the tool accepts it)
-{generalist_instruction}
+{generalist_instruction}{pubmed_instruction}
 
 IMPORTANT: When the tool requires an image parameter, you MUST use the exact image path provided above: "{safe_path}"
 {"IMPORTANT: Nuclei_Segmenter_Tool, Cell_Segmenter_Tool, Organoid_Segmenter_Tool, and Image_Preprocessor_Tool accept the image_id parameter for consistent file naming and tracking. Include image_id parameter when available for these tools." if image_id else ""}
