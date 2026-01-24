@@ -45,8 +45,20 @@ class Cell_Cluster_Functional_Hypothesis_Tool(BaseTool):
         }
 
     def _collect_evidence(self, genes: List[str], tissue_context: Optional[str] = None, 
-                         disease_context: Optional[str] = None, max_results: int = 5) -> Dict[str, Any]:
-        """Collect evidence from PubMed for given genes."""
+                         disease_context: Optional[str] = None, max_results: int = 5,
+                         use_llm_knowledge: bool = True) -> Dict[str, Any]:
+        """
+        Collect evidence using efficient hybrid strategy:
+        1. Use LLM knowledge for common genes (fast, no API calls)
+        2. Use batch PubMed queries for comprehensive evidence (fewer API calls)
+        
+        Args:
+            genes: List of gene names
+            tissue_context: Optional tissue context
+            disease_context: Optional disease context
+            max_results: Max results per query type
+            use_llm_knowledge: Whether to use LLM knowledge first (default: True)
+        """
         all_evidence = {
             "hard_lineage_markers": [],
             "functional_programs": [],
@@ -54,58 +66,204 @@ class Cell_Cluster_Functional_Hypothesis_Tool(BaseTool):
             "conflicting_signals": []
         }
         
-        for gene in genes:
-            # Search for hard lineage markers
-            queries = [gene, "lineage marker", "cell type"]
-            result = self.pubmed_tool.execute(queries=queries, max_results=max_results)
+        if not genes:
+            return all_evidence
+        
+        # Strategy 1: Use LLM knowledge for quick initial evidence (if enabled)
+        if use_llm_knowledge and len(genes) <= 10:  # Only for reasonable number of genes
+            llm_evidence = self._get_llm_gene_knowledge(genes, tissue_context, disease_context)
+            # Merge LLM evidence
+            for evidence_type in ["hard_lineage_markers", "functional_programs", "tissue_disease_context"]:
+                all_evidence[evidence_type].extend(llm_evidence.get(evidence_type, []))
+        
+        # Strategy 2: Batch PubMed queries for comprehensive evidence
+        # Only query PubMed if we need more evidence or LLM knowledge is insufficient
+        need_pubmed = not use_llm_knowledge or len(all_evidence["hard_lineage_markers"]) < len(genes)
+        
+        if need_pubmed:
+            # Batch query for hard lineage markers (all genes + "lineage marker")
+            print(f"Batch querying PubMed for lineage markers ({len(genes)} genes)...")
+            lineage_queries = genes + ["lineage marker", "cell type marker"]
+            result = self.pubmed_tool.execute(queries=lineage_queries, max_results=max_results * len(genes))
             if result.get("items"):
-                for item in result["items"][:max_results]:
-                    all_evidence["hard_lineage_markers"].append({
-                        "gene": gene,
-                        "source": "PubMed",
-                        "pmid": item.get("pmid"),
-                        "url": item.get("url"),
-                        "title": item.get("title"),
-                        "abstract": item.get("abstract", "")[:200] + "..." if item.get("abstract") else "",
-                        "evidence_type": "hard_lineage_marker"
-                    })
-            
-            # Search for functional programs
-            queries = [gene, "function"]
-            result = self.pubmed_tool.execute(queries=queries, max_results=max_results)
-            if result.get("items"):
-                for item in result["items"][:max_results]:
-                    all_evidence["functional_programs"].append({
-                        "gene": gene,
-                        "source": "PubMed",
-                        "pmid": item.get("pmid"),
-                        "url": item.get("url"),
-                        "title": item.get("title"),
-                        "abstract": item.get("abstract", "")[:200] + "..." if item.get("abstract") else "",
-                        "evidence_type": "functional_program"
-                    })
-            
-            # Search for tissue/disease context if provided
-            if tissue_context or disease_context:
-                context_terms = [gene]
-                if tissue_context:
-                    context_terms.append(tissue_context)
-                if disease_context:
-                    context_terms.append(disease_context)
-                result = self.pubmed_tool.execute(queries=context_terms, max_results=max_results)
-                if result.get("items"):
-                    for item in result["items"][:max_results]:
-                        all_evidence["tissue_disease_context"].append({
+                for item in result["items"]:
+                    # Match which gene(s) this article is about
+                    matched_genes = [g for g in genes if g.lower() in (item.get("title", "") + " " + item.get("abstract", "")).lower()]
+                    for gene in matched_genes:
+                        all_evidence["hard_lineage_markers"].append({
                             "gene": gene,
                             "source": "PubMed",
                             "pmid": item.get("pmid"),
                             "url": item.get("url"),
                             "title": item.get("title"),
                             "abstract": item.get("abstract", "")[:200] + "..." if item.get("abstract") else "",
-                            "evidence_type": "tissue_disease_context"
+                            "evidence_type": "hard_lineage_marker"
                         })
+            
+            # Batch query for functional programs (all genes + "function")
+            print(f"Batch querying PubMed for functional programs ({len(genes)} genes)...")
+            function_queries = genes + ["function", "biological process"]
+            result = self.pubmed_tool.execute(queries=function_queries, max_results=max_results * len(genes))
+            if result.get("items"):
+                for item in result["items"]:
+                    matched_genes = [g for g in genes if g.lower() in (item.get("title", "") + " " + item.get("abstract", "")).lower()]
+                    for gene in matched_genes:
+                        all_evidence["functional_programs"].append({
+                            "gene": gene,
+                            "source": "PubMed",
+                            "pmid": item.get("pmid"),
+                            "url": item.get("url"),
+                            "title": item.get("title"),
+                            "abstract": item.get("abstract", "")[:200] + "..." if item.get("abstract") else "",
+                            "evidence_type": "functional_program"
+                        })
+            
+            # Context-specific query (if tissue/disease context provided)
+            if tissue_context or disease_context:
+                print(f"Batch querying PubMed for tissue/disease context ({len(genes)} genes)...")
+                context_queries = genes.copy()
+                if tissue_context:
+                    context_queries.append(tissue_context)
+                if disease_context:
+                    context_queries.append(disease_context)
+                result = self.pubmed_tool.execute(queries=context_queries, max_results=max_results * len(genes))
+                if result.get("items"):
+                    for item in result["items"]:
+                        matched_genes = [g for g in genes if g.lower() in (item.get("title", "") + " " + item.get("abstract", "")).lower()]
+                        for gene in matched_genes:
+                            all_evidence["tissue_disease_context"].append({
+                                "gene": gene,
+                                "source": "PubMed",
+                                "pmid": item.get("pmid"),
+                                "url": item.get("url"),
+                                "title": item.get("title"),
+                                "abstract": item.get("abstract", "")[:200] + "..." if item.get("abstract") else "",
+                                "evidence_type": "tissue_disease_context"
+                            })
+        
+        # Remove duplicates based on (gene, pmid) pairs
+        seen = set()
+        for evidence_type in ["hard_lineage_markers", "functional_programs", "tissue_disease_context"]:
+            unique_items = []
+            for item in all_evidence[evidence_type]:
+                key = (item["gene"], item.get("pmid", ""), item.get("source", ""))
+                if key not in seen:
+                    seen.add(key)
+                    unique_items.append(item)
+            all_evidence[evidence_type] = unique_items
+        
+        print(f"Evidence collected: {len(all_evidence['hard_lineage_markers'])} lineage markers, "
+              f"{len(all_evidence['functional_programs'])} functional programs, "
+              f"{len(all_evidence['tissue_disease_context'])} context items")
         
         return all_evidence
+    
+    def _get_llm_gene_knowledge(self, genes: List[str], tissue_context: Optional[str] = None,
+                               disease_context: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Use LLM to quickly retrieve gene knowledge without PubMed queries.
+        This is much faster for common genes.
+        """
+        try:
+            llm_engine = ChatOpenAI(model_string=self.model_string, is_multimodal=False, api_key=self.api_key)
+            
+            prompt = f"""You are a gene annotation expert. For the following genes, provide their known functions, lineage markers, and cell type associations.
+
+Genes: {', '.join(genes)}
+Tissue context: {tissue_context or 'not specified'}
+Disease context: {disease_context or 'not specified'}
+
+For each gene, provide:
+1. Known lineage markers or cell type associations (if any)
+2. Primary biological functions
+3. Relevant tissue/disease context (if applicable)
+
+Output in JSON format:
+{{
+  "genes": [
+    {{
+      "gene": "GENE_NAME",
+      "lineage_markers": ["marker1", "marker2"],
+      "functions": ["function1", "function2"],
+      "tissue_context": "relevant tissue info",
+      "confidence": "high/medium/low"
+    }}
+  ]
+}}
+
+Only include information you are confident about. Use "N/A" if information is not available."""
+            
+            response = llm_engine(prompt)
+            response_text = response.strip()
+            
+            # Parse JSON from response
+            if response_text.startswith("```"):
+                response_text = response_text.split("```")[1]
+                if response_text.startswith("json"):
+                    response_text = response_text[4:]
+            response_text = response_text.strip()
+            
+            llm_data = json.loads(response_text)
+            
+            # Convert to evidence format
+            evidence = {
+                "hard_lineage_markers": [],
+                "functional_programs": [],
+                "tissue_disease_context": []
+            }
+            
+            for gene_info in llm_data.get("genes", []):
+                gene = gene_info.get("gene", "")
+                if gene not in genes:
+                    continue
+                
+                # Add lineage markers
+                if gene_info.get("lineage_markers"):
+                    for marker in gene_info["lineage_markers"]:
+                        evidence["hard_lineage_markers"].append({
+                            "gene": gene,
+                            "source": "LLM Knowledge",
+                            "pmid": None,
+                            "url": None,
+                            "title": f"{gene} as {marker} marker",
+                            "abstract": f"Known lineage marker: {marker}",
+                            "evidence_type": "hard_lineage_marker"
+                        })
+                
+                # Add functions
+                if gene_info.get("functions"):
+                    for func in gene_info["functions"]:
+                        evidence["functional_programs"].append({
+                            "gene": gene,
+                            "source": "LLM Knowledge",
+                            "pmid": None,
+                            "url": None,
+                            "title": f"{gene} function: {func}",
+                            "abstract": f"Known function: {func}",
+                            "evidence_type": "functional_program"
+                        })
+                
+                # Add tissue context
+                if gene_info.get("tissue_context") and gene_info["tissue_context"] != "N/A":
+                    evidence["tissue_disease_context"].append({
+                        "gene": gene,
+                        "source": "LLM Knowledge",
+                        "pmid": None,
+                        "url": None,
+                        "title": f"{gene} in {gene_info['tissue_context']}",
+                        "abstract": gene_info["tissue_context"],
+                        "evidence_type": "tissue_disease_context"
+                    })
+            
+            return evidence
+            
+        except Exception as e:
+            print(f"Error getting LLM gene knowledge: {e}")
+            return {
+                "hard_lineage_markers": [],
+                "functional_programs": [],
+                "tissue_disease_context": []
+            }
 
     def _calculate_confidence_breakdown(self, evidence: Dict[str, Any], 
                                       intrinsic_status: str) -> Dict[str, float]:
