@@ -13,7 +13,7 @@ class Cell_Cluster_Functional_Hypothesis_Tool(BaseTool):
     def __init__(self, model_string="gpt-4o-mini", api_key=None):
         super().__init__(
             tool_name="Cell_Cluster_Functional_Hypothesis_Tool",
-            tool_description="A specialized tool for generating functional state hypotheses for cell clusters based on their top regulator genes. Follows strict evidence hierarchy and uncertainty principles. Outputs structured annotations with confidence scores and evidence citations.",
+            tool_description="SPECIALIZED tool for cell cluster functional annotation tasks. Generates functional state hypotheses for cell clusters based on their top regulator genes. This tool internally handles literature search (PubMed), evidence collection, and hypothesis synthesis following strict evidence hierarchy and uncertainty principles. Use this tool INSTEAD of manually calling Pubmed_Search_Tool + Generalist_Solution_Generator_Tool for cluster annotation tasks. Outputs structured annotations with confidence scores and evidence citations. Input: clusters with regulator_genes, tissue_context, disease_context, target_lineage.",
             tool_version="1.0.0",
             input_types={
                 "clusters": "list[dict] - List of cluster dictionaries, each containing: cluster_id (str), regulator_genes (list[str]), tissue_context (str, optional), disease_context (str, optional), target_lineage (str, optional)",

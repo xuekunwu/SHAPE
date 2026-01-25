@@ -298,7 +298,7 @@ MULTI-IMAGE PROCESSING CONTEXT:
         
         # Get recommended next tools
         recommended_tools = self.priority_manager.get_recommended_next_tools(
-            available_tools, used_tools, detected_domain
+            available_tools, used_tools, detected_domain, question, query_analysis
         )
         recommended_str = ", ".join(recommended_tools[:5]) if recommended_tools else "None"
         
@@ -361,14 +361,24 @@ TASK DOMAIN AWARENESS:
 
 **Knowledge Domain (Non-Image Analysis):**
 The system has detected this as a knowledge-based task (literature mining, gene annotation, pathway enrichment, functional analysis, etc.).
-- **CRITICAL: Use actual search tools FIRST to retrieve real knowledge from databases**
+
+**CRITICAL: For cell cluster functional annotation tasks, use the specialized tool:**
+- **If the query involves cell clusters with regulator genes, functional state annotation, or cluster classification:**
+  - **USE Cell_Cluster_Functional_Hypothesis_Tool FIRST** - This specialized tool internally handles:
+    * Literature search (PubMed) for all genes in batch
+    * Evidence collection and evaluation
+    * Functional hypothesis generation with confidence scores
+    * Structured output with citations
+  - **DO NOT manually call Pubmed_Search_Tool + Generalist_Solution_Generator_Tool** - The specialized tool replaces this workflow
+  - Input format: clusters=[{"cluster_id": "...", "regulator_genes": ["GENE1", "GENE2"], "tissue_context": "...", "disease_context": "...", "target_lineage": "..."}]
+
+**For other knowledge tasks (general literature mining, gene function lookup, etc.):**
+- **Use search tools FIRST** to retrieve real knowledge from databases:
   - For literature mining: Use Pubmed_Search_Tool to search PubMed for relevant articles
   - For general knowledge: Use Google_Search_Tool to find current information
   - For academic papers: Use ArXiv_Paper_Searcher_Tool for preprints
   - These tools provide REAL, VERIFIABLE information with actual citations
 - **Then use Generalist_Solution_Generator_Tool** to synthesize the search results into comprehensive answers
-- These tasks require knowledge retrieval from external sources, NOT just language model knowledge
-- Examples: "Perform literature mining for gene clusters" → First use Pubmed_Search_Tool to find papers, then use Generalist_Solution_Generator_Tool to synthesize
 - Workflow: Search tools (Pubmed_Search_Tool, Google_Search_Tool) → Generalist_Solution_Generator_Tool (synthesis with references)
 
 **Bioimage Domain (Image Analysis):**
@@ -377,9 +387,13 @@ For image analysis tasks, follow the bioimage analysis chain below.
 INSTRUCTIONS:
 1. Review the query analysis and detected domain to understand what type of analysis is needed
 2. For knowledge domain: 
-   - FIRST: Use search tools (Pubmed_Search_Tool, Google_Search_Tool, ArXiv_Paper_Searcher_Tool) to retrieve REAL knowledge from databases
-   - THEN: Use Generalist_Solution_Generator_Tool to synthesize search results with proper citations
-   - DO NOT use Generalist_Solution_Generator_Tool alone - it should synthesize actual search results
+   - **If cluster annotation task (regulator genes, functional state, cluster classification):**
+     * USE Cell_Cluster_Functional_Hypothesis_Tool directly - it handles search + synthesis internally
+     * DO NOT manually call Pubmed_Search_Tool first
+   - **For other knowledge tasks:**
+     * FIRST: Use search tools (Pubmed_Search_Tool, Google_Search_Tool, ArXiv_Paper_Searcher_Tool) to retrieve REAL knowledge
+     * THEN: Use Generalist_Solution_Generator_Tool to synthesize search results with proper citations
+     * DO NOT use Generalist_Solution_Generator_Tool alone - it should synthesize actual search results
 3. For bioimage domain: Check what has been done (PREVIOUS STEPS) and what is still needed
 4. For bioimage domain: Follow the bioimage analysis chain appropriate for the query type
 5. Use intelligent reasoning: Evaluate whether each step adds value or if a more direct approach would be better

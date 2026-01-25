@@ -102,6 +102,14 @@ KNOWLEDGE_KEYWORDS: Set[str] = {
     'cell cluster', 'cluster annotation', 'functional inference', 'cluster functional'
 }
 
+# Keywords for detecting cell cluster functional annotation tasks (use specialized tool)
+CLUSTER_ANNOTATION_KEYWORDS: Set[str] = {
+    'cluster annotation', 'cluster functional', 'functional hypothesis', 'functional state',
+    'regulator gene', 'regulator genes', 'top regulator', 'top regulators',
+    'cell cluster', 'gene cluster', 'cluster identity', 'cluster classification',
+    'cluster marker', 'cluster markers', 'cluster function', 'cluster functions'
+}
+
 
 class ToolPriorityManager:
     """Manages tool priorities and filtering based on task domain."""
@@ -182,17 +190,21 @@ class ToolPriorityManager:
         for tool in available_tools:
             priority = self.get_priority(tool)
             
-            # For knowledge domain (non-image analysis tasks), prioritize search tools
+            # For knowledge domain (non-image analysis tasks)
             if domain == 'knowledge':
-                # Knowledge tasks need search tools FIRST, then specialized tools, then synthesis tools
-                if 'Search' in tool or 'Searcher' in tool or 'Fetcher' in tool:
-                    # Prioritize search tools for knowledge tasks (even if EXCLUDED for bioimage)
+                # Check if this is a cluster annotation task (needs specialized tool)
+                is_cluster_task = self.is_cluster_annotation_task(query="", query_analysis="")
+                # Note: We can't access query here, so we'll handle this in the sorting/priority logic
+                
+                if tool == 'Cell_Cluster_Functional_Hypothesis_Tool':
+                    # HIGHEST priority for cluster functional hypothesis tool in knowledge domain
+                    # This tool internally handles search + synthesis, so it should be preferred
                     filtered.append(tool)
-                elif tool == 'Cell_Cluster_Functional_Hypothesis_Tool':
-                    # High priority for cluster functional hypothesis tool
+                elif 'Search' in tool or 'Searcher' in tool or 'Fetcher' in tool:
+                    # Search tools for general knowledge tasks (even if EXCLUDED for bioimage)
                     filtered.append(tool)
                 elif tool == 'Generalist_Solution_Generator_Tool':
-                    # Also allow Generalist_Solution_Generator_Tool for synthesis
+                    # Synthesis tool (use after search, or as fallback)
                     filtered.append(tool)
                 elif priority == ToolPriority.EXCLUDED:
                     # Exclude image processing tools for knowledge tasks
@@ -230,7 +242,17 @@ class ToolPriorityManager:
                     excluded.append(tool)
         
         # Sort filtered tools by priority (lower number = higher priority)
-        filtered.sort(key=lambda t: (self.get_priority(t).value, t))
+        # Special handling: prioritize Cell_Cluster_Functional_Hypothesis_Tool for knowledge domain
+        if domain == 'knowledge':
+            # Custom sort: Cell_Cluster_Functional_Hypothesis_Tool first, then by priority
+            def sort_key(t):
+                if t == 'Cell_Cluster_Functional_Hypothesis_Tool':
+                    return (0, t)  # Highest priority
+                priority = self.get_priority(t)
+                return (priority.value, t)
+            filtered.sort(key=sort_key)
+        else:
+            filtered.sort(key=lambda t: (self.get_priority(t).value, t))
         
         return filtered, excluded
     
@@ -248,7 +270,9 @@ class ToolPriorityManager:
         self,
         available_tools: List[str],
         used_tools: List[str],
-        domain: str = 'bioimage'
+        domain: str = 'bioimage',
+        query: str = "",
+        query_analysis: str = ""
     ) -> List[str]:
         """
         Get recommended next tools based on dependencies and priorities.
@@ -262,6 +286,11 @@ class ToolPriorityManager:
             List of recommended tools in priority order
         """
         filtered_tools, _ = self.filter_tools_for_domain(available_tools, domain)
+        
+        # For knowledge domain with cluster annotation tasks, prioritize specialized tool
+        if domain == 'knowledge' and self.is_cluster_annotation_task(query, query_analysis):
+            if 'Cell_Cluster_Functional_Hypothesis_Tool' in filtered_tools and 'Cell_Cluster_Functional_Hypothesis_Tool' not in used_tools:
+                return ['Cell_Cluster_Functional_Hypothesis_Tool'] + [t for t in filtered_tools if t != 'Cell_Cluster_Functional_Hypothesis_Tool']
         
         # Check dependencies
         recommended = []
