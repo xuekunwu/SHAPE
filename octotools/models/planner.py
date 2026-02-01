@@ -370,7 +370,7 @@ The system has detected this as a knowledge-based task (literature mining, gene 
     * Functional hypothesis generation with confidence scores
     * Structured output with citations
   - **DO NOT manually call Pubmed_Search_Tool + Generalist_Solution_Generator_Tool** - The specialized tool replaces this workflow
-  - Input format: clusters=[{"cluster_id": "...", "regulator_genes": ["GENE1", "GENE2"], "tissue_context": "...", "disease_context": "...", "target_lineage": "..."}]
+  - Input format: clusters=[{{"cluster_id": "...", "regulator_genes": ["GENE1", "GENE2"], "tissue_context": "...", "disease_context": "...", "target_lineage": "..."}}]
 
 **For other knowledge tasks (general literature mining, gene function lookup, etc.):**
 - **Use search tools FIRST** to retrieve real knowledge from databases:
