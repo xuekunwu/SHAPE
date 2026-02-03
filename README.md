@@ -138,7 +138,7 @@ If you use SHAPE in your research, please cite:
 }
 ```
 
-## Contributors
+### Contributors
 
 | [xuekunwu](https://github.com/xuekunwu) |
 |----------------------------------------|
