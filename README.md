@@ -44,7 +44,7 @@ Single-cell Cropper → Cell-state Analyzer → Morphology Clusters
 ### Extensible GPU-Compatible Tools
 
 SHAPE integrates with a wide range of tools and libraries:
-- **Deep Learning**: PyTorch, DINO v3, Cellpose
+- **Deep Learning**: PyTorch, [DINOv3](https://github.com/facebookresearch/dinov3), [cellpose-sam](https://github.com/MouseLand/cellpose)
 - **Image Processing**: NumPy, Scikit-image, OpenCV
 - **Single-cell Analysis**: Scanpy, Scvi-tools
 - **Visualization**: Matplotlib, Seaborn
