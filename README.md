@@ -169,6 +169,12 @@ If you use SHAPE in your research, please cite:
 }
 ```
 
+## Contributors
+
+| [xuekunwu](https://github.com/xuekunwu) | [lupantech](https://github.com/lupantech) | [bowen118](https://github.com/bowen118) |
+|----------------------------------------|-------------------------------------------|-----------------------------------------|
+| **Xuekun Wu**                          | **Pan Lu**                                | **Bowen Chen**                           |
+
 ## License
 
 MIT License - see [LICENSE](LICENSE) for details.
