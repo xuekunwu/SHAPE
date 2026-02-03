@@ -138,12 +138,6 @@ If you use SHAPE in your research, please cite:
 }
 ```
 
-### Contributors
-
-| [xuekunwu](https://github.com/xuekunwu) |
-|----------------------------------------|
-| **Xuekun Wu**                          |
-
 ## License
 
 MIT License - see [LICENSE](LICENSE) for details.
