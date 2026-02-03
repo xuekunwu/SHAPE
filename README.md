@@ -86,26 +86,51 @@ pip install -r requirements.txt
 export OPENAI_API_KEY="<your-api-key-here>"
 ```
 
+### Verify Installation
+
+After installation, verify that everything is set up correctly:
+
+```bash
+python test_installation.py
+```
+
+This will test imports, dependencies, and tool discovery.
+
 ## Quick Start
 
 ```python
-from shape.agent.planner import Planner
-from shape.agent.executor import Executor
+import os
+from solver import solve
 
-# Initialize agent components
-planner = Planner(
-    llm_engine_name="gpt-4",
-    available_tools=get_available_tools(),
+# Set your API key
+os.environ["OPENAI_API_KEY"] = "your-api-key-here"
+
+# Solve a problem
+result = solve(
+    question="What cell states are present in this image?",
+    image_path="path/to/image.tif",
+    llm_engine_name="gpt-4o"
+)
+
+print(result["direct_output"])
+```
+
+For more control, you can use `construct_solver` to get individual components:
+
+```python
+from solver import construct_solver
+
+# Construct solver with all components
+solver = construct_solver(
+    llm_engine_name="gpt-4o",
     api_key=os.getenv("OPENAI_API_KEY")
 )
 
-executor = Executor(planner=planner)
+planner = solver["planner"]
+executor = solver["executor"]
+memory = solver["memory"]
 
-# Execute a query
-result = executor.execute(
-    question="What cell states are present in this image?",
-    image_path="path/to/image.tif"
-)
+# Use components as needed...
 ```
 
 ## Repository Structure

@@ -6,12 +6,12 @@ for morphological analysis of cell images.
 """
 
 import os
-from shape.agent.planner import Planner
-from shape.agent.executor import Executor
-from shape.agent.memory import Memory
+import sys
 
-# TODO: Import tool discovery function
-# from shape.tools import get_available_tools
+# Add parent directory to path to import solver
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from solver import solve, construct_solver
 
 
 def analyze_cell_states(image_path: str, query: str, api_key: str):
@@ -24,22 +24,43 @@ def analyze_cell_states(image_path: str, query: str, api_key: str):
         api_key: OpenAI API key
     
     Returns:
+        Analysis results dictionary
+    """
+    # Use the high-level solve function
+    result = solve(
+        question=query,
+        image_path=image_path,
+        llm_engine_name="gpt-4o",
+        api_key=api_key,
+        max_steps=10
+    )
+    
+    return result
+
+
+def analyze_with_custom_setup(image_path: str, query: str, api_key: str):
+    """
+    Example using construct_solver for more control.
+    
+    Args:
+        image_path: Path to the image file
+        query: Natural language query
+        api_key: OpenAI API key
+    
+    Returns:
         Analysis results
     """
-    # Initialize agent components
-    planner = Planner(
+    # Construct solver components
+    solver = construct_solver(
         llm_engine_name="gpt-4o",
-        available_tools=get_available_tools(),  # TODO: Implement
         api_key=api_key
     )
     
-    executor = Executor(
-        llm_engine_name="gpt-4o",
-        query_cache_dir="output/cache",
-        api_key=api_key
-    )
+    planner = solver["planner"]
+    executor = solver["executor"]
+    memory = solver["memory"]
     
-    memory = Memory()
+    # Set query
     memory.set_query(query)
     
     # Analyze query
@@ -48,10 +69,9 @@ def analyze_cell_states(image_path: str, query: str, api_key: str):
         image=image_path
     )
     
-    # Execute analysis steps
+    # Execute steps (simplified - see solver.py for full implementation)
     max_steps = 10
     for step in range(1, max_steps + 1):
-        # Generate next step
         next_step = planner.generate_next_step(
             question=query,
             image=image_path,
@@ -61,7 +81,6 @@ def analyze_cell_states(image_path: str, query: str, api_key: str):
             max_step_count=max_steps
         )
         
-        # Verify if we can stop
         verification = planner.verificate_memory(
             question=query,
             image=image_path,
@@ -69,17 +88,22 @@ def analyze_cell_states(image_path: str, query: str, api_key: str):
             memory=memory
         )
         
-        if verification.stop_signal:
+        if verification.stop_signal == "STOP":
             break
         
-        # Execute tool
+        # Get tool metadata
+        tool_metadata = solver["initializer"].get_toolbox_metadata().get(
+            next_step.tool_name, {}
+        )
+        
+        # Generate and execute tool command
         tool_command = executor.generate_tool_command(
             question=query,
             image=image_path,
             context=next_step.context,
             sub_goal=next_step.sub_goal,
             tool_name=next_step.tool_name,
-            tool_metadata={},  # TODO: Get from registry
+            tool_metadata=tool_metadata,
             memory=memory
         )
         
@@ -88,7 +112,6 @@ def analyze_cell_states(image_path: str, query: str, api_key: str):
             command=tool_command.command
         )
         
-        # Update memory
         memory.add_action(
             step_count=step,
             tool_name=next_step.tool_name,
@@ -104,18 +127,61 @@ def analyze_cell_states(image_path: str, query: str, api_key: str):
         memory=memory
     )
     
-    return final_answer
+    return {
+        "direct_output": final_answer.direct_output,
+        "memory": memory
+    }
 
 
 if __name__ == "__main__":
     # Example usage
-    image_path = "examples/example_image.tif"
-    query = "What cell states are present in this image?"
-    api_key = os.getenv("OPENAI_API_KEY")
+    import argparse
     
+    parser = argparse.ArgumentParser(description="SHAPE basic usage example")
+    parser.add_argument(
+        "--image",
+        type=str,
+        default="examples/iPSC-cardiomyocyte.tif",
+        help="Path to image file"
+    )
+    parser.add_argument(
+        "--query",
+        type=str,
+        default="What cell states are present in this image?",
+        help="Query to analyze"
+    )
+    parser.add_argument(
+        "--api-key",
+        type=str,
+        default=None,
+        help="OpenAI API key (or set OPENAI_API_KEY env var)"
+    )
+    
+    args = parser.parse_args()
+    
+    # Get API key
+    api_key = args.api_key or os.getenv("OPENAI_API_KEY")
     if not api_key:
-        raise ValueError("Please set OPENAI_API_KEY environment variable")
+        raise ValueError(
+            "Please provide API key via --api-key argument "
+            "or set OPENAI_API_KEY environment variable"
+        )
     
-    result = analyze_cell_states(image_path, query, api_key)
-    print(result)
+    # Check if image exists
+    if not os.path.exists(args.image):
+        print(f"Warning: Image file not found: {args.image}")
+        print("Using query-only mode (no image)")
+        args.image = None
+    
+    # Run analysis
+    print(f"Query: {args.query}")
+    if args.image:
+        print(f"Image: {args.image}")
+    
+    result = analyze_cell_states(args.image, args.query, api_key)
+    
+    print("\n" + "="*50)
+    print("Analysis Result:")
+    print("="*50)
+    print(result["direct_output"])
 
