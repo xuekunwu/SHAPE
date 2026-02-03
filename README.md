@@ -155,11 +155,11 @@ SHAPE/
 If you use SHAPE in your research, please cite:
 
 ```bibtex
-@software{shape2024,
-  title={SHAPE: Self-supervised morpHology Agent for cellular Phenotype},
-  author={Wu, Xuekun},
-  year={2024},
-  url={https://github.com/xuekunwu/SHAPE}
+@article{wu2026shape,
+    title={Augmented agentic inference of morphological cell states across biological scales},
+    author={Xuekun Wu, Pan Lu, Di Yin, Xiu Liu, Anisa Subbiah, Zehra Yildirim, Xin Zhou, Le Cong, James Zou, Joseph Wu},
+    journal = {not available yet},
+    year={2026}
 }
 ```
 
