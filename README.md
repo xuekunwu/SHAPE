@@ -115,7 +115,7 @@ os.environ["OPENAI_API_KEY"] = "your-api-key-here"
 result = solve(
     question="What cell states are present in this image?",
     image_path="path/to/image.tif",
-    llm_engine_name="gpt-4o"
+    llm_engine_name="gpt-5-mini"
 )
 
 print(result["direct_output"])
