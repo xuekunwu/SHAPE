@@ -54,7 +54,7 @@ SHAPE does not assume specific biological tasks. The agent adapts to diverse que
 
 ### Not a Demo
 
-The Hugging Face Space is a showcase, not the core system. The framework is designed for programmatic use and research.
+The framework is designed for programmatic use and research.
 
 ## Abstraction Levels
 
@@ -72,9 +72,8 @@ The Hugging Face Space is a showcase, not the core system. The framework is desi
 - Image processing utilities
 - Caching and persistence
 
-### Application Level (`hf_space/`, `examples/`)
+### Application Level (`examples/`)
 
-- User interfaces
 - Example workflows
 - Demonstrations
 

@@ -339,8 +339,7 @@ class Image_Preprocessor_Tool(BaseTool):
         Returns:
             Dictionary containing processing results and file paths
         """
-        # Force output_format to 'png' for Visual Outputs compatibility
-        # PNG format is required for proper display in Gradio Gallery
+        # Force output_format to 'png' for visual outputs compatibility
         output_format = 'png'
         
         # Ensure output directory exists

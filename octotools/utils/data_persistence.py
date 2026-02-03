@@ -68,7 +68,7 @@ def get_dataset_dir() -> Path:
 
 def save_query_data(query_id: str, query: str, image_path: str, dataset_dir: Path = None) -> None:
     """
-    Save query data to Huggingface dataset.
+    Save query data to local cache.
     
     Args:
         query_id: Unique identifier for the query
@@ -136,7 +136,7 @@ def save_feedback(query_id: str, feedback_type: str, feedback_text: str = None, 
 
 def save_steps_data(query_id: str, memory: Memory, dataset_dir: Path = None) -> None:
     """
-    Save steps data to Huggingface dataset.
+    Save steps data to local cache.
     
     Args:
         query_id: Unique identifier for the query
@@ -158,7 +158,7 @@ def save_steps_data(query_id: str, memory: Memory, dataset_dir: Path = None) -> 
     
 def save_module_data(query_id: str, key: str, value: Any, dataset_dir: Path = None) -> None:
     """
-    Save module data to Huggingface dataset.
+    Save module data to local cache.
     
     Args:
         query_id: Unique identifier for the query

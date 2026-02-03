@@ -22,7 +22,6 @@ diskcache==5.6.3
 transformers>=4.44.2  # Updated to allow newer versions with Python 3.13 support
 pymed==0.8.9
 metapub==0.5.12
-gradio==5.23.1
 
 # Deep learning and GPU support
 torch>=2.0.0

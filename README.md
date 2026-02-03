@@ -120,17 +120,8 @@ SHAPE/
 │   │   └── omics/          # GRN, ligand-receptor analysis
 │   └── schemas/            # Tool and observation schemas
 ├── examples/                # Reproducible analysis notebooks
-├── docs/                    # Design documents and methodology
-└── hf_space/                # Hugging Face Space demo (showcase)
+└── docs/                    # Design documents and methodology
 ```
-
-## Hugging Face Space
-
-SHAPE is showcased through an interactive demo on Hugging Face Spaces:
-
-🔗 **[Try SHAPE on Hugging Face](https://huggingface.co/spaces/5xuekun/SHAPE)**
-
-The Space demonstrates SHAPE's capabilities through a user-friendly interface, but the core framework is designed for programmatic use and integration into research workflows.
 
 ## Citation
 
@@ -154,6 +145,4 @@ MIT License - see [LICENSE](LICENSE) for details.
 We welcome contributions! Please see our contributing guidelines for details on code style, testing, and the pull request process.
 
 ---
-
-**Note**: SHAPE is a research framework. The Hugging Face Space is a demonstration of capabilities, not the core system. For production use, refer to the framework code in `shape/` and the examples in `examples/`.
 
