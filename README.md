@@ -132,11 +132,17 @@ If you use SHAPE in your research, please cite:
 ```bibtex
 @software{shape2024,
   title={SHAPE: Self-supervised morpHology Agent for cellular Phenotype},
-  author={Your Name},
+  author={Wu, Xuekun},
   year={2024},
   url={https://github.com/xuekunwu/SHAPE}
 }
 ```
+
+## Contributors
+
+| [xuekunwu](https://github.com/xuekunwu) |
+|----------------------------------------|
+| **Xuekun Wu**                          |
 
 ## License
 
