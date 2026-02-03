@@ -14,10 +14,10 @@ def test_imports():
     print("Testing imports...")
     
     try:
-        from solver import solve, construct_solver, get_available_tools
-        print("✓ solver module imported successfully")
+        from shape import solve, construct_solver, get_available_tools
+        print("✓ shape module imported successfully")
     except ImportError as e:
-        print(f"✗ Failed to import solver: {e}")
+        print(f"✗ Failed to import shape: {e}")
         return False
     
     try:
@@ -46,7 +46,7 @@ def test_tool_discovery():
     print("\nTesting tool discovery...")
     
     try:
-        from solver import get_available_tools
+        from shape import get_available_tools
         tools = get_available_tools()
         print(f"✓ Discovered {len(tools)} tools")
         if len(tools) > 0:
@@ -62,7 +62,7 @@ def test_solver_construction():
     print("\nTesting solver construction...")
     
     try:
-        from solver import construct_solver
+        from shape import construct_solver
         
         # This should fail gracefully without API key
         try:

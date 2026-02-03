@@ -8,10 +8,10 @@ for morphological analysis of cell images.
 import os
 import sys
 
-# Add parent directory to path to import solver
+# Add parent directory to path to import shape
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from solver import solve, construct_solver
+from shape import solve, construct_solver
 
 
 def analyze_cell_states(image_path: str, query: str, api_key: str):

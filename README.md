@@ -100,7 +100,7 @@ This will test imports, dependencies, and tool discovery.
 
 ```python
 import os
-from solver import solve
+from shape import solve
 
 # Set your API key
 os.environ["OPENAI_API_KEY"] = "your-api-key-here"
@@ -118,7 +118,7 @@ print(result["direct_output"])
 For more control, you can use `construct_solver` to get individual components:
 
 ```python
-from solver import construct_solver
+from shape import construct_solver
 
 # Construct solver with all components
 solver = construct_solver(
@@ -140,14 +140,14 @@ SHAPE/
 ├── README.md                 # This file
 ├── shape/                    # Core framework
 │   ├── agent/               # Agent logic (planner, executor, memory)
-│   └── schemas/             # Tool and observation schemas
+│   ├── schemas/             # Tool and observation schemas
+│   └── solver.py            # Main entry point (solve, construct_solver)
 ├── octotools/               # Tool implementations and utilities
 │   ├── tools/              # Modular tool implementations
 │   ├── models/             # Core models (planner, executor, memory)
 │   ├── engine/             # LLM engine integrations
 │   └── utils/              # Utility functions
-├── examples/                # Reproducible analysis notebooks
-└── docs/                    # Design documents and methodology
+└── examples/                # Reproducible analysis notebooks
 ```
 
 ## Citation
