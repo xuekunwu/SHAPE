@@ -1,76 +1,108 @@
-# SHAPE: Self-supervised morpHology Agent for cellular Phenotype
+# SHAPE: Self-supervised morpHology Agent for cellular PhenotypE
 
-**SHAPE** is an agentic framework that treats cell morphology as an executable layer for biological reasoning. Unlike traditional image analysis pipelines, SHAPE uses an LLM-driven agent to dynamically plan and execute morphological analysis workflows, enabling adaptive reasoning across biological scales.
+**SHAPE** is an augmented agentic framework for morphological cell state inference across biological scales. Unlike traditional sequencing-based approaches that require months and thousands of dollars, SHAPE enables real-time morphological analysis in 5-30 minutes at less than $5, using live-cell imaging and LLM-driven planning.
 
-## Core Philosophy
+## Why SHAPE?
 
-SHAPE is built on three foundational principles:
+Traditional sequencing-based methods for cell state analysis require:
+- ⏱️ **3-6 months** of processing time
+- 💰 **> $5,000** per experiment
+- 🔬 **Destructive sampling** (no live-cell compatibility)
 
-1. **Morphology-First Reasoning**: Morphological observations are first-class objects in the reasoning process, not just preprocessing steps for downstream analysis.
-
-2. **Agentic Planning**: An LLM-driven planner dynamically selects and orchestrates tools based on query intent, avoiding hard-coded pipelines and enabling flexible, context-aware analysis.
-
-3. **Modular Tools**: Tools are composable and swappable via unified interfaces, allowing the framework to adapt to new biological questions without core modifications.
+SHAPE offers a revolutionary alternative:
+- ⚡ **5-30 minutes** for complete analysis
+- 💵 **< $5** per experiment
+- 🔬 **Live-cell compatible** - works with real-time imaging
+- 🤖 **LLM-driven planning** - intelligent workflow generation
+- 🔧 **Extensible tools** - easy integration of new methods
+- 🚀 **GPU-accelerated** - leverages modern deep learning models
 
 ## Architecture
 
+SHAPE follows a four-stage pipeline orchestrated by an intelligent agent:
+
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                      User Query                              │
-└──────────────────────┬──────────────────────────────────────┘
-                       │
-                       ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    Agent (Planner)                          │
-│  • Query analysis & intent understanding                    │
-│  • Dynamic tool selection                                   │
-│  • Multi-step planning with memory                          │
-└──────────────────────┬──────────────────────────────────────┘
-                       │
-                       ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    Tool Registry                            │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐    │
-│  │ Vision       │  │ Analysis     │  │ Knowledge    │    │
-│  │ Tools        │  │ Tools        │  │ Tools       │    │
-│  └──────────────┘  └──────────────┘  └──────────────┘    │
-└──────────────────────┬──────────────────────────────────────┘
-                       │
-                       ▼
-┌─────────────────────────────────────────────────────────────┐
-│              Morphological Observations                      │
-│  • Segmentation masks                                       │
-│  • Cell embeddings                                          │
-│  • Spatial graphs                                           │
-│  • State classifications                                    │
-└─────────────────────────────────────────────────────────────┘
+Raw Images → Image Preprocessor → Cell/Organoid Segmenter → 
+Single-cell Cropper → Cell-state Analyzer → Morphology Clusters
 ```
 
-### Key Components
+### Core Components
 
-- **`shape/agent/`**: Core agent logic including the planner, executor, and memory system
-- **`shape/schemas/`**: Unified schemas for tool inputs/outputs and morphological observations
-- **`octotools/tools/`**: Modular tool implementations including:
-  - **Vision tools**: Image preprocessing, segmentation (cell/nuclei/organoid), single-cell cropping, feature extraction, clustering, visualization
-  - **Analysis tools**: Cell state analysis, functional hypothesis generation
-  - **Knowledge tools**: PubMed search, ArXiv search, Wikipedia search, Google search
-  - **Utility tools**: Python code generation, text extraction, image captioning
+**SHAPE Agent** consists of two main components:
+
+1. **Planner**:
+   - Query analyzer: Understands user queries (e.g., "How many cell states in the image?")
+   - Action predictor: Generates tool selection and execution plans
+   - Context verifier: Validates intermediate results and decides when to stop
+   - Solution generator: Synthesizes final answers from execution history
+
+2. **Executor**:
+   - Command generator: Converts planner actions into tool-specific commands
+   - Command executor: Executes tools and collects results
+   - Tool calling: Interfaces with extensible GPU-compatible tools
+
+### Extensible GPU-Compatible Tools
+
+SHAPE integrates with a wide range of tools and libraries:
+- **Deep Learning**: PyTorch, DINO v3, Cellpose
+- **Image Processing**: NumPy, Scikit-image, OpenCV
+- **Single-cell Analysis**: Scanpy, Scvi-tools
+- **Visualization**: Matplotlib, Seaborn
+- **Data Processing**: Pandas
+
+### Processing Pipeline
+
+1. **Image Preprocessor**: Enhances and normalizes raw microscopy images
+2. **Cell/Organoid Segmenter**: Performs instance segmentation to generate individual masks
+3. **Single-cell Cropper**: Extracts individual cell crops from segmented masks
+4. **Cell-state Analyzer**: Applies self-supervised learning to identify morphological cell states
+
+### Key Features
+
+- **Real-time Analysis**: 5-30 minutes vs. 3-6 months for sequencing-based methods
+- **Cost-effective**: < $5 vs. > $5,000 for traditional approaches
+- **Live-cell Compatible**: Works with live-cell imaging without sample destruction
+- **LLM-driven Planning**: Intelligent tool selection and workflow orchestration
+- **GPU-accelerated**: Leverages GPU computing for deep learning models
+- **Extensible Tools**: Easy integration of new tools and methods
+- **Multi-channel Support**: Handles multi-channel microscopy images
+- **Multi-group Comparison**: Enables comparative analysis across experimental groups
 
 ## Biological Applications
 
-SHAPE enables a wide range of morphological reasoning tasks:
+SHAPE supports diverse applications in biological research:
 
-- **Cell State Discovery**: Self-supervised learning on morphological features to identify distinct cellular states
-- **Phenotypic Comparison**: Quantitative comparison of morphological phenotypes across conditions
-- **Spatial Context Analysis**: Integration of morphological features with spatial neighborhood information
-- **Multi-Scale Reasoning**: From single-cell morphology to tissue-level patterns
+- **iPSC Differentiation Purity**: Assess differentiation efficiency and purity in induced pluripotent stem cell cultures
+- **Cell-state Trajectory**: Track cellular state transitions and developmental trajectories
+- **Organoid Activities**: Analyze organoid morphology and activity patterns
+- **Spatial Annotation**: Integrate morphological features with spatial context
+- **Phenotypic Screening**: High-throughput screening of cellular phenotypes
+
+### Comparison with Traditional Methods
+
+| Approach | Time | Cost | Output | Live-cell |
+|----------|------|------|--------|-----------|
+| **Sequencing-based** | 3-6 months | > $5,000 | Transcriptomic cell states | No |
+| **SHAPE (Agentic image-based)** | 5-30 mins | < $5 | Morphological cell states | Yes |
+
+### Capabilities
+
+SHAPE excels across multiple bioimage analysis tasks:
+- ✅ Call deep-learning tools
+- ✅ GPU-enabled computing
+- ✅ Cell feature learning
+- ✅ Multigroup comparison
+- ✅ Cell segmentation
+- ✅ Multichannel image processing
+- ✅ Image normalization
 
 ## Design Principles
 
-- **No Hard-Coded Pipelines**: The agent selects tools dynamically based on query requirements
-- **Task-Agnostic Core**: The agent makes minimal assumptions about specific biological tasks
-- **Composable Tools**: Tools expose unified interfaces and can be combined in novel ways
-- **Morphology as Data**: Morphological observations are structured, queryable objects
+- **Agentic Planning**: LLM-driven planner dynamically selects and orchestrates tools based on query intent
+- **No Hard-Coded Pipelines**: Flexible workflow generation avoids rigid analysis pipelines
+- **GPU-Compatible Tools**: Seamless integration with GPU-accelerated deep learning models
+- **Extensible Architecture**: Easy addition of new tools without modifying core framework
+- **Morphology-First Reasoning**: Morphological observations are first-class objects in the reasoning process
 
 ## Installation
 
