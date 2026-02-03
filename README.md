@@ -78,32 +78,6 @@ SHAPE supports diverse applications in biological research:
 - **Spatial Annotation**: Integrate morphological features with spatial context
 - **Phenotypic Screening**: High-throughput screening of cellular phenotypes
 
-### Comparison with Traditional Methods
-
-| Approach | Time | Cost | Output | Live-cell |
-|----------|------|------|--------|-----------|
-| **Sequencing-based** | 3-6 months | > $5,000 | Transcriptomic cell states | No |
-| **SHAPE (Agentic image-based)** | 5-30 mins | < $5 | Morphological cell states | Yes |
-
-### Capabilities
-
-SHAPE excels across multiple bioimage analysis tasks:
-- ✅ Call deep-learning tools
-- ✅ GPU-enabled computing
-- ✅ Cell feature learning
-- ✅ Multigroup comparison
-- ✅ Cell segmentation
-- ✅ Multichannel image processing
-- ✅ Image normalization
-
-## Design Principles
-
-- **Agentic Planning**: LLM-driven planner dynamically selects and orchestrates tools based on query intent
-- **No Hard-Coded Pipelines**: Flexible workflow generation avoids rigid analysis pipelines
-- **GPU-Compatible Tools**: Seamless integration with GPU-accelerated deep learning models
-- **Extensible Architecture**: Easy addition of new tools without modifying core framework
-- **Morphology-First Reasoning**: Morphological observations are first-class objects in the reasoning process
-
 ## Installation
 
 ```bash
