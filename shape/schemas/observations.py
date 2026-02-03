@@ -59,3 +59,4 @@ class MorphologicalObservation(BaseModel):
     spatial: Optional[SpatialObservation] = None
     metadata: Dict[str, Any] = {}
 
+

@@ -15,27 +15,27 @@ def test_imports():
     
     try:
         from shape import solve, construct_solver, get_available_tools
-        print("✓ shape module imported successfully")
+        print("[OK] shape module imported successfully")
     except ImportError as e:
-        print(f"✗ Failed to import shape: {e}")
+        print(f"[FAIL] Failed to import shape: {e}")
         return False
     
     try:
         from shape.agent.planner import Planner
         from shape.agent.executor import Executor
         from shape.agent.memory import Memory
-        print("✓ shape.agent modules imported successfully")
+        print("[OK] shape.agent modules imported successfully")
     except ImportError as e:
-        print(f"✗ Failed to import shape.agent modules: {e}")
+        print(f"[FAIL] Failed to import shape.agent modules: {e}")
         return False
     
     try:
-        from octotools.models.initializer import Initializer
-        from octotools.models.planner import Planner as OctoPlanner
-        from octotools.models.executor import Executor as OctoExecutor
-        print("✓ octotools modules imported successfully")
+        from shape.models.initializer import Initializer
+        from shape.models.planner import Planner as ShapePlanner
+        from shape.models.executor import Executor as ShapeExecutor
+        print("[OK] shape modules imported successfully")
     except ImportError as e:
-        print(f"✗ Failed to import octotools modules: {e}")
+        print(f"[FAIL] Failed to import shape modules: {e}")
         return False
     
     return True
@@ -48,12 +48,12 @@ def test_tool_discovery():
     try:
         from shape import get_available_tools
         tools = get_available_tools()
-        print(f"✓ Discovered {len(tools)} tools")
+        print(f"[OK] Discovered {len(tools)} tools")
         if len(tools) > 0:
             print(f"  Sample tools: {tools[:5]}")
         return True
     except Exception as e:
-        print(f"✗ Tool discovery failed: {e}")
+        print(f"[FAIL] Tool discovery failed: {e}")
         return False
 
 
@@ -70,18 +70,18 @@ def test_solver_construction():
                 llm_engine_name="gpt-4o",
                 api_key="test-key"
             )
-            print("✓ Solver construction successful")
+            print("[OK] Solver construction successful")
             print(f"  Available tools: {len(solver['available_tools'])}")
             return True
         except ValueError as e:
             if "API key" in str(e):
-                print("✓ Solver construction works (API key validation working)")
+                print("[OK] Solver construction works (API key validation working)")
                 return True
             else:
-                print(f"✗ Unexpected error: {e}")
+                print(f"[FAIL] Unexpected error: {e}")
                 return False
     except Exception as e:
-        print(f"✗ Solver construction failed: {e}")
+        print(f"[FAIL] Solver construction failed: {e}")
         import traceback
         traceback.print_exc()
         return False
@@ -106,9 +106,9 @@ def test_dependencies():
     for module_name, display_name in dependencies:
         try:
             __import__(module_name)
-            print(f"✓ {display_name} available")
+            print(f"[OK] {display_name} available")
         except ImportError:
-            print(f"✗ {display_name} not found")
+            print(f"[FAIL] {display_name} not found")
             all_ok = False
     
     return all_ok
@@ -139,12 +139,12 @@ def main():
             all_passed = False
     
     if all_passed:
-        print("\n✓ All tests passed! SHAPE is ready to use.")
+        print("\n[OK] All tests passed! SHAPE is ready to use.")
         print("\nNote: To use SHAPE, set your OPENAI_API_KEY environment variable:")
         print("  export OPENAI_API_KEY='your-api-key-here'")
         return 0
     else:
-        print("\n✗ Some tests failed. Please check the errors above.")
+        print("\n[FAIL] Some tests failed. Please check the errors above.")
         return 1
 
 

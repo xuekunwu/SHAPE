@@ -13,8 +13,11 @@ Tools in this module handle:
 # - ligand_receptor_analyzer: Analyze ligand-receptor interactions
 # - functional_annotator: Annotate morphological states with functional terms
 
-# Current related tools (in octotools/tools/):
+# Current related tools (in shape/tools/):
 # - cell_cluster_functional_hypothesis: Functional hypothesis generation
 
 __all__ = []
+
+
+
 

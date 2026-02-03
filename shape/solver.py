@@ -6,10 +6,10 @@ This module provides a high-level interface for using SHAPE programmatically.
 
 import os
 from typing import List, Optional
-from octotools.models.initializer import Initializer
-from octotools.models.planner import Planner
-from octotools.models.executor import Executor
-from octotools.models.memory import Memory
+from shape.models.initializer import Initializer
+from shape.models.planner import Planner
+from shape.models.executor import Executor
+from shape.models.memory import Memory
 
 
 def get_available_tools(enabled_tools: Optional[List[str]] = None) -> List[str]:
@@ -210,4 +210,5 @@ def solve(
         "memory": memory,
         "steps": memory.get_actions()
     }
+
 

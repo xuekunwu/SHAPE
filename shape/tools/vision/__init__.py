@@ -11,7 +11,7 @@ Tools in this module handle:
 """
 
 # Tool organization:
-# Vision tools are currently implemented in octotools/tools/
+# Vision tools are currently implemented in shape/tools/
 # They will be migrated to shape/tools/vision/ in future refactoring
 #
 # Current vision tools:
@@ -26,4 +26,7 @@ Tools in this module handle:
 # - image_captioner: Image description generation
 
 __all__ = []
+
+
+
 

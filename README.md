@@ -146,13 +146,13 @@ SHAPE/
 ├── README.md                 # This file
 ├── shape/                    # Core framework
 │   ├── agent/               # Agent logic (planner, executor, memory)
+│   ├── models/              # Core models (planner, executor, memory, initializer)
+│   ├── tools/               # Modular tool implementations
+│   ├── engine/              # LLM engine integrations
+│   ├── utils/               # Utility functions
+│   ├── registry/            # Tool registry
 │   ├── schemas/             # Tool and observation schemas
 │   └── solver.py            # Main entry point (solve, construct_solver)
-├── octotools/               # Tool implementations and utilities
-│   ├── tools/              # Modular tool implementations
-│   ├── models/             # Core models (planner, executor, memory)
-│   ├── engine/             # LLM engine integrations
-│   └── utils/              # Utility functions
 └── examples/                # Reproducible analysis notebooks
 ```
 
