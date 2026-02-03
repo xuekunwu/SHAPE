@@ -1,6 +1,6 @@
 # SHAPE: Self-supervised morpHology Agent for cellular PhenotypE
 
-**SHAPE** is an augmented agentic framework for morphological cell state inference across biological scales. Unlike traditional sequencing-based approaches that require months and thousands of dollars, SHAPE enables real-time morphological analysis in 5-30 minutes at less than $5, using live-cell imaging and LLM-driven planning.
+**SHAPE** is an augmented agentic framework for morphological cell state inference across biological scales. SHAPE is built upon [OctoTools](https://github.com/octotools/octotools/tree/main), a general-purpose agentic framework that couples high-level reasoning with execution via a stateful planner-executor design, and extends it into a bioimage-native execution ecosystem optimized for heterogeneous microscopy modalities.
 
 ## Why SHAPE?
 
