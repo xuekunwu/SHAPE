@@ -30,10 +30,10 @@ SHAPE is built on three foundational principles:
                        ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                    Tool Registry                            │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐                 │
-│  │ Vision   │  │ Spatial  │  │  Omics   │                 │
-│  │ Tools    │  │ Tools    │  │  Tools   │                 │
-│  └──────────┘  └──────────┘  └──────────┘                 │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐    │
+│  │ Vision       │  │ Analysis     │  │ Knowledge    │    │
+│  │ Tools        │  │ Tools        │  │ Tools       │    │
+│  └──────────────┘  └──────────────┘  └──────────────┘    │
 └──────────────────────┬──────────────────────────────────────┘
                        │
                        ▼
@@ -49,11 +49,12 @@ SHAPE is built on three foundational principles:
 ### Key Components
 
 - **`shape/agent/`**: Core agent logic including the planner, executor, and memory system
-- **`shape/tools/`**: Modular tool implementations organized by domain:
-  - **`vision/`**: Segmentation, embedding extraction, clustering
-  - **`spatial/`**: Neighborhood graph construction, niche detection
-  - **`omics/`**: Gene regulatory network analysis, ligand-receptor inference
 - **`shape/schemas/`**: Unified schemas for tool inputs/outputs and morphological observations
+- **`octotools/tools/`**: Modular tool implementations including:
+  - **Vision tools**: Image preprocessing, segmentation (cell/nuclei/organoid), single-cell cropping, feature extraction, clustering, visualization
+  - **Analysis tools**: Cell state analysis, functional hypothesis generation
+  - **Knowledge tools**: PubMed search, ArXiv search, Wikipedia search, Google search
+  - **Utility tools**: Python code generation, text extraction, image captioning
 
 ## Biological Applications
 
@@ -114,11 +115,12 @@ SHAPE/
 ├── README.md                 # This file
 ├── shape/                    # Core framework
 │   ├── agent/               # Agent logic (planner, executor, memory)
-│   ├── tools/              # Modular tools
-│   │   ├── vision/         # Segmentation, embedding, clustering
-│   │   ├── spatial/        # Neighborhood graphs, niche detection
-│   │   └── omics/          # GRN, ligand-receptor analysis
-│   └── schemas/            # Tool and observation schemas
+│   └── schemas/             # Tool and observation schemas
+├── octotools/               # Tool implementations and utilities
+│   ├── tools/              # Modular tool implementations
+│   ├── models/             # Core models (planner, executor, memory)
+│   ├── engine/             # LLM engine integrations
+│   └── utils/              # Utility functions
 ├── examples/                # Reproducible analysis notebooks
 └── docs/                    # Design documents and methodology
 ```
