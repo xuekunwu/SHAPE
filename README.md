@@ -80,6 +80,22 @@ SHAPE supports diverse applications in biological research:
 
 ## Installation
 
+### Option 1: Install as a package (Recommended)
+
+```bash
+# Clone the repository
+git clone https://github.com/xuekunwu/SHAPE.git
+cd SHAPE
+
+# Install the package in editable mode
+pip install -e .
+
+# Set up environment variables
+export OPENAI_API_KEY="<your-api-key-here>"
+```
+
+### Option 2: Install dependencies only
+
 ```bash
 # Clone the repository
 git clone https://github.com/xuekunwu/SHAPE.git
@@ -87,6 +103,9 @@ cd SHAPE
 
 # Install dependencies
 pip install -r requirements.txt
+
+# Add the package to Python path (or use PYTHONPATH)
+export PYTHONPATH="${PYTHONPATH}:$(pwd)"
 
 # Set up environment variables
 export OPENAI_API_KEY="<your-api-key-here>"

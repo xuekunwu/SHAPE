@@ -1,0 +1,96 @@
+[build-system]
+requires = ["setuptools>=65.0.0", "wheel>=0.40.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "shape"
+version = "0.1.0"
+description = "Self-supervised morpHology Agent for cellular PhenotypE - An agentic framework for morphological reasoning in biological image analysis"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "CC-BY-4.0"}
+authors = [
+    {name = "Xuekun Wu", email = ""},
+]
+keywords = ["bioimage", "morphology", "cell-state", "agentic", "llm", "deep-learning"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Topic :: Scientific/Engineering :: Image Processing",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+
+dependencies = [
+    "setuptools>=65.0.0",
+    "wheel>=0.40.0",
+    "numpy>=1.21.0,<2.0",
+    "python-bidi==0.4.2",
+    "easyocr==1.7.1",
+    "openai==1.58.1",
+    "python-dotenv==1.0.1",
+    "wikipedia==1.4.0",
+    "pillow==10.4.0",
+    "platformdirs==4.2.2",
+    "sympy>=1.13.3",
+    "tenacity==9.0.0",
+    "diskcache==5.6.3",
+    "transformers>=4.44.2",
+    "pymed==0.8.9",
+    "metapub==0.5.12",
+    "torch>=2.0.0",
+    "torchvision>=0.15.0",
+    "torchmetrics>=0.11.0",
+    "ftfy>=6.0.0",
+    "omegaconf>=2.3.0",
+    "regex>=2022.0.0",
+    "submitit>=1.4.0",
+    "termcolor>=2.0.0",
+    "pandas>=2.1.0,<3.0",
+    "scikit-learn>=1.4.0,<2.0",
+    "scipy>=1.7.0",
+    "opencv-python>=4.8.0",
+    "scikit-image>=0.19.0",
+    "tifffile>=2021.0.0",
+    "anndata>=0.8.0",
+    "scanpy>=1.9.0",
+    "umap-learn>=0.5.0",
+    "cellpose>=2.2.0",
+    "matplotlib>=3.5.0,<4.0",
+    "seaborn>=0.12.0",
+    "huggingface-hub>=0.19.0",
+    "requests>=2.25.0",
+    "packaging>=21.0",
+    "joblib>=1.1.0",
+    "tqdm>=4.65.0",
+    "pydantic>=2.0.0",
+    "leidenalg>=0.9.0",
+    "python-igraph>=0.9.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "black>=23.0.0",
+    "flake8>=6.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/xuekunwu/SHAPE"
+Repository = "https://github.com/xuekunwu/SHAPE"
+Documentation = "https://github.com/xuekunwu/SHAPE#readme"
+Issues = "https://github.com/xuekunwu/SHAPE/issues"
+
+[tool.setuptools]
+packages = ["shape", "shape.agent", "shape.engine", "shape.models", "shape.registry", "shape.schemas", "shape.tools", "shape.utils"]
+
+[tool.setuptools.package-data]
+"*" = ["*.txt", "*.md", "*.json", "*.yaml", "*.yml"]
+
