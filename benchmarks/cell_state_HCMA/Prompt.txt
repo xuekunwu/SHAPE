@@ -1,0 +1,127 @@
+# Agent Task Prompt: Label-Free Cell-State Inference on HCMA (end to end)
+
+## Task Overview
+
+You are given the **Human Cell Morphology Atlas (HCMA)** — roughly **2,546 microscopy
+images** stitched together from **many independent sources and laboratories**. Your job
+is to perform **label-free cell-state inference** on these images and emit a single
+**AnnData** object that carries, for every cell you analyze:
+
+* a **morphology embedding** (`adata.X` or `adata.obsm[...]`), and
+* a **cluster assignment** (an `obs` column, e.g. `leiden_0.5`).
+
+You will **NOT** be given cell-type labels, and you must **not** try to obtain or infer a
+supervised label to train on. Learn the representation *without labels*; the clustering
+must be *unsupervised*. Downstream, a fixed evaluation script — which you never see and
+cannot influence — will compare your clusters and your embedding against held-out
+cell-type labels.
+
+This is an **end-to-end** task. Unlike a pre-segmented crop dataset, HCMA images are raw
+fields that contain many cells. You must:
+
+```
+raw image  ->  segment cells  ->  crop single cells  ->  learn embedding + cluster  ->  AnnData
+```
+
+> The dataset location is **not fixed**. Discover the images under the provided data
+> root. Do not hard-code paths or any label names.
+
+---
+
+## Available Environment and Tools
+
+1. **Cell segmentation** (`Cell_Segmenter_Tool`) — SAM-based per-cell masks over each raw
+   field. Produces single-cell crops. Drop degenerate crops (too small, empty, blank).
+2. **DINOv3 self-supervised morphology embedding** (`Cell_State_Analyzer_Tool`) —
+   contrastive single-cell representation learning over the crops, **without labels**,
+   followed by neighbourhood-graph Leiden clustering. Returns an AnnData
+   (`cell_state_analyzed.h5ad`) with the embedding, a UMAP, and a `leiden_<res>` cluster
+   column. This is your primary output producer.
+3. **A representation verifier** — inspects the learned embedding for collapse, size
+   domination, and — critically here — whether the embedding separates by **source
+   image / lab batch** more than by biology. Because HCMA is stitched from many sources,
+   a batch-driven embedding will look good for the wrong reason. Flag and correct it;
+   do not accept it.
+
+---
+
+## Core Requirements
+
+You choose the order of operations, the segmentation and QC thresholds, the embedding
+settings, and the clustering resolution, based on the image content and intermediate
+results.
+
+### 1. Segmentation & Cropping
+* Segment cells from each raw image and extract single-cell crops.
+* Record, for every crop, a **stable per-cell id** and its **source image id** — carry
+  both into the AnnData `obs` (`cell_id`, `image_name`). The source image id is essential:
+  the evaluator groups its cross-validation by it, and you should use it to detect batch
+  leakage.
+
+### 2. Label-Free Morphology Embedding
+* Learn a self-supervised embedding over ALL crops (no labels, no supervised head).
+* Document the model variant, preprocessing, resize/normalization, and whether the model
+  is adapted or used zero-shot.
+* Verify the embedding: reject/repair collapse and size-dominated embeddings; compare
+  batch-silhouette (by source image) against structure — a per-image-driven embedding
+  inflates every downstream metric and must be flagged or corrected.
+
+### 3. Unsupervised Clustering
+* Cluster the embedding (Leiden over the neighbourhood graph). The number of clusters is
+  yours to choose from the data — do not tune it against any label.
+
+### 4. Emit the AnnData
+* Write one AnnData with: the embedding, the `leiden_<res>` cluster column, and the
+  `cell_id` + `image_name` obs columns. That file is your entire deliverable.
+
+---
+
+## Evaluation (fixed script — for your understanding only; you cannot change it)
+
+A fixed script scores your AnnData against held-out cell-type labels. Two families:
+
+* **Clustering vs cell type**: **ARI** and **NMI** between your cluster column and the GT
+  cell type.
+* **Representation label probes** on your embedding: **kNN accuracy**, **linear-probe
+  accuracy**, and **linear NLL**.
+
+Two confound guards are applied by the script and you cannot bypass them — design for
+them:
+
+* **(A) Multi-source subset**: only cell types appearing in **>= 2 independent source
+  images** are scored. Many HCMA cell types come from a single image/lab; those are
+  dropped so that "recognizing the imaging condition" cannot masquerade as biology.
+* **(B) Image-grouped cross-validation**: every probe uses **GroupKFold grouped by
+  source image** — a source image is never split across train and test. An embedding that
+  encodes per-image technical signature instead of cell state will therefore score poorly.
+
+The practical implication: **an embedding that rides source-image batch will be punished,
+not rewarded**. Spend your verification budget on removing batch leakage, not on chasing a
+cluster count that happens to match some structure.
+
+---
+
+## Constraints
+
+* Do not use cell-type labels anywhere — not for the embedding, not for the clustering,
+  not for choosing the number of clusters.
+* Carry a stable `cell_id` and the `image_name` for every cell into the AnnData.
+* Do not hard-code data paths or label names — discover the images.
+* Do not present structure that is driven by source-image batch as biological signal.
+* Ensure the pipeline is reproducible (record seeds, tool versions, parameters).
+
+---
+
+## Required Final Output
+
+A single **AnnData** (`cell_state_analyzed.h5ad`) with:
+1. the label-free morphology **embedding** (`adata.X` or `obsm`),
+2. an unsupervised **cluster** column (`obs['leiden_<res>']`),
+3. `obs['cell_id']` (stable per-cell id) and `obs['image_name']` (source image id),
+4. plus a short methods/verification note: segmentation + QC summary, embedding variant,
+   representation-verifier verdicts (collapse / size / batch leakage), and the clustering
+   parameters used.
+
+Everything else — the ARI/NMI, the kNN and linear-probe accuracy and NLL, the multi-source
+subset, and the image-grouped cross-validation — is computed by the fixed evaluator from
+this one file.
