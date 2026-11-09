@@ -61,7 +61,8 @@ import run_cellpose_sam_only as score  # noqa: E402  -- shape-free scoring (same
 
 BANDS = ("hard", "medium", "easy")
 HARD_MAX, MEDIUM_MAX = 0.30, 0.60
-METRICS_CSV = _HERE / "results" / "NeurIPS22-CellSeg-cell_image_metrics.csv"
+METRICS_CSV_NAME = "NeurIPS22-CellSeg-cell_image_metrics.csv"
+METRICS_CSV = _HERE / "results" / METRICS_CSV_NAME
 IMAGE_EXTS = {".png", ".bmp", ".tif", ".tiff", ".jpg", ".jpeg"}
 READOUTS = (("ap50", "AP50"), ("map_50_95", "mAP@0.50:0.95"),
             ("seconds_per_image", "Runtime (s / image)"), ("tool_calls_per_image", "Tool calls / image"),
@@ -89,6 +90,13 @@ def read_band_metric(csv_path: Path = METRICS_CSV) -> list[tuple[str, float]]:
             except (KeyError, TypeError, ValueError):
                 continue
     return [r for r in rows if r[0]]
+
+
+def band_metric_csv(data_root: Path | None) -> Path:
+    """Where the per-image Cellpose-SAM AP50 table is: the dataset's own copy, else this folder's."""
+    if data_root is not None and (data_root / METRICS_CSV_NAME).exists():
+        return data_root / METRICS_CSV_NAME
+    return METRICS_CSV
 
 
 def partition_bands(rows, hard_max: float = HARD_MAX, medium_max: float = MEDIUM_MAX) -> dict:
@@ -842,7 +850,8 @@ def main() -> None:
         exclude = {s for f in args.exclude for s in read_list(f)}
         if args.exclude:
             print(f"[lists] excluded: {len(exclude)} images from {len(args.exclude)} list file(s)")
-        write_lists(args.run_dir, args.n_per_band, args.seed, largest=largest, exclude=exclude)
+        write_lists(args.run_dir, args.n_per_band, args.seed, csv_path=band_metric_csv(args.data_root),
+                    largest=largest, exclude=exclude)
     elif args.cmd == "run":
         run_arm(args.run_dir, args.arm, args.data_root, bands=args.bands, limit=args.limit,
                 model=args.model, max_steps=args.max_steps, workers=args.workers)
