@@ -1,0 +1,13 @@
+{
+  "id": "linux-py312-cu130-h200",
+  "python": "3.12.12",
+  "platform": "linux-x86_64",
+  "torch": "2.14.0+cu130",
+  "torchvision": "0.29.0+cu130",
+  "uv": "0.13.1",
+  "codex_cli": "0.162.0",
+  "gpu": "NVIDIA H200, driver 580.173.02",
+  "lock_sha256": "0bd34b9da48eda616440e669f819d32e26c2d2aa2d53fc57b6fead070952ab82",
+  "packages": 181,
+  "validation": "Pinned from the installed venv shape_bench_h200_py31212 (cellpose 4.2.1.1, not the pilot's 4.0.7; user-accepted deviation 2026-10-28); used by the cTnT staining full run via SHAPE_BENCHMARK_LOCK"
+}

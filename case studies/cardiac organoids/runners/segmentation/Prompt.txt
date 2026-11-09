@@ -1,0 +1,15 @@
+# Cardiac organoid instance segmentation
+
+## Target
+Segment every whole cardiac organoid or spheroid as a separate instance, including
+objects touching the image border. Outline its full visible outer boundary.
+Internal cells, lumens, texture and halos are not separate objects. Do not include
+debris or background. Touching distinct organoids must have different instance IDs.
+
+## Deliverable
+Deliver a 2D integer instance mask at the original image size: background 0,
+one unique positive ID per organoid. The task ends at segmentation.
+
+For tool-assisted segmentation use Organoid_Segmenter_Tool with its fixed custom
+shape_seg_co weights. Choose and deliver a completed segmentation result.
+No downstream cropping, representation learning or biological classification.

@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "study": "ctnt_flowcytometry",
+  "repo_id": "SHAPE-Morph/iPSC-CM-cTnT_flowcytometry",
+  "revision": "d8212fc08464bf2afee0d41bb867e7ed4e76121b",
+  "archive": "iPSC-CM-cTnT_flowcytometry.tar.gz",
+  "archive_bytes": 4325280145,
+  "archive_root": "iPSC-CM-cTnT_flowcytometry",
+  "metadata_path": "flow_cytometry_metadata.csv",
+  "metadata_in_archive": false,
+  "metadata_sha256": "90204cc6e3894e0f7f2c9ee024438850bd5d15fc717810cabb51cec236110ff0",
+  "expected_images": 600,
+  "expected_wells": 87,
+  "label_column": "ctnt_positive_percent",
+  "label_unit": "percent",
+  "well_key": ["plate_id", "well_id"],
+  "assay_key": "flow_sample_id"
+}

@@ -1,0 +1,81 @@
+cell_state,morph_class,note
+adipocyte,mesenchymal,ScienCell preadipocytes (stromal)
+adrenal cortical,epithelial,ScienCell adrenal cortical cells
+aggregate,epithelial,"ATCC LASCPC-01 neuroendocrine prostate carcinoma (user: neuroendocrine is a differentiation phenotype, not a neural lineage)"
+alexander,epithelial,ATCC PLC/PRF/5 hepatoma
+annulus fibrosus,mesenchymal,ScienCell intervertebral disc annulus fibrosus cells (stromal)
+astrocyte,neural,ScienCell astrocytes (glia)
+astrocytic,neural,ATCC CCF-STTG1 astrocytoma (same as astrocyte)
+basophil,immune,ATCC KU812 basophilic leukaemia
+bright smooth spheres,neural,ATCC BT glioblastoma / oligodendroglioma stem-like lines grown as spheres
+chondrocyte,mesenchymal,ScienCell articular chondrocytes
+clear,melanocytic,"ATCC SU-CCS-1 clear cell sarcoma (user: stable melanocytic differentiation, MITF / SOX10 / S100 / HMB45 / Melan-A)"
+colonocyte,epithelial,"ATCC colon lines, vendor morphology epithelial"
+embryonic,epithelial,ATCC HEK-293.2sus embryonic kidney
+endothelial,endothelial,"endothelial cells (ATCC, ScienCell, Inhouse)"
+enterocyte,epithelial,"ATCC intestinal lines, vendor morphology epithelial(-like)"
+enteroendocrine,epithelial,ATCC NCI-H716 colorectal adenocarcinoma with enteroendocrine features
+epithelial,epithelial,epithelial(-like) lines and primary cells
+erythroblast,immune,ATCC TF-1 (IDH2 mutant) erythroleukaemia
+fibroblast,mesenchymal,fibroblasts
+floating aggregates,epithelial,ATCC NCI-H69 small cell lung carcinoma (user: neuroendocrine carcinoma = epithelial)
+floating clusters,epithelial,ATCC NCI-H1105 small cell lung carcinoma (user: neuroendocrine carcinoma = epithelial)
+glial,neural,ATCC M059K glioblastoma
+glioblastoma,neural,LIVECell A172 glioblastoma (glial tumour)
+goblet,epithelial,ATCC LS 174T colon adenocarcinoma
+hair,epithelial,"ScienCell hair follicle cells: germinal matrix, inner and outer root sheath (epithelial); exception: dermal papilla cells are mesenchymal"
+hematopoietic,immune,"ATCC CML / B-cell lymphoma suspension lines (K562, LAMA84, AR230, DS)"
+hepatocellular carcinoma,epithelial,LIVECell Huh7 hepatocellular carcinoma
+hepatocyte,epithelial,ScienCell hepatocytes
+histiocytic,immune,ATCC SU-DHL-1 / SU-DHL-2 large cell lymphoma
+irregular aggregates,neural,ATCC BT238 glioma
+keratinocyte,epithelial,keratinocytes
+keratocytes,mesenchymal,ScienCell corneal keratocytes (stromal)
+lymphoblast,immune,lymphoblastoid / lymphoblast lines
+lymphocyte,immune,B and T lymphocyte lines
+macrophage,immune,macrophages (myeloid)
+megakaryoblast,immune,ATCC MEG-01 megakaryoblastic leukaemia
+melanocyte,melanocytic,melanocytes and melanoma lines (neural-crest pigment lineage); exceptions in the label: UMB1949 (tuberous sclerosis) and the MDA-MB-435 derivatives
+meningeal,mesenchymal,ScienCell meningeal cells (fibroblast-like meningeal cells; borderline with neural by organ)
+mesangial,mesenchymal,"ScienCell renal mesangial cells (stromal, smooth-muscle/pericyte-like); exception in the label: ATCC UM-Chor1 is a chordoma line (chordoma U-CH2 is mapped to epithelial by the user)"
+mesenchymal,mesenchymal,mesenchymal stem / mesenchymal-like cells
+mesencymal like with variable vacuoles,epithelial,ATCC U-CH2 chordoma (user: notochordal lineage expressing epithelial and mesenchymal markers; epithelial chosen to avoid a systematic mesenchymal mislabel)
+microglia,immune,ScienCell microglia (CNS-resident myeloid cells)
+microglial,immune,ATCC HMC3 microglia (same as microglia)
+mixed,unscored,"mixed lineage: fibrosarcoma, histiocytoma, breast cancer and melanoma lines; not scored at the coarse level"
+monocyte,immune,monocytes
+mononuclear,immune,peripheral blood / liver / lymphatic mononuclear cells
+myeloblast,immune,myeloblast lines
+myocyte,muscle,"cardiomyocytes (AC10, AC16, iPSC-CM, ScienCell cardiac myocytes); exception in the label: two ATCC bronchial / lung smooth muscle images"
+natural killer nk,immune,NK cell lines
+neural,neural,ATCC BT142 glioma neurospheres
+neural progenitor,neural,ATCC neural progenitor cells derived from ATCC-BYS012
+neuroblast,neural,ATCC neuroblastoma lines
+neuroendocrine,epithelial,ATCC NCI-H1770 lung carcinoma with neuroendocrine features (user: neuroendocrine carcinoma = epithelial)
+neuron,neural,neurons
+neurosphere groups of,neural,ATCC CHLA-05-ATRT (CNS atypical teratoid / rhabdoid tumour)
+nucleus pulposus,mesenchymal,ScienCell nucleus pulposus cells
+oligodendrocytes,neural,ScienCell oligodendrocytes (glia)
+osteoblast,mesenchymal,ScienCell osteoblasts (stromal)
+pericyte,mesenchymal,ScienCell pericytes (stromal)
+perineurial,neural,ScienCell perineurial cells (user: Cell Ontology lists perineurial cell as a glial cell)
+polygonal,unscored,mixed lineage: Capan-2 pancreatic adenocarcinoma and Daoy medulloblastoma; not scored at the coarse level
+promyeloblast,immune,ATCC HL-60 promyelocytic leukaemia
+rounded,unscored,mixed lineage: BECK-1 lymphoblastic leukaemia and CHLA medulloblastoma / ATRT lines; not scored at the coarse level
+rounded and or attached attached will appear as spindle and or rounded,neural,ATCC CHLA-06-ATRT (CNS atypical teratoid / rhabdoid tumour)
+rounded and refractile,epithelial,ATCC COLO 320DM colon adenocarcinoma with neuroendocrine features
+schwann,neural,ATCC NF1 Schwann cell lines (peripheral glia)
+skeletal muscle,muscle,ScienCell skeletal muscle cells
+smooth muscle,mesenchymal,ScienCell smooth muscle cells (user decision: mesenchymal)
+somatic hybrid,endothelial,"ATCC EA.hy926 (HUVEC x A549 hybrid, endothelial phenotype)"
+spherical,epithelial,ATCC KATO III gastric and NCI-H650 lung carcinoma
+spheroid,neural,ATCC D341 Med medulloblastoma
+spindle,melanocytic,"ATCC melanoma lines LM-MEL-1a, MM28, MP38, MP65 (vendor morphology spindle-like)"
+spindle and large multinucleated,muscle,ATCC RD embryonal rhabdomyosarcoma
+squamous,epithelial,ATCC squamous cell carcinoma lines
+stellate,mesenchymal,ScienCell hepatic and pancreatic stellate cells (stromal)
+synoviocytes,mesenchymal,ScienCell synoviocytes (fibroblast-like synoviocytes)
+trabecular meshwork,mesenchymal,ScienCell trabecular meshwork cells (stromal)
+trophoblast,epithelial,ATCC HTR-8/SVneo trophoblast (same as trophoblasts)
+trophoblasts,epithelial,ScienCell trophoblasts
+urothelial,epithelial,ScienCell urothelial cells

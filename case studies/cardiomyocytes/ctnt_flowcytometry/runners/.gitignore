@@ -1,0 +1,3 @@
+# Keep this runner's execution documentation despite the repository-wide docs/ ignore.
+!docs/
+!docs/**

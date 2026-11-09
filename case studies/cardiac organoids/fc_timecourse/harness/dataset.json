@@ -1,0 +1,132 @@
+{
+  "dataset": "co_fc_timecourse",
+  "description": "Cardiac organoid FC time course: one 96-well plate, phase contrast and GFP, eight time points",
+  "source_root_cluster": "/scratch/users/your-user/shape_benchmark/CO-FC_timecourse",
+  "timepoints": {
+    "bs": 0,
+    "d2": 2,
+    "d4": 4,
+    "d6": 6,
+    "d8": 8,
+    "d10": 10,
+    "d12": 12,
+    "d16": 16
+  },
+  "conditions": {
+    "Control": [
+      "B",
+      "C",
+      "D"
+    ],
+    "FC": [
+      "E",
+      "F",
+      "G"
+    ]
+  },
+  "columns": [
+    3,
+    4,
+    5,
+    6
+  ],
+  "expected_wells": 23,
+  "expected_images": 184,
+  "known_incomplete_wells": {
+    "F6": "imaged at day 4 only; excluded, no trajectory"
+  },
+  "image_shape": [
+    904,
+    1224
+  ],
+  "dtype": "uint16",
+  "phase_pattern": "^([B-G])([3-6])_(\\d\\d)_1_1_Phase Contrast_001\\.tif$",
+  "gfp_pattern": "{well}_{seq}_2_1_GFP_001.tif",
+  "split": {
+    "unit": "well",
+    "protocol": "co-fc-timecourse-well-stratified-11-4-8-v1",
+    "seed": 20261024,
+    "counts": {
+      "Control": {
+        "development_train": 6,
+        "development_val": 2,
+        "evaluation_only": 4
+      },
+      "FC": {
+        "development_train": 5,
+        "development_val": 2,
+        "evaluation_only": 4
+      }
+    }
+  },
+  "split_cvcol4": {
+    "unit": "well",
+    "protocol": "co-fc-timecourse-ssl19-cvcol4-v1",
+    "seed": 20261024,
+    "ssl_validation_source_wells": [
+      "C6",
+      "D6",
+      "F4",
+      "G3"
+    ],
+    "counts": {
+      "Control": {
+        "development_train": 10,
+        "development_val": 2
+      },
+      "FC": {
+        "development_train": 9,
+        "development_val": 2
+      }
+    },
+    "cv": {
+      "unit": "well",
+      "folds": "plate column (leave one column out)",
+      "fold_of_column": {
+        "3": 1,
+        "4": 2,
+        "5": 3,
+        "6": 4
+      },
+      "inner_validation": "the next fold, cyclic; the other two folds train"
+    }
+  },
+  "prediction_channels": [
+    "PhaseContrast"
+  ],
+  "evaluation_channels": [
+    "PhaseContrast",
+    "GFP"
+  ],
+  "gfp_positive_threshold": "99th percentile of all baseline (day 0) GFP pixels, computed once by prepare",
+  "variants": {
+    "phase_only": {
+      "stage_channels": {
+        "segment": [
+          "PhaseContrast"
+        ],
+        "crop": [
+          "PhaseContrast"
+        ],
+        "embed": [
+          "PhaseContrast"
+        ]
+      }
+    },
+    "ssl_two_channel": {
+      "stage_channels": {
+        "segment": [
+          "PhaseContrast"
+        ],
+        "crop": [
+          "PhaseContrast"
+        ],
+        "embed": [
+          "PhaseContrast",
+          "GFP"
+        ]
+      },
+      "note": "crop boxes chosen on the phase image cut a two-channel stack; GFP pixels enter the SSL stage only"
+    }
+  }
+}
