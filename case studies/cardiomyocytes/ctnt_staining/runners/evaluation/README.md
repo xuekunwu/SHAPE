@@ -17,7 +17,7 @@ analysis commit; the source manifest records the exact archive and per-file hash
 | `report.py` | Recompute primary, split, donor and failure tables | Public `evidence/` → `main_metrics.csv`, `metrics.json`, `split_metrics.csv`, `donor_metrics.csv`, F3 JSON/CSV |
 | `process.py` | Professional failure/efficiency accounting with explicit denominators | Separates native attempts, input records, request rejection, evidence admission, abstention and missing telemetry |
 | `figures.py` | Deterministic data-native charts and full-cell UMAP coloring | Public aggregates or hash-verified private coordinates → PNG/PDF plus provenance and pending visual-QA receipt |
-| `common.py` | UTF-8 JSON, canonical LF CSV, SHA256 and missing-safe rates | Standard library only |
+| `evaluation_common.py` | UTF-8 JSON, canonical LF CSV, SHA256 and missing-safe rates | Standard library only |
 | `test_evaluation.py` | Accounting, abstention, donor-weighting and integrity regressions | Small synthetic ledgers; no API, data downloads or GPU |
 
 `prepare`, `tables` and `manifest` use Python standard library only. Figures need

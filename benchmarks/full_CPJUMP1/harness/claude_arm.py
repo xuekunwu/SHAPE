@@ -78,7 +78,8 @@ def setup(root: Path, model: str, evidence: list[Path]) -> Path:
     helper.chmod(0o700)
     roots = root / "read_roots.json"
     write_json(roots, [str(p.resolve()) for p in evidence])
-    hook = shlex.join([sys.executable, str(Path(__file__).with_name("read_guard.py")), str(roots)])
+    from shape.agent.arms import read_guard
+    hook = shlex.join([sys.executable, read_guard.__file__, str(roots)])
     settings = root / "settings.json"
     write_json(settings, {"apiKeyHelper": shlex.quote(str(helper)),
                          "hooks": {"PreToolUse": [{"matcher": ".*", "hooks": [{"type": "command", "command": hook}]}]}})

@@ -3,7 +3,7 @@ from pathlib import Path
 import json
 import tarfile
 
-from common import ARMS, csv_rows, read, sha, write, write_csv
+from evaluation_common import ARMS, csv_rows, read, sha, write, write_csv
 
 
 def prepare(export_root, codex_trajectory, output):

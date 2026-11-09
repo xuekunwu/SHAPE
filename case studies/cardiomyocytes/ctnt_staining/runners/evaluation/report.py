@@ -1,7 +1,7 @@
 """Replay the primary and supplementary tables from curated public evidence."""
 import statistics
 from pathlib import Path
-from common import ARMS, SPLITS, csv_rows, read, sha, write, write_csv
+from evaluation_common import ARMS, SPLITS, csv_rows, read, sha, write, write_csv
 from process import evaluate
 
 

@@ -1,6 +1,6 @@
 """Denominator-aware F3/tool efficiency. No fabricated utilization or grade."""
 from collections import Counter
-from common import fraction
+from evaluation_common import fraction
 
 
 def classify_error(message):

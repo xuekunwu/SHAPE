@@ -3,7 +3,7 @@ from pathlib import Path
 import importlib.metadata
 import platform
 
-from common import ARMS, NAMES, SPLITS, csv_rows, read, sha, write
+from evaluation_common import ARMS, NAMES, SPLITS, csv_rows, read, sha, write
 
 COLORS = ("#757575", "#009E73", "#E69F00")
 SPLIT_COLORS = ("#0072B2", "#E69F00", "#009E73")

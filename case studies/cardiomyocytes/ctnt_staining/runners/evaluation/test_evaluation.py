@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from common import fraction, write
+from evaluation_common import fraction, write
 from process import classify_error, evaluate
 from report import donor_macro, manifest
 

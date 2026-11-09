@@ -6,7 +6,7 @@ import pytest
 
 from benchmarks.full_CPJUMP1.harness import claude_arm as agent
 from benchmarks.full_CPJUMP1.harness.data import digest, read_json, write_json
-from benchmarks.full_CPJUMP1.harness.read_guard import allowed
+from shape.agent.arms.read_guard import allowed
 
 
 def decision(action="finish", selected="t000", params=None, parent=""):
