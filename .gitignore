@@ -1,0 +1,127 @@
+logs/
+todo.*
+benchmarks/baselines/results
+benchmarks/batch_correction_JUMP/results
+benchmarks/cell_state_HCMA/results
+benchmarks/full_CPJUMP1/results
+benchmarks/cropper_NeurIPS22-CellSeg/results
+benchmarks/segmentation_NeurIPS22-CellSeg/results
+benchmarks/full_HCMA/cache
+
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv
+
+# IDE
+.vscode/
+.idea/
+.cursor/
+*.swp
+*.swo
+*~
+
+# Environment variables
+.env
+.env.local
+
+# Cache and temporary files
+solver_cache/
+output_visualizations/
+*.cache
+*.log
+*.tmp
+
+# Model files and large data
+*.pth
+*.pt
+*.h5
+*.h5ad
+*.npy
+*.npz
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Hugging Face
+.huggingface/
+
+# Test outputs
+test_outputs/
+output/
+
+# Benchmark arrays are versioned with Git LFS
+!benchmarks/**/*.npy
+
+# Local example datasets; keep only small, referenced fixtures in git
+case studies/datasets/
+
+
+# Local-only (per project preference): kept off the public repo
+tests/
+docs/
+
+# Claude Code transcripts + memory, symlinked from ~/.claude/projects (may contain secrets)
+.claude-sessions/
+
+# Downloaded benchmark datasets (large; not for git)
+data/
+# The CellSeg benchmark's results/ is committed whole: its inputs (the prompt, the per-image metrics CSV) and
+# each reported run's non-image records (logs and traces included, which the rules above would drop)
+!benchmarks/segmentation_NeurIPS22-CellSeg/results/
+!benchmarks/segmentation_NeurIPS22-CellSeg/results/**/
+!benchmarks/segmentation_NeurIPS22-CellSeg/results/**
+# The cropper benchmark's results/ is committed whole, as the CellSeg benchmark's is: its inputs (the mask-check
+# prompt copy, seeds.json) and each reported run's non-image records (logs and traces included); never pixel
+# files (crop TIFFs, zips, montage PNGs: reproducible from commit + seed)
+!benchmarks/cropper_NeurIPS22-CellSeg/results/
+!benchmarks/cropper_NeurIPS22-CellSeg/results/**/
+!benchmarks/cropper_NeurIPS22-CellSeg/results/**
+benchmarks/cropper_NeurIPS22-CellSeg/results/**/*.tif
+benchmarks/cropper_NeurIPS22-CellSeg/results/**/*.tiff
+benchmarks/cropper_NeurIPS22-CellSeg/results/**/*.png
+benchmarks/cropper_NeurIPS22-CellSeg/results/**/*.jpg
+benchmarks/cropper_NeurIPS22-CellSeg/results/**/*.jpeg
+benchmarks/cropper_NeurIPS22-CellSeg/results/**/*.bmp
+benchmarks/cropper_NeurIPS22-CellSeg/results/**/*.gif
+benchmarks/cropper_NeurIPS22-CellSeg/results/**/*.zip
+benchmarks/cropper_NeurIPS22-CellSeg/results/**/*.npy
+benchmarks/cropper_NeurIPS22-CellSeg/results/**/*.npz
+# The JUMP batch benchmark's results/ is committed whole: each reported run's record set (no matrices; logs and
+# traces included, which the rules above would drop)
+!benchmarks/batch_correction_JUMP/results/
+!benchmarks/batch_correction_JUMP/results/**/
+!benchmarks/batch_correction_JUMP/results/**
+benchmarks/full_CPJUMP1/results/
+benchmarks/.gpu_service_logs/
+
+# agent-arm API env files (hold secret keys)
+benchmarks/**/.claude_api.env
+
+# benchmark run outputs (large; kept on disk, not in git)
+benchmarks/**/results/
