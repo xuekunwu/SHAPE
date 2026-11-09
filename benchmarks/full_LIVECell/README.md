@@ -68,11 +68,20 @@ with instance ground truth, eight cell lines. The harness is full_CPJUMP1's, run
 One GPU. The environment and the model assets are full_CPJUMP1's (its `assets` command builds them).
 
 ```bash
-export FULL_LIVECELL_EXPECTED_COMMIT=$(git rev-parse HEAD)
-C="python -m benchmarks.full_LIVECell.harness.cli"
-$C select && $C prepare && $C verify-prepared          # raw/ + SOURCE.json, the prepared tree, its receipt
-$C run --arm control|shape|codex [--smoke] && $C score --run <run> && $C compare --experiment <dir>
+C="python -m benchmarks.full_LIVECell.harness.cli"          # --help on any subcommand
+COMMIT=$(git rev-parse HEAD)
+$C select --raw RAW --manifest RAW/../manifest.json         # the manifest of the downloaded files
+$C prepare --raw RAW --out PREP                             # the prepared tree + SOURCE.json
+$C verify-prepared --prep PREP --out RECEIPT                # a transferred prepared tree, without rebuilding it
+$C preflight --arm shape --expected-commit $COMMIT --assets-root ASSETS --out EXPERIMENT
+$C run --arm shape --prep PREP --assets-root ASSETS --out EXPERIMENT \
+   --expected-commit $COMMIT [--smoke] [--budget-hours 11] [--cores N]
+$C score --prep PREP --run EXPERIMENT/shape
+$C compare --prep PREP --control EXPERIMENT/control --shape EXPERIMENT/shape \
+   --codex EXPERIMENT/codex --out EXPERIMENT/comparison --expected-commit $COMMIT
 ```
+
+`stage` is the internal per-stage worker a launcher calls. Run `--help` on any subcommand for its exact flags.
 
 - `prepare` reads a mirrored LIVECell S3 tree and writes `raw/`, `manifest.json` and `prepared/` beside it.
 - A full run requires a complete three-arm smoke of the same commit.
@@ -85,9 +94,7 @@ $C run --arm control|shape|codex [--smoke] && $C score --run <run> && $C compare
 - The Claude Code and Biomni arms share one prompt and its size protections with Codex (`harness/codex_arm.py`);
   only the whole-prompt guard differs per arm (900k characters; Biomni 800k).
 
-CLI: `python -m benchmarks.full_LIVECell.harness.cli {select,prepare,verify-prepared,run,score,compare}` (`--help`).
 A full run prints and writes `LIVECELL_COMPLETE`; a smoke prints `SMOKE_COMPLETE` only.
-
 
 ## Tests
 
