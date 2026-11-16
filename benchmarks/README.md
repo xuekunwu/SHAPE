@@ -36,6 +36,11 @@ hf download SHAPE-agent/benchmark-data --repo-type dataset --include "NeurIPS22-
 | `CPJUMP1/` | 12.8 GB | `full_CPJUMP1` (CPJUMP1) |
 | `JUMP/` | 15.4 GB | `batch_correction_JUMP` |
 
+A folder holds thousands of files, and the Hub limits how many requests a client may make in
+five minutes (fewer without a login). If `hf download` stops with `429 Too Many Requests`, wait
+five minutes and run the same command again: it keeps the files already in `data/` and fetches
+the rest. `hf auth login` raises the limit.
+
 RxRx1 is not in that dataset; `representation_RxRx1` builds its inputs from a local RxRx1 copy
 (`run_rxrx1.py prepare --data-root`). ModalityProbe3 is fetched from the Cell Painting Gallery by
 `full_CPJUMP1/runners/download_modality_probe3.py`.
