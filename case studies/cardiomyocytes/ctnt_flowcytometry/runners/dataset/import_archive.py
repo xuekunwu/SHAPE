@@ -21,7 +21,7 @@ import time
 ARCHIVE = "iPSC-CM-cTnT_flowcytometry.tar.gz"
 PREFIX = "iPSC-CM-cTnT_flowcytometry"
 METADATA = "flow_cytometry_metadata.csv"
-METADATA_SHA = "90204cc6e3894e0f7f2c9ee024438850bd5d15fc717810cabb51cec236110ff0"
+METADATA_SHA = "c27399640baf871b2ce2155aa02bc8fc40d1303b3f27aa079e9edff672b52b65"
 
 
 
@@ -29,7 +29,7 @@ METADATA_SHA = "90204cc6e3894e0f7f2c9ee024438850bd5d15fc717810cabb51cec236110ff0
 def main(mount: Path, output: Path) -> None:
     if output.exists():
         raise FileExistsError(output)
-    if (mount / ARCHIVE).stat().st_size != 4325280145:
+    if (mount / ARCHIVE).stat().st_size != 4325279271:
         raise RuntimeError("pinned archive size differs")
     if digest(mount / METADATA) != METADATA_SHA:
         raise RuntimeError("pinned standalone metadata differs")
@@ -71,7 +71,7 @@ def main(mount: Path, output: Path) -> None:
     if seen != wanted:
         raise RuntimeError(f"missing {len(wanted - seen)} images")
     record = {"status": "complete", "images": len(seen), "metadata_sha256": METADATA_SHA,
-              "archive_bytes": 4325280145, "source": str(mount), "seconds": time.time()-started}
+              "archive_bytes": 4325279271, "source": str(mount), "seconds": time.time()-started}
     (output / "RAW_COMPLETE.json").write_text(json.dumps(record, indent=2) + "\n")
     print(json.dumps(record), flush=True)
 

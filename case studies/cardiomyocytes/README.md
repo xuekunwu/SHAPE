@@ -8,11 +8,11 @@ positivity from **brightfield only**, with different reference measurements.
 | [cTnT staining](ctnt_staining/) | Fixed cells: brightfield, DAPI, cTnT/Cy5 | Per-cell binary label derived from cTnT fluorescence intensity | Probability and yes/no call for each cell |
 | [cTnT flow cytometry](ctnt_flowcytometry/) | Live cells: multiple brightfield views per well | One cTnT-positive proportion per culture well from subsequent staining and flow cytometry | Numeric proportion per well |
 
-- Staining: [SHAPE-Morph/iPSC-CM-cTnT_staining](https://huggingface.co/datasets/SHAPE-Morph/iPSC-CM-cTnT_staining).
-- Flow cytometry: [SHAPE-Morph/iPSC-CM-cTnT_flowcytometry](https://huggingface.co/datasets/SHAPE-Morph/iPSC-CM-cTnT_flowcytometry).
+- Staining: [SHAPE-agent/iPSC-CM-cTnT_staining](https://huggingface.co/datasets/SHAPE-agent/iPSC-CM-cTnT_staining).
+- Flow cytometry: [SHAPE-agent/iPSC-CM-cTnT_flowcytometry](https://huggingface.co/datasets/SHAPE-agent/iPSC-CM-cTnT_flowcytometry).
 
-Both datasets are private on Hugging Face and need an account with access and
-the official login. Each sub-study has `harness/` and `runners/`, a pinned
+Both datasets are public on Hugging Face (CC BY 4.0); donor demographics and
+diagnosis are withheld. Each sub-study has `harness/` and `runners/`, a pinned
 dataset contract and executable metadata admission commands. The flow archive
 carries an older CSV beside the pinned standalone one; use the pinned CSV and
 never silently substitute the embedded one.

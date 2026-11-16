@@ -9,7 +9,7 @@ Image preparation, cell-label derivation and full pipeline execution are pending
 The embedded CSV carries image-level experimental metadata with no per-cell
 intensity or label columns.
 
-Source: [SHAPE-Morph/iPSC-CM-cTnT_staining](https://huggingface.co/datasets/SHAPE-Morph/iPSC-CM-cTnT_staining).
+Source: [SHAPE-agent/iPSC-CM-cTnT_staining](https://huggingface.co/datasets/SHAPE-agent/iPSC-CM-cTnT_staining).
 Fixed iPSC-derived cardiomyocytes are imaged in brightfield, DAPI and cTnT/Cy5.
 The target is a **per-cell cTnT-positive label (0/1)** derived from fluorescence,
 predicted using the corresponding brightfield morphology alone.

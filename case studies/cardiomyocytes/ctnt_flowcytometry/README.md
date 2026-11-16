@@ -15,7 +15,7 @@ within each `(plate_id, well_id)` group, and each group has one `flow_sample_id`
 Background metadata are partly incomplete, which does not imply a missing flow
 label. The archive's older CSV is excluded by the pinned hash check.
 
-Source: [SHAPE-Morph/iPSC-CM-cTnT_flowcytometry](https://huggingface.co/datasets/SHAPE-Morph/iPSC-CM-cTnT_flowcytometry).
+Source: [SHAPE-agent/iPSC-CM-cTnT_flowcytometry](https://huggingface.co/datasets/SHAPE-agent/iPSC-CM-cTnT_flowcytometry).
 Live iPSC-derived cardiomyocytes are imaged in brightfield, followed by cTnT
 staining and flow cytometry. Predict the measured **cTnT-positive proportion per
 culture well** as a numeric value from that well's brightfield images.
