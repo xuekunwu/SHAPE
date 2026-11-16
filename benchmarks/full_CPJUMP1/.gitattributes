@@ -1,2 +1,4 @@
 *.sh text eol=lf
 *.sbatch text eol=lf
+# byte-exact: download_cpjump1.py and harness/data.py pin this file by its sha256
+runners/manifest.json -text
