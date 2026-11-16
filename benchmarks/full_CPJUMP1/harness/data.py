@@ -249,7 +249,9 @@ def technical(c: dict, **extra) -> dict:
 
 def well_profiles(matrix: np.ndarray, cells: list[dict], images: list[dict],
                   *, allowed_sites: tuple[int, ...] = (2,), allow_empty_sites: bool = False) -> tuple[np.ndarray, pd.DataFrame]:
-    """Equal site weighting, not weighting a well by its number of segmented cells."""
+    """Equal site weighting, not weighting a well by its number of segmented cells. `allowed_sites`: the
+    well's site count must be one of these; CPJUMP1 images two sites per well (the default), a dataset with
+    no multi-site pooling (ModalityProbe) passes (1,)."""
     x = np.asarray(matrix)
     if x.ndim != 2 or len(x) != len(cells) or not np.isfinite(x).all():
         raise ValueError("invalid cell embedding")

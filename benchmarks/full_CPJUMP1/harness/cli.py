@@ -13,16 +13,20 @@ import subprocess
 import sys
 import time
 
-from shape.agent.arms import AGENT_ARMS, ARM_MODELS as _AGENT_ARM_MODELS
+from shape.agent.arms import AGENT_ARMS, ARM_MODELS as _AGENT_ARM_MODELS, ARM_ALLOWED as _AGENT_ARM_ALLOWED
 from .data import MANIFEST_SHA256, digest, load_prepared, prepare, read_json, write_json
 from .pipeline import CPJUMP1, dataset, reasoning_record, stage_env, stage_reasoning
 
 REPO = Path(__file__).resolve().parents[3]
-DEFAULT_MODEL = "gpt-5.6-luna"
+DEFAULT_MODEL = "gpt-6-sol"
 DEFAULT_BRANCH = "e2e"         # --expected-branch: the branch a run's checkout and its comparison must be on
 # The agent arms (shape/agent/arms) share codex_arm's stage protocol; each has its own backend and model.
 ARMS = ("control", "shape", *AGENT_ARMS)
 ARM_MODELS = {"shape": DEFAULT_MODEL, **_AGENT_ARM_MODELS}       # + shape, which runs the SHAPE pipeline, not a backend
+# Every model id each arm accepts (shape runs the pipeline reasoner on the gateway (gpt-*) or Anthropic-direct
+# (claude-*); the agent arms carry their own ARM_ALLOWED). --model must be in the arm's set.
+ARM_ALLOWED = {"shape": frozenset({"gpt-6-sol", "claude-opus-5", "zai-org/GLM-5.3-Flash",
+                                   "deepseek-ai/DeepSeek-V4.1-Flash"}), **_AGENT_ARM_ALLOWED}
 STAGES = ("segment", "crop", "embed", "batch", "cluster")
 SMOKE_POLICY = {"shape_search_images": 1, "shape_search_rounds": 2, "codex_rounds": 2}
 ARTIFACTS = ("cells.json", "excluded_cells.json", "embedding.npy", "profiles.npy", "profiles.csv",
@@ -92,8 +96,8 @@ def asset_environment(root: Path) -> dict:
 
 
 def preflight(args) -> dict:
-    if args.arm != "control" and args.model != ARM_MODELS[args.arm]:
-        raise ValueError(f"the {args.arm} arm requires the exact model ID {ARM_MODELS[args.arm]}")
+    if args.arm != "control" and args.model not in ARM_ALLOWED[args.arm]:
+        raise ValueError(f"the {args.arm} arm accepts models {sorted(ARM_ALLOWED[args.arm])}, not {args.model!r}")
     identity = code_identity(args.expected_commit, args.expected_branch)
     assets = asset_environment(args.assets_root)
     for module in ("torch", "anndata", "scanpy", "leidenalg", "harmonypy", "copairs", "scib_metrics",
@@ -111,8 +115,21 @@ def preflight(args) -> dict:
     if args.arm == "shape":
         from benchmarks.full_HCMA.harness.shape_arm import build_engine
         from shape.engine import usage
-        if not os.environ.get("LLM_API_KEY") or os.environ.get("LLM_BASE_URL", "").rstrip("/") != "https://llm-gateway.example.edu/v1":
-            raise RuntimeError("require LLM_API_KEY and the Stanford Gateway LLM_BASE_URL from the API environment file")
+        from shape.engine.factory import provider_of
+        # The reasoner's provider follows the model id and the environment: gpt-* -> the OpenAI-compatible
+        # gateway (LLM_BASE_URL + LLM_API_KEY); claude-* -> Anthropic-direct (ANTHROPIC_API_KEY) ONLY when
+        # LLM_BASE_URL is unset (factory.provider_of routes claude-* through the gateway when it is set, and
+        # the gateway serves no claude model, so a claude-* SHAPE run must unset LLM_BASE_URL first).
+        provider = provider_of(args.model)
+        if provider == "anthropic":
+            if not os.environ.get("ANTHROPIC_API_KEY"):
+                raise RuntimeError("the SHAPE arm on a claude-* model requires ANTHROPIC_API_KEY and LLM_BASE_URL "
+                                   "unset (Anthropic-direct; the gateway serves no claude model)")
+            base_url, key_variable = "https://api.anthropic.com", "ANTHROPIC_API_KEY"
+        else:
+            if not os.environ.get("LLM_API_KEY") or not os.environ.get("LLM_BASE_URL"):
+                raise RuntimeError("the SHAPE arm on a gpt-* model requires LLM_API_KEY and the gateway LLM_BASE_URL")
+            base_url, key_variable = os.environ["LLM_BASE_URL"], "LLM_API_KEY"
         before = usage.total_tokens()
         build_engine(args.model)
         tokens = usage.total_tokens() - before
@@ -120,7 +137,7 @@ def preflight(args) -> dict:
             raise RuntimeError("model preflight did not report positive token usage")
         result.update(model=args.model, requested_model=args.model, response_model=None,
                       response_model_attested=False, model_provenance="requested_engine_config",
-                      preflight_tokens=tokens, base_url=os.environ["LLM_BASE_URL"], key_variable="LLM_API_KEY")
+                      preflight_tokens=tokens, base_url=base_url, key_variable=key_variable)
     elif args.arm in AGENT_ARMS:
         from shape.agent.arms import backend
         result.update(backend(args.arm).preflight(args.out.parent / f"{args.arm}_preflight", args.model))
@@ -428,8 +445,11 @@ def parser() -> argparse.ArgumentParser:
     for name in ("run", "preflight"):
         cmd = sub.add_parser(name)
         cmd.add_argument("--arm", choices=ARMS, required=True)
-        # The arm's exact model (ARM_MODELS, checked per arm in preflight); claude passes --model claude-sonnet-5.
-        cmd.add_argument("--model", default=DEFAULT_MODEL, choices=sorted(set(ARM_MODELS.values())))
+        # The reasoner model, validated against the arm's allowed set in preflight (ARM_ALLOWED). cc/claude
+        # passes claude-opus-5; shape/codex/biomni default to gpt-6-sol, with claude-opus-5 also allowed for
+        # shape and biomni (Anthropic-direct). choices is the union so --model accepts every wired id.
+        cmd.add_argument("--model", default=DEFAULT_MODEL,
+                         choices=sorted({m for models in ARM_ALLOWED.values() for m in models}))
         cmd.add_argument("--expected-commit", required=True)
         cmd.add_argument("--expected-branch", default=DEFAULT_BRANCH)
         cmd.add_argument("--assets-root", type=Path, required=True)

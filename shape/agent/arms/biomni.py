@@ -17,12 +17,20 @@ import time
 from . import protocol
 from .protocol import read_json, write_json
 
-MODEL = "gpt-5.6-luna"
+MODEL = "gpt-6-sol"                                   # default reasoner
+ALLOWED = frozenset({"gpt-6-sol", "gpt-5.6-luna", "claude-opus-5", "claude-sonnet-5-5",  # gateway (gpt-*) / Anthropic-direct (claude-*)
+                     "zai-org/GLM-5.3-Flash", "deepseek-ai/DeepSeek-V4.1-Flash"})  # Together.ai OpenAI-compatible (Custom source, LLM_API_KEY)
 BIOMNI_VERSION = "0.0.8"
 POLICY = "biomni-a1-decision-only-v1"
 DRIVER = Path(__file__).with_name("biomni_driver.py")
 PYTHON_ENV = "FULL_CPJUMP1_BIOMNI_PYTHON"
 USAGE_KEYS = ("input_tokens", "output_tokens", "total_tokens")
+
+
+def _provider(model: str) -> str:
+    """'anthropic' for claude-* (Biomni A1 source "Anthropic", ANTHROPIC_API_KEY, native endpoint), else 'openai'
+    (source "Custom" against the OpenAI-compatible gateway with LLM_API_KEY). The gateway serves no claude model."""
+    return "anthropic" if model.startswith("claude") else "openai"
 
 
 def python() -> Path:
@@ -44,16 +52,25 @@ def python() -> Path:
 
 
 def route(model):
-    if model != MODEL:
-        raise ValueError(f"CPJUMP1 Biomni requires {MODEL}")
+    if model not in ALLOWED:
+        raise ValueError(f"CPJUMP1 Biomni accepts {sorted(ALLOWED)}, not {model!r}")
+    if _provider(model) == "anthropic":
+        if not os.environ.get("ANTHROPIC_API_KEY", "").strip():
+            raise RuntimeError("Biomni (Anthropic) preflight blocked: ANTHROPIC_API_KEY is missing")
+        return
     for variable in ("LLM_API_BASE", "LLM_BASE_URL"):
         if os.environ.get(variable, protocol.BASE_URL).rstrip("/") != protocol.BASE_URL:
-            raise ValueError("Biomni requires the Stanford Gateway route")
+            raise ValueError("Biomni requires the configured OpenAI-compatible gateway route")
     if not os.environ.get("LLM_API_KEY", "").strip():
         raise RuntimeError("Biomni preflight blocked: LLM_API_KEY is missing")
 
 
 def _settings(model) -> dict:
+    # claude-* is Biomni's native Anthropic source (no base_url: the anthropic SDK's default endpoint);
+    # gpt-* is the "Custom" OpenAI-compatible source pointed at the gateway.
+    if _provider(model) == "anthropic":
+        return {"backend": "biomni", "model": model, "source": "Anthropic", "base_url": None,
+                "python": str(python()), "driver": str(DRIVER), "biomni_version": BIOMNI_VERSION}
     return {"backend": "biomni", "model": model, "source": "Custom", "base_url": protocol.BASE_URL,
             "python": str(python()), "driver": str(DRIVER), "biomni_version": BIOMNI_VERSION}
 
@@ -70,11 +87,16 @@ def setup(root: Path, model: str) -> Path:
     return settings
 
 
-def _env(home: Path, run=None, marker_env=None) -> dict:
-    """Only PATH, a temporary HOME, the locale and the key (plus what Windows needs to start Python)."""
+def _env(home: Path, run=None, marker_env=None, model: str = MODEL) -> dict:
+    """Only PATH, a temporary HOME, the locale and the reasoner's key (plus what Windows needs to start Python).
+    gpt-* carries LLM_API_KEY (the gateway), claude-* carries ANTHROPIC_API_KEY (Anthropic-direct). The key is
+    set only when present, so the keyless version probe runs for either provider."""
     allowed = {"PATH", "LANG", "LC_ALL", "SYSTEMROOT", "WINDIR"}
     env = {k: v for k, v in os.environ.items() if k.upper() in allowed}
-    env.update(HOME=str(home), LLM_API_KEY=os.environ["LLM_API_KEY"])
+    env.update(HOME=str(home))
+    key = "ANTHROPIC_API_KEY" if _provider(model) == "anthropic" else "LLM_API_KEY"
+    if os.environ.get(key):
+        env[key] = os.environ[key]
     if run is not None and marker_env:
         # An outer watchdog (the caller's harness) scans this marker even after a nested setsid/chdir; the
         # caller names the variable, so this backend knows nothing of any particular harness.
@@ -85,7 +107,7 @@ def _env(home: Path, run=None, marker_env=None) -> dict:
 def stream_usage(trace: Path, model: str) -> dict:
     """The driver's result and its token usage (any failure here is a basic driver/LLM failure). Keeps the result
     under "result"."""
-    if model != MODEL:
+    if model not in ALLOWED:
         raise ValueError("unexpected requested Biomni model")
     try:
         result = read_json(trace)
@@ -101,9 +123,12 @@ def stream_usage(trace: Path, model: str) -> dict:
             raise RuntimeError("Biomni token usage is malformed")
     if usage["total_tokens"] <= 0:
         raise RuntimeError("Biomni reported no positive token usage")
+    anthropic = _provider(model) == "anthropic"
     return {"total_tokens": usage["total_tokens"], "usage": {k: usage[k] for k in USAGE_KEYS}, "model": model,
             "requested_model": model, "response_model": None, "response_model_attested": False,
-            "model_provenance": "requested_driver_config", "provider": "stanford", "base_url": protocol.BASE_URL,
+            "model_provenance": "requested_driver_config",
+            "provider": "anthropic" if anthropic else "stanford",
+            "base_url": "https://api.anthropic.com" if anthropic else protocol.BASE_URL,
             "steps": result.get("steps"), "refused_executions": result.get("refused_executions"), "result": result}
 
 
@@ -152,12 +177,15 @@ def invoke(root, prompt, model, settings, deadline, index, images=(), marker=Non
             attachments.append(workspace / f"evidence_{i:03d}.png")
             shutil.copy2(path, attachments[-1])
         request, result = workspace / "request.json", workspace / "result.json"
+        anthropic = _provider(model) == "anthropic"
         write_json(request, {"prompt": prompt, "images": [str(p) for p in attachments], "schema": protocol.SCHEMA,
-                             "model": model, "base_url": protocol.BASE_URL,
+                             "model": model, "source": "Anthropic" if anthropic else "Custom",
+                             "base_url": None if anthropic else protocol.BASE_URL,
                              "timeout_seconds": max(1, int(deadline - time.time()))})
         # The driver's stdout is dropped: whatever Biomni prints after construction is not a record.
         rc, _, stderr = protocol._process([str(python()), "-I", str(DRIVER), str(request), str(result)], workspace,
-                                          _env(home, run=marker or root, marker_env=marker_env), deadline, name="Biomni")
+                                          _env(home, run=marker or root, marker_env=marker_env, model=model),
+                                          deadline, name="Biomni")
         trace.with_suffix(".stderr").write_text(stderr, encoding="utf-8")
         if rc or not result.is_file():
             raise RuntimeError(f"Biomni driver failed (exit {rc}); see {trace.with_suffix('.stderr')}")

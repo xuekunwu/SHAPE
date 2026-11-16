@@ -46,6 +46,14 @@ _PREFIXES = (
     ("o3", "openai"),
     ("o4", "openai"),
     ("claude", "anthropic"),
+    # Together.ai hosts several model families on an OpenAI-compatible endpoint under their upstream
+    # namespace prefix; route them through the OpenAI client (LLM_BASE_URL=https://api.together.xyz/v1 +
+    # LLM_API_KEY=TOGETHER_API_KEY, set by runners/arms/together_glm.env -- generic despite the filename,
+    # any Together-hosted model works through it). "zai-org/" is distinct from a bare "glm-*" id, which is
+    # 智谱 direct.
+    ("zai-org/", "openai"),
+    ("deepseek-ai/", "openai"),
+    ("qwen/", "openai"),
     ("glm", "glm"),
 )
 

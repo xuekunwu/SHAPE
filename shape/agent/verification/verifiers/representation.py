@@ -891,7 +891,16 @@ class RepresentationAgenticVerifier(AgenticVerifier):
     def gate(self) -> dict:
         """The measurability gate on trial 0: the replicate tier (the one with an adopted proxy, sibling_site_map),
         at least MIN_VAL_WELLS val wells on every plate, and at least one query unit of the frozen proxy. RUN when all
-        hold, else SKIP with the reasons."""
+        hold, else SKIP with the reasons.
+
+        $SHAPE_FORCE_SSL_RUN=1 forces RUN regardless of the above -- an explicit, opt-in escape hatch for a
+        dataset whose tier has no adopted proxy at all (ADOPTED_PROXY: batch/image -> None; only "replicate"
+        -- >=2 sites on over half the wells -- has one, sibling_site_map). Forcing RUN here does NOT give the
+        tuning loop a working proxy: `self.proxy` and `self._units` are unaffected, so every later `_compare`
+        (quant.beats) between trials still has no units to compare and reports no measurable improvement.
+        This is a genuinely unvalidated experiment, not a safe override -- use it to see what SSL training
+        actually produces (judged externally, e.g. by this benchmark's own score()), not because the gate was
+        being overly strict."""
         per_plate = self.split_facts.get("val_wells_per_plate") or {}
         units = len(self._units.get(0) or {})
         reasons = []
@@ -904,8 +913,10 @@ class RepresentationAgenticVerifier(AgenticVerifier):
                                f"{low or per_plate})")
             if not units:
                 reasons.append("the frozen proxy has no query unit")
-        return {"decision": "SKIP" if reasons else "RUN", "tier": self.tier, "adopted_proxy": self.proxy,
-                "val_wells_per_plate": per_plate, "frozen_units": units, "reasons": reasons}
+        forced = bool(reasons) and os.environ.get("SHAPE_FORCE_SSL_RUN") == "1"
+        return {"decision": "RUN" if (not reasons or forced) else "SKIP", "tier": self.tier,
+                "adopted_proxy": self.proxy, "val_wells_per_plate": per_plate, "frozen_units": units,
+                "reasons": reasons, **({"forced": True} if forced else {})}
 
     # ---- the noise: the paired 2 SE of each comparison, on the comparison draws ------------------------------
     def _compare(self, a: int, b: int) -> dict:
@@ -997,7 +1008,16 @@ class RepresentationAgenticVerifier(AgenticVerifier):
     def guard(self, inp: VLRRResult, vres: VLRRResult) -> list[str]:
         """The conditions a final choice fails (empty = admissible): a measured embedding (a finished call that
         wrote an h5ad: `call_error`), finite and not constant, whose val proxy beats the frozen input's by more
-        than 2 SE (``quant.beats``, paired over the val units both have, on the comparison draws)."""
+        than 2 SE (``quant.beats``, paired over the val units both have, on the comparison draws).
+
+        $SHAPE_FORCE_SSL_RUN=1 drops the "beats the frozen input" requirement specifically when this tier has
+        no adopted proxy at all (self.proxy != SCORE -- gate()'s own "no adopted proxy" case): `_compare`
+        always returns beats=False here (no sibling_site_map units exist to pair), so without this the guard
+        would reject every trial unconditionally and the search would always deliver the frozen input --
+        making gate()'s SHAPE_FORCE_SSL_RUN override a no-op in practice (real training runs, nothing it
+        produces is ever admissible). The finite/non-constant sanity checks still apply; only the
+        unattainable comparison is skipped. Still unvalidated: a trial that clears this relaxed guard is not
+        confirmed better than zero-shot, only not obviously broken."""
         m, index = vres.metrics or {}, self._index_of.get(id(vres))
         if not m or index is None:
             return ["no measured embedding"]
@@ -1006,9 +1026,12 @@ class RepresentationAgenticVerifier(AgenticVerifier):
             fails.append("the embedding is not finite")
         elif not m.get("embedding_varies"):
             fails.append("the embedding is constant")
-        paired = self._compare(0, index)
-        if not paired["beats"]:
-            fails.append(f"val {SCORE} does not beat the frozen input's by more than 2 SE: {self._paired_text(paired)}")
+        no_proxy_forced = self.proxy != SCORE and os.environ.get("SHAPE_FORCE_SSL_RUN") == "1"
+        if not no_proxy_forced:
+            paired = self._compare(0, index)
+            if not paired["beats"]:
+                fails.append(f"val {SCORE} does not beat the frozen input's by more than 2 SE: "
+                             f"{self._paired_text(paired)}")
         return fails
 
     # ---- the round: the shared one, with the resource stop ------------------------------------------------

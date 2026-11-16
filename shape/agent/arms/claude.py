@@ -19,7 +19,10 @@ import time
 from . import protocol
 from .protocol import read_json, write_json
 
-MODEL = "claude-sonnet-5"
+MODEL = "claude-opus-5"
+# The Claude Code arm's allowed reasoners (the CLI alias env vars and the --model flag are all set to the
+# one picked per run; a run may not mix models -- modelUsage must name exactly it). Add new ids here.
+ALLOWED_MODELS = ("claude-opus-5", "claude-sonnet-5-5")
 CLAUDE_CLI_VERSION = "2.1.296"
 POLICY = "claude-code-native-tools-v2"
 # the result subtypes of the agent's own failure (a malformed reply); any other error result is an API error
@@ -80,8 +83,8 @@ def api_env() -> Path:
 
 
 def route(model):
-    if model != MODEL:
-        raise ValueError(f"CPJUMP1 Claude Code requires {MODEL}")
+    if model not in ALLOWED_MODELS:
+        raise ValueError(f"CPJUMP1 Claude Code requires one of {ALLOWED_MODELS}")
     for variable in ("LLM_API_BASE", "LLM_BASE_URL"):
         if os.environ.get(variable, protocol.BASE_URL).rstrip("/") != protocol.BASE_URL:
             raise ValueError("Claude Code requires the Stanford Gateway route")
@@ -149,7 +152,7 @@ def _inherited(workspace: Path) -> list[Path]:
             if (parent / name).exists()]
 
 
-def _env(config_dir: Path, workspace: Path, run=None, marker_env=None) -> dict:
+def _env(config_dir: Path, workspace: Path, run=None, marker_env=None, model=MODEL) -> dict:
     """From scratch, as Codex's: no key variable, a run-private config dir and home, every alias the arm's model."""
     allowed = {"PATH", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "LANG", "LC_ALL",
                "SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE"}
@@ -162,7 +165,7 @@ def _env(config_dir: Path, workspace: Path, run=None, marker_env=None) -> dict:
                CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1", DISABLE_TELEMETRY="1",
                # no CLI retries, as Codex (request/stream retries 0): an API error fails the arm (user, 2026-10-12)
                CLAUDE_CODE_MAX_RETRIES="0",
-               **{alias: MODEL for alias in MODEL_ALIASES})
+               **{alias: model for alias in MODEL_ALIASES})
     if run is not None and marker_env:
         # An outer watchdog (the caller's harness) scans this marker even after a nested setsid/chdir; the
         # caller names the variable, so this backend knows nothing of any particular harness.
@@ -191,7 +194,7 @@ def _version(cwd, env, deadline) -> str:
 def stream_usage(trace: Path, model: str) -> dict:
     """The CLI's documented JSON result and its token usage (any failure here is a basic CLI/LLM failure; a result
     without tokens means the model never answered: route, auth or gateway). Keeps the result under "result"."""
-    if model != MODEL:
+    if model not in ALLOWED_MODELS:
         raise ValueError("unexpected requested Claude Code model")
     try:
         result = json.loads(Path(trace).read_text(encoding="utf-8"))
@@ -274,7 +277,7 @@ def invoke(root, prompt, model, settings, deadline, index, images=(), marker=Non
         roots = workspace / "read_roots.json"
         write_json(roots, [str((workspace / name).resolve()) for name in names])
         write_json(config_dir / "settings.json", _round_settings(settings, roots))
-        env = _env(config_dir, workspace, run=marker or root, marker_env=marker_env)
+        env = _env(config_dir, workspace, run=marker or root, marker_env=marker_env, model=model)
         version = _version(workspace, env, deadline)
         text = prompt + ("\n" + evidence_line(names) if names else "")
         rc, stdout, stderr = protocol._process(command(model, config_dir / "settings.json"), workspace, env,
@@ -311,7 +314,7 @@ def preflight(root, model):
     with tempfile.TemporaryDirectory(prefix="cpj-claude-check-", dir=TEMP_ROOT) as temporary:
         cwd = Path(temporary)
         (cwd / "config").mkdir()
-        env = _env(cwd / "config", cwd, run=root)
+        env = _env(cwd / "config", cwd, run=root, model=model)
         version = _version(cwd, env, deadline)
         rc, help_text, _ = protocol._process(["claude", "--help"], cwd, env, deadline, name="Claude Code")
         if rc or any(flag not in help_text for flag in HELP_FLAGS):

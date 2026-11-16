@@ -1,9 +1,8 @@
 """Image / GT-label pairing and the cropper defaults the drivers share.
 
 `<data-dir>/images/<name>.<ext>` + `<data-dir>/labels/<name>_label.tiff` is the
-NeurIPS22-CellSeg layout; `run_benchmark.py`, `run_shape_crop.py`, `run_cohort_crop.py`
-and `run_calib_sweep.py` all read it through `_find_image_mask_pairs`. The pairing's
-test is `test_cropper_arms.py::test_find_image_mask_pairs_matches_layout`.
+NeurIPS22-CellSeg layout; `run_benchmark.py` and `run_shape_crop.py` read it through
+`_find_image_mask_pairs`.
 """
 
 from __future__ import annotations

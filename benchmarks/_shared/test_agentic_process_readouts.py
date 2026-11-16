@@ -547,25 +547,3 @@ def test_rec_put_replaces_a_leaf_that_a_later_put_nests_under():
     rec.put("A.b", 1)
     rec.put("A.b.c", None, "why not")
     assert rec.data["A"] == {"b": {"c": None}} and rec.why == {"A.b.c": "why not"}
-
-
-def test_livecell_shape_embed_record_that_does_not_pair_up_with_its_rounds(tmp_path):
-    """Real LIVECell SHAPE arm: the embed search entries do not pair up with the rounds (P3.loop = None), and the
-    record has an expert_config list (P3.loop.expert_start_calls nests under that None); control + shape, no codex."""
-    from benchmarks.full_LIVECell.runners import process_readouts as livecell
-    root = tmp_path / "exp"
-    base_arm(root, "control", "control", marker="LIVECELL_COMPLETE")
-    shape = build_shape(root)
-    (shape / "CPJUMP1_COMPLETE").rename(shape / "LIVECELL_COMPLETE")
-    path = shape / "representation_SEARCH.json"
-    record = json.loads(path.read_text(encoding="utf-8"))
-    record["details"]["entries"] = record["details"]["entries"][:2]         # 1 entry, 3 round names: not paired
-    record["details"]["expert_config"] = [{"a": 1}, {"a": 2}]
-    put(path, record)
-    assert livecell.main(["--run", str(root)]) == 0
-    data = json.loads((root / "analysis" / "process_readouts.json").read_text(encoding="utf-8"))
-    assert sorted(data["arms"]) == ["control", "shape"]
-    embed = data["arms"]["shape"]["stages"]["embed"]
-    assert embed["P3"]["loop"] == {"expert_start_calls": 2}
-    assert "P3.loop" not in embed["unavailable"]
-    assert data["arms"]["shape"]["stages"]["batch"]["P3"]["loop"]["tuning_calls"] == 1

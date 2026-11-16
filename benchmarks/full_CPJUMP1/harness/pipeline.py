@@ -95,6 +95,146 @@ CPJUMP1 = Dataset(
            "ABSTAIN": "ABSTAIN (no calibration reference group occurs on two or more plates)"},
     withheld="Private labels and evaluation genes are not available.", usages=CPJUMP1_USAGES)
 
+MODALITY_PROBE_SEGMENT_REQUEST = ("Segment whole cells, one instance per cell. Fluorescence channels are "
+                                  "DNA, AGP; the resulting masks crop a separate five-channel raw image at "
+                                  "identical coordinates.")
+MODALITY_PROBE_EMBED_BRIEF = ("Five-channel Cell Painting images spanning two cell types (A549, U2OS) and "
+                              "three perturbation modalities (CRISPR knockout, small-molecule compound, "
+                              "ORF overexpression), one plate per (cell type, modality) combination -- not "
+                              "CPJUMP1's two-plate same-biology replicate design. Only development wells "
+                              "are visible; held-out wells are excluded entirely.")
+MODALITY_PROBE_BATCH_BRIEF = ("Six (cell type, modality) combinations, each its own single plate -- plate "
+                              "is confounded with the biological condition here, unlike CPJUMP1's two "
+                              "technical-replicate plates of the same knockouts. No calibration reference "
+                              "spans two or more plates by construction, so correction is expected to "
+                              "ABSTAIN (the existing admission rule, unmodified): batch correction must "
+                              "never erase a real biological difference it was never designed to separate "
+                              "from a technical one.")
+MODALITY_PROBE = Dataset(
+    name="ModalityProbe", cli="benchmarks.full_CPJUMP1.harness.cli",
+    data="benchmarks.full_CPJUMP1.harness.modality_probe_data",
+    score="benchmarks.full_CPJUMP1.harness.modality_probe_score",
+    n_images=600, marker="MODALITY_PROBE_COMPLETE", image_shape=(1080, 1080), channels=CHANNELS, dtype="uint16",
+    plate_type="Mixed", mask_label=False,
+    tasks={"segment": MODALITY_PROBE_SEGMENT_REQUEST, "crop": CROP_BRIEF, "embed": MODALITY_PROBE_EMBED_BRIEF,
+           "batch": MODALITY_PROBE_BATCH_BRIEF},
+    inputs={"segment": "Inputs: {n} images (sites) of mixed cell-type/perturbation Cell Painting wells on "
+                       "six plates; each a 1080 x 1080 two-channel uint16 TIFF (DNA, AGP) taken from the "
+                       "site's five-channel image (Mito, AGP, RNA, ER, DNA).",
+            "crop": "Inputs: {n} images; each a 1080 x 1080 five-channel uint16 TIFF (Mito, AGP, RNA, ER, DNA) "
+                    "and its cell mask delivered by this arm's segment stage (min_area is that segmentation's "
+                    "min_size). The delivered crop boxes are cut from the raw five-channel image as the "
+                    "embedding stage's input.",
+            "embed": "Inputs: the single-cell crops of this arm's crop stage. Calls fit and validate on "
+                     "development wells only: at most {cells} cells per development site; "
+                     "development_train wells train, development_val wells validate; evaluation wells never "
+                     "enter a call. input is the pretrained backbone (zero_shot) on those cells, not a call. "
+                     "After finish, a fresh worker embeds every retained cell with the delivered call's "
+                     "frozen checkpoint (the pretrained backbone for input), within the same arm deadline.",
+            "batch": "Inputs: the well profiles of this arm's embed stage (median cell embedding per site, "
+                     "mean of a well's two sites), batch key plate (six plates, each its own cell type x "
+                     "modality combination). Each call runs the tool on all rows with harmony_params = the "
+                     "tool's DEFAULT_CONFIG overridden by your parameters. input is the uncorrected profiles, "
+                     "not a call. Batch calibration rule (shared by all arms): correction runs only when the "
+                     "tool's batch-effect detector reports a batch effect on all rows and at least one "
+                     "calibration reference group occurs on two or more plates. Here the rule's decision is "
+                     "{rule}."},
+    input_channels={"segment": "DNA, AGP", "crop": "Mito, AGP, RNA, ER, DNA"},
+    rules={"RUN": "RUN (correction admitted)", "SKIP": "SKIP (no batch effect detected on all rows)",
+           "ABSTAIN": "ABSTAIN (no calibration reference group occurs on two or more plates)"},
+    withheld="Per-well treatment identity (compound/guide/construct) and private labels are not available; "
+             "only each image's (cell type, perturbation) combination is known.", usages=CPJUMP1_USAGES,
+    allow_empty_masks=True, allowed_sites=(1,))
+
+# ModalityProbe2 (MODALITY_PROBE2_PLAN.md): same 6 groups and 600-image scale as MODALITY_PROBE, but 2
+# plates per group (12 total) at each modality's LONGEST available timepoint, 50 shared well positions per
+# plate -- every well has a guaranteed cross-plate identity twin (private/labels.json's pair_plate/pair_well)
+# instead of probe1's identity-blind random sample. Reuses MODALITY_PROBE's loader/scorer modules unmodified
+# (both are prep-path-generic, not hardcoded to probe1's directory); only the Dataset name, image count
+# source description and plate count in the prompts differ. The retrieval scorer upgrade that actually uses
+# pair_well (plan step 7) is not written yet -- until then this dataset's retrieval_metrics will just report
+# "nothing eligible" (no gene/compound_target fetched for probe2 yet either; a later, separate step).
+MODALITY_PROBE2 = Dataset(
+    name="ModalityProbe2", cli="benchmarks.full_CPJUMP1.harness.cli",
+    data="benchmarks.full_CPJUMP1.harness.modality_probe_data",
+    score="benchmarks.full_CPJUMP1.harness.modality_probe_score",
+    n_images=600, marker="MODALITY_PROBE2_COMPLETE", image_shape=(1080, 1080), channels=CHANNELS, dtype="uint16",
+    plate_type="Mixed", mask_label=False,
+    tasks={"segment": MODALITY_PROBE_SEGMENT_REQUEST, "crop": CROP_BRIEF, "embed": MODALITY_PROBE_EMBED_BRIEF,
+           "batch": MODALITY_PROBE_BATCH_BRIEF},
+    inputs={"segment": "Inputs: {n} images (sites) of mixed cell-type/perturbation Cell Painting wells on "
+                       "twelve plates (2 per cell-type/modality combination, each modality's longest "
+                       "available timepoint); each a 1080 x 1080 two-channel uint16 TIFF (DNA, AGP) taken "
+                       "from the site's five-channel image (Mito, AGP, RNA, ER, DNA).",
+            "crop": "Inputs: {n} images; each a 1080 x 1080 five-channel uint16 TIFF (Mito, AGP, RNA, ER, DNA) "
+                    "and its cell mask delivered by this arm's segment stage (min_area is that segmentation's "
+                    "min_size). The delivered crop boxes are cut from the raw five-channel image as the "
+                    "embedding stage's input.",
+            "embed": "Inputs: the single-cell crops of this arm's crop stage. Calls fit and validate on "
+                     "development wells only: at most {cells} cells per development site; "
+                     "development_train wells train, development_val wells validate; evaluation wells never "
+                     "enter a call. input is the pretrained backbone (zero_shot) on those cells, not a call. "
+                     "After finish, a fresh worker embeds every retained cell with the delivered call's "
+                     "frozen checkpoint (the pretrained backbone for input), within the same arm deadline.",
+            "batch": "Inputs: the well profiles of this arm's embed stage (median cell embedding per site, "
+                     "mean of a well's two sites), batch key plate (twelve plates, two per cell type x "
+                     "modality combination). Each call runs the tool on all rows with harmony_params = the "
+                     "tool's DEFAULT_CONFIG overridden by your parameters. input is the uncorrected profiles, "
+                     "not a call. Batch calibration rule (shared by all arms): correction runs only when the "
+                     "tool's batch-effect detector reports a batch effect on all rows and at least one "
+                     "calibration reference group occurs on two or more plates. Here the rule's decision is "
+                     "{rule}."},
+    input_channels={"segment": "DNA, AGP", "crop": "Mito, AGP, RNA, ER, DNA"},
+    rules={"RUN": "RUN (correction admitted)", "SKIP": "SKIP (no batch effect detected on all rows)",
+           "ABSTAIN": "ABSTAIN (no calibration reference group occurs on two or more plates)"},
+    withheld="Per-well treatment identity (compound/guide/construct) and private labels are not available; "
+             "only each image's (cell type, perturbation) combination is known.", usages=CPJUMP1_USAGES,
+    allow_empty_masks=True, allowed_sites=(1,))
+
+# ModalityProbe3: same 6 groups, same 12 plates as probe2, but 25 shared well positions (half of probe2's
+# 50) with 2 REAL sites per (plate, well) instead of 1 -- same plate, same well, same imaging session, two
+# different fields of view. This is deliberately the SAME structure original CPJUMP1 already has (2
+# sites/well), so SHAPE's own SSL validation (sibling_site_map / tier_of's "replicate" tier,
+# shape/tools/cell_state_analyzer/quant.py) works natively here: no SHAPE_FORCE_SSL_RUN override, no code
+# change to that shared infrastructure. allowed_sites=(2,) (CPJUMP1's own default) replaces probe1/probe2's
+# (1,) override. Cross-plate identity twins (pair_plate/pair_well) are preserved at the (plate, well) level.
+MODALITY_PROBE3 = Dataset(
+    name="ModalityProbe3", cli="benchmarks.full_CPJUMP1.harness.cli",
+    data="benchmarks.full_CPJUMP1.harness.modality_probe_data",
+    score="benchmarks.full_CPJUMP1.harness.modality_probe_score",
+    n_images=600, marker="MODALITY_PROBE3_COMPLETE", image_shape=(1080, 1080), channels=CHANNELS, dtype="uint16",
+    plate_type="Mixed", mask_label=False,
+    tasks={"segment": MODALITY_PROBE_SEGMENT_REQUEST, "crop": CROP_BRIEF, "embed": MODALITY_PROBE_EMBED_BRIEF,
+           "batch": MODALITY_PROBE_BATCH_BRIEF},
+    inputs={"segment": "Inputs: {n} images (sites) of mixed cell-type/perturbation Cell Painting wells on "
+                       "twelve plates (2 per cell-type/modality combination, each modality's longest "
+                       "available timepoint, 2 sites per well); each a 1080 x 1080 two-channel uint16 TIFF "
+                       "(DNA, AGP) taken from the site's five-channel image (Mito, AGP, RNA, ER, DNA).",
+            "crop": "Inputs: {n} images; each a 1080 x 1080 five-channel uint16 TIFF (Mito, AGP, RNA, ER, DNA) "
+                    "and its cell mask delivered by this arm's segment stage (min_area is that segmentation's "
+                    "min_size). The delivered crop boxes are cut from the raw five-channel image as the "
+                    "embedding stage's input.",
+            "embed": "Inputs: the single-cell crops of this arm's crop stage. Calls fit and validate on "
+                     "development wells only: at most {cells} cells per development site; "
+                     "development_train wells train, development_val wells validate; evaluation wells never "
+                     "enter a call. input is the pretrained backbone (zero_shot) on those cells, not a call. "
+                     "After finish, a fresh worker embeds every retained cell with the delivered call's "
+                     "frozen checkpoint (the pretrained backbone for input), within the same arm deadline.",
+            "batch": "Inputs: the well profiles of this arm's embed stage (median cell embedding per site, "
+                     "mean of a well's two sites), batch key plate (twelve plates, two per cell type x "
+                     "modality combination). Each call runs the tool on all rows with harmony_params = the "
+                     "tool's DEFAULT_CONFIG overridden by your parameters. input is the uncorrected profiles, "
+                     "not a call. Batch calibration rule (shared by all arms): correction runs only when the "
+                     "tool's batch-effect detector reports a batch effect on all rows and at least one "
+                     "calibration reference group occurs on two or more plates. Here the rule's decision is "
+                     "{rule}."},
+    input_channels={"segment": "DNA, AGP", "crop": "Mito, AGP, RNA, ER, DNA"},
+    rules={"RUN": "RUN (correction admitted)", "SKIP": "SKIP (no batch effect detected on all rows)",
+           "ABSTAIN": "ABSTAIN (no calibration reference group occurs on two or more plates)"},
+    withheld="Per-well treatment identity (compound/guide/construct) and private labels are not available; "
+             "only each image's (cell type, perturbation) combination is known.", usages=CPJUMP1_USAGES,
+    allow_empty_masks=True, allowed_sites=(2,))
+
 
 def dataset(config: dict) -> Dataset:
     """The run's dataset: CONFIG.json's `dataset` (absent: CPJUMP1)."""
@@ -110,6 +250,12 @@ def dataset(config: dict) -> Dataset:
         return importlib.import_module("case studies.cardiomyocytes.ctnt_flowcytometry.runners.dataset.contract").for_config(config)
     if name == "ctnt_staining":
         return importlib.import_module("case studies.cardiomyocytes.ctnt_staining.runners.spec").for_config(config)
+    if name == "ModalityProbe":
+        return MODALITY_PROBE
+    if name == "ModalityProbe2":
+        return MODALITY_PROBE2
+    if name == "ModalityProbe3":
+        return MODALITY_PROBE3
     raise ValueError(f"unknown dataset {name!r}")
 
 
@@ -123,6 +269,20 @@ def check_result(result: dict, field: str) -> dict:
     if not isinstance(result, dict) or result.get("error") or result.get(field) is None:
         raise RuntimeError(f"tool did not deliver {field}: {(result or {}).get('error')}")
     return result
+
+
+def check_segment_result(result: dict, spec: Dataset) -> dict:
+    """check_result(result, "mask_path"), except on a dataset with allow_empty_masks: a visual-QC
+    rejection caused purely by cell_count==0 (overlay rendered fine -- overlay_is_black is False, so this
+    is not a broken render or a connection failure, just truly no cells) is accepted as a valid zero-cell
+    delivery instead of raising. Any other failure (no mask_path at all, overlay_is_black, an exception)
+    still raises -- this does not mask real tool failures, on this dataset or any other."""
+    overlay_qc = (result or {}).get("overlay_qc") or {}
+    if (spec.allow_empty_masks and isinstance(result, dict) and result.get("error")
+            and result.get("mask_path") and result.get("cell_count") == 0
+            and not overlay_qc.get("overlay_is_black")):
+        return result
+    return check_result(result, "mask_path")
 
 
 def assert_search_clean(record: dict) -> dict | None:
@@ -459,7 +619,7 @@ def _segmentation_per_image(prep: Path, run: Path, config: dict, images: list[di
             # evaluable); SHAPE's VRR sees the complaint in S001 and searches from it.
             qc_error = str(initial["error"])
         else:
-            initial = check_result(initial, "mask_path")
+            initial = check_segment_result(initial, spec)
         write_json(folder / "defaults.json", initial)
         mask = np.load(initial["mask_path"])
         target = folder / f"cell_mask_{ident}.tif"
@@ -484,7 +644,7 @@ def _segmentation_per_image(prep: Path, run: Path, config: dict, images: list[di
         if mask.shape != spec.image_shape or not np.issubdtype(mask.dtype, np.integer) or np.any(mask < 0):
             raise ValueError(f"invalid segmentation mask: {ident}")
         n_cells = int(np.count_nonzero(np.unique(mask) > 0))
-        if not n_cells and not dataset(config).allow_empty_masks:
+        if not n_cells and not spec.allow_empty_masks:
             raise RuntimeError(f"empty segmentation: {ident}; recorded failure, not silently omitted")
         return {"image_id": ident, "mask": str(target.resolve()), "sha256": digest(target),
                 "min_area": params["min_size"], "n_cells": n_cells,
@@ -537,8 +697,8 @@ def _segment_image_worker(task) -> dict:
     folder = run / "segment" / ident
     folder.mkdir(parents=True, exist_ok=True)
     image = within(prep / "public", row["segment_file"])
-    initial = check_result(tool.execute(image=str(image), image_id=ident, model_type="cpsam", bsize=256,
-                           query_cache_dir=str(folder / "defaults"), **defaults), "mask_path")
+    initial = check_segment_result(tool.execute(image=str(image), image_id=ident, model_type="cpsam",
+                           bsize=256, query_cache_dir=str(folder / "defaults"), **defaults), spec)
     write_json(folder / "defaults.json", initial)
     mask = np.load(initial["mask_path"])
     target = folder / f"cell_mask_{ident}.tif"
@@ -969,6 +1129,8 @@ def _cropping_per_image(prep: Path, run: Path, config: dict, images: list[dict],
         exclusions.extend(excluded)
         if record is not None:
             record_search(run, "crop", row["image_id"], record)
+    if not all_cells:
+        raise RuntimeError(f"crop retained no cells across all {len(images)} images")
     write_json(run / "cells.json", all_cells)
     write_json(run / "excluded_cells.json", exclusions)
 
@@ -1004,6 +1166,47 @@ def _crop_materialize(task) -> tuple[list, list, dict | None, dict | None]:
     kept, excluded = retained_crops(raw, row, crops, delivered["rejected"], folder, spec, labels)
     print(f"CROP_MATERIALIZE {ident} retained={len(kept)} excluded={len(delivered['rejected'])}", flush=True)
     return kept, excluded, delivered["record"], usage.snapshot() if _IN_WORKER else None
+
+
+def _crop_reroute_empty(prep: Path, run: Path, config: dict, defaults: dict, engine, search_rounds: int,
+                         per_vrr_cores: int, pending: list) -> dict:
+    """Re-crop, with a full per-image VRR search (no cohort consensus), every image whose cohort-delivered crop
+    retained zero cells -- a legitimate but rare cohort-consensus miss (e.g. this image's own segmentation found
+    only small/edge cells that the shared margin/recenter levers happen to trim away). This mirrors the
+    admission-routed path (crop_one seeded per image) but triggers on "delivered zero cells", a condition the
+    cohort's upstream preflight grouping cannot see ahead of time. `pending`: [(row, mask)]. Returns
+    {image_id: (kept, excluded, record)}; if the full search ALSO retains nothing, kept is empty (a genuinely
+    cell-less image), left for the caller's aggregate check to surface."""
+    from benchmarks.full_HCMA.harness.shape_arm import crop_one, tools_common
+    from shape.tools.single_cell_cropper.tool import Single_Cell_Cropper_Tool
+
+    C = tools_common()
+    spec = dataset(config)
+    out = {}
+    for row, mask in pending:
+        ident = row["image_id"]
+        image = within(prep / "public", row["file"])
+        folder = run / "crop" / ident
+        record = crop_one(C, Single_Cell_Cropper_Tool,
+            {"image_id": ident, "path": str(image), "mask": mask["mask"], "min_area": mask["min_area"],
+             "defaults": defaults, "brief": spec.tasks["crop"]},
+            engine, config["deadline"], per_vrr_cores, folder / "reroute", run / "logs" / "crop",
+            budget=search_rounds)
+        write_json(folder / "COHORT_REROUTE.json", record)
+        assert_search_clean(record)
+        params = {**record["levers"], "cell_overrides": record["cell_overrides"]}
+        rejected = set(record["rejected_tool_cells"])
+        result = check_result(Single_Cell_Cropper_Tool().execute(
+            original_image=str(image), nuclei_mask=mask["mask"], source_image_id=ident, group="default",
+            min_area=mask["min_area"], output_format="tif", query_cache_dir=str(folder / "reroute_delivered"),
+            **params), "cell_crops_metadata_path")
+        crops = read_json(Path(result["cell_crops_metadata_path"]))["cell_metadata"]
+        labels = tifffile.imread(mask["mask"]) if spec.mask_label else None
+        kept, excluded = retained_crops(raw_stack(image, spec), row, crops, rejected, folder, spec, labels)
+        print(f"CROP_REROUTE {ident} retained={len(kept)} excluded={len(rejected)} (cohort delivered 0)",
+              flush=True)
+        out[ident] = (kept, excluded, {**record, "mode": "reroute_empty"})
+    return out
 
 
 def _cropping_cohort(prep: Path, run: Path, config: dict, images: list[dict], engine) -> None:
@@ -1101,14 +1304,28 @@ def _cropping_cohort(prep: Path, run: Path, config: dict, images: list[dict], en
              for r in images]
     mat_workers = max(1, min(workers, SEGMENT_WORKERS_CAP, len(images)))
     results = _in_processes(_crop_materialize, tasks, mat_workers, max(1, workers // mat_workers))
-    all_cells, exclusions = [], []
+    all_cells, exclusions, empty = [], [], []
     for row, (kept, excluded, record, spent) in zip(images, results):
         if spent is not None:
             usage.absorb(spent)
+        if not kept:
+            empty.append((row, masks[row["image_id"]]))
+            continue
         all_cells.extend(kept)
         exclusions.extend(excluded)
         if record is not None:
             record_search(run, "crop", row["image_id"], record)
+    if empty:
+        print(f"CROP_COHORT {len(empty)} image(s) delivered zero cells -- rerouting to per-image VRR: "
+              f"{[r['image_id'] for r, _ in empty]}", flush=True)
+        rerouted = _crop_reroute_empty(prep, run, config, defaults, engine, search_rounds, per_vrr_cores, empty)
+        for row, _ in empty:
+            kept, excluded, record = rerouted[row["image_id"]]
+            all_cells.extend(kept)
+            exclusions.extend(excluded)
+            record_search(run, "crop", row["image_id"], record)
+    if not all_cells:
+        raise RuntimeError(f"crop cohort retained no cells across all {len(images)} images")
     write_json(run / "cells.json", all_cells)
     write_json(run / "excluded_cells.json", exclusions)
 
@@ -1134,8 +1351,15 @@ def retained_crops(raw: np.ndarray, row: dict, crops: list[dict], rejected: set,
                      "display_crop_path": c["crop_path"], "crop_bbox": c["crop_bbox"],
                      **{k: row[k] for k in ("image_id", "plate", "well", "usage")},
                      **({"mask_label": labels[c["cell_id"]]} if spec.mask_label else {})})
-    if not kept and not (spec.allow_empty_masks and mask is not None and not np.any(mask)):
-        raise RuntimeError(f"no retained crops for {ident}")
+    if not kept:
+        if not spec.allow_empty_masks:
+            raise RuntimeError(f"no retained crops for {ident}")
+        # On a dataset that allows empty masks: either the segmentation mask was genuinely empty, or every
+        # cell of this image was rejected by the (cohort or per-image) crop VRR. Both are legitimate
+        # per-image outcomes here -- the image contributes no cells rather than crashing the whole stage.
+        # The aggregate guard in the caller (before writing cells.json) still fails if NO image retained
+        # anything.
+        print(f"CROP_EMPTY {ident}: all {len(crops)} crop(s) rejected -> image contributes no cells", flush=True)
     return kept, excluded
 
 

@@ -26,7 +26,7 @@ from shape.tools.single_cell_cropper.tool import SEGMENTER_DEFAULT_MIN_SIZE  # n
 
 @dataclass
 class BenchmarkConfig:
-    """The fields the runners read (run_shape_crop.py, run_concurrent_benchmark.py)."""
+    """The fields the runners read (run_shape_crop.py)."""
     # === Solver path (run_shape_crop.py --solver) ===
     solver_question: str = (
         "Crop every individual cell from the segmentation mask, "
@@ -50,3 +50,7 @@ class BenchmarkConfig:
 
 
 DEFAULT = BenchmarkConfig()
+
+# Non-pixel run artifacts (run_benchmark.py's lean/noimg export filters): every other suffix is treated
+# as pixel data (crops, masks, overlays) and excluded from a lean copy.
+PIXEL_SUFFIXES = {".tif", ".tiff", ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".zip", ".npy", ".npz"}

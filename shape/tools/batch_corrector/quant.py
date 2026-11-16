@@ -33,6 +33,8 @@ from importlib.metadata import version as package_version
 import numpy as np
 import pandas as pd
 
+from shape.utils import gpu_knn
+
 LABEL_KEY = "Metadata_JCP2022"
 DMSO = "DMSO"
 CONTROL_SPLITS = ("negcon", "poscon")
@@ -60,6 +62,10 @@ def filter_dmso(meta: pd.DataFrame, feats: np.ndarray, label_key: str):
 
 
 def _neighbors(feats: np.ndarray, n_neighbors: int):
+    if gpu_knn.enabled():       # SHAPE_GPU_KNN=1: exact kNN on the GPU, self first like pynndescent
+        from scib_metrics.nearest_neighbors import NeighborsResults
+        indices, distances = gpu_knn.knn(feats, n_neighbors)
+        return NeighborsResults(indices=indices, distances=distances)
     from scib_metrics.nearest_neighbors import pynndescent
     return pynndescent(np.asarray(feats, dtype=np.float64), n_neighbors=n_neighbors)
 

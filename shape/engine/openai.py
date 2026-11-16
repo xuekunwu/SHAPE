@@ -68,9 +68,21 @@ def _requires_temperature_1(model_string: str) -> bool:
             or (model_string or "").lower().startswith("claude"))
 
 
+def _is_together_freeform_model(model_string: str) -> bool:
+    """Together-hosted DeepSeek/Qwen: `response_format` (even permissive json_object, let alone strict
+    json_schema) is either ignored (Qwen/Qwen3.5-9B free-texts past it) or returns empty content
+    (deepseek-ai/DeepSeek-V4.1-Flash), verified against the live Together endpoint 2026-10-31. Unlike GLM,
+    sending response_format at all makes things worse, not better -- these need the plain-completion +
+    instruction-only + regex-parse path (_freeform_json_completion)."""
+    m = (model_string or "").lower()
+    return m.startswith(("deepseek-ai/", "qwen/"))
+
+
 def _supports_structured(model_string: str) -> bool:
     return (model_string in OPENAI_STRUCTURED_MODELS
-            or _is_reasoning_or_next_gen_model(model_string))
+            or _is_reasoning_or_next_gen_model(model_string)
+            or "glm" in (model_string or "").lower()   # GLM (智谱 glm-* and Together zai-org/GLM-*): strict json_schema
+            or _is_together_freeform_model(model_string))
 
 
 def _maybe_downscale_image(item: bytes, cap: int = None) -> bytes:
@@ -255,6 +267,36 @@ class ChatOpenAI(EngineLM, CachedEngine):
         text = response.choices[0].message.content or ""
         return {"content": parse_json_answer(response_format, text), "usage": self._usage_dict(response)}
 
+    def _freeform_json_completion(self, api_params: dict, response_format):
+        """DeepSeek-V4.1-Flash / Qwen3.5-9B on Together (_is_together_freeform_model): no `response_format`
+        at all -- the schema is ONLY a prompt instruction, parsed back out of free text. These models also
+        spend a variable, sometimes large, share of max_tokens on invisible reasoning before any visible
+        answer. Measured on Together with a realistic batch-correction decision prompt (2026-10-31, 8
+        Qwen3.5-9B trials / 4 DeepSeek-V4.1-Flash trials): DeepSeek stayed a steady 1500-2300 reasoning
+        tokens, but Qwen3.5-9B ranged 401-4592 -- one trial alone used 57% of an 8000 floor, and real
+        multi-round VRR prompts (longer, more context) than this synthetic test can plausibly run heavier.
+        16000 gives real headroom rather than a floor already seen half-consumed once. A caller-set
+        max_tokens under this can otherwise starve the visible answer entirely (finish_reason='length',
+        empty content). Floor it here rather than at every call site."""
+        params = dict(api_params)
+        params.pop("response_format", None)
+        token_key = "max_completion_tokens" if "max_completion_tokens" in params else "max_tokens"
+        params[token_key] = max(params.get(token_key) or 0, 16000)
+        messages = [dict(message) for message in params.get("messages") or []]
+        schema = response_format.model_json_schema()
+        schema_name = getattr(response_format, "__name__", "structured_response")
+        instruction = ("Return exactly one JSON object and no prose, no markdown fences, no reasoning in "
+                       "the visible answer. The object must satisfy this JSON Schema: "
+                       + json.dumps(schema, ensure_ascii=False, separators=(",", ":")))
+        if messages and messages[0].get("role") == "system":
+            messages[0]["content"] = str(messages[0].get("content") or "") + "\n\n" + instruction
+        else:
+            messages.insert(0, {"role": "system", "content": instruction})
+        params["messages"] = messages
+        response = self.client.chat.completions.create(**params)
+        text = response.choices[0].message.content or ""
+        return {"content": parse_json_answer(response_format, text), "usage": self._usage_dict(response)}
+
     def _parse_structured(self, api_params: dict, response_format):
         """Validate the first JSON value of the same response when SDK parsing rejects surrounding prose."""
         raw = self.client.beta.chat.completions.with_raw_response.parse(**api_params)
@@ -414,8 +456,10 @@ class ChatOpenAI(EngineLM, CachedEngine):
                 else:
                     api_params["max_tokens"] = max_tokens
                 self._apply_backend_quirks(api_params)
-                if self.model_string.startswith("glm"):
-                    return self._glm_structured_completion(api_params, response_format)
+                if "glm" in self.model_string.lower():   # glm-* (智谱) and zai-org/GLM-* (Together): both need
+                    return self._glm_structured_completion(api_params, response_format)  # the explicit strict json_schema
+                if _is_together_freeform_model(self.model_string):
+                    return self._freeform_json_completion(api_params, response_format)
                 return self._parse_structured(api_params, response_format)
             except Exception as e:
                 if is_fatal_llm_error(e):
@@ -661,8 +705,10 @@ class ChatOpenAI(EngineLM, CachedEngine):
                 else:
                     api_params["max_tokens"] = max_tokens
                 self._apply_backend_quirks(api_params)
-                if self.model_string.startswith("glm"):
-                    return self._glm_structured_completion(api_params, response_format)
+                if "glm" in self.model_string.lower():   # glm-* (智谱) and zai-org/GLM-* (Together): both need
+                    return self._glm_structured_completion(api_params, response_format)  # the explicit strict json_schema
+                if _is_together_freeform_model(self.model_string):
+                    return self._freeform_json_completion(api_params, response_format)
                 return self._parse_structured(api_params, response_format)
             except Exception as e:
                 if is_fatal_llm_error(e):

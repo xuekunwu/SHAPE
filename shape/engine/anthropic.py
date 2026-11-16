@@ -20,6 +20,7 @@ except ImportError:
     )
 
 import base64
+import json
 import logging
 import re
 from typing import List, Union
@@ -33,6 +34,9 @@ from .errors import is_fatal_llm_error
 from dotenv import load_dotenv
 load_dotenv()
 logging.getLogger("httpx").setLevel(logging.WARNING)
+
+# Models that reject a FORCED tool_choice ("tool"/"any"); their structured calls use "auto" instead.
+_NO_FORCED_TOOL_CHOICE = {"claude-sonnet-5-5", "claude-opus-5-5"}
 
 
 class ChatAnthropic(EngineLM, CachedEngine):
@@ -121,7 +125,8 @@ class ChatAnthropic(EngineLM, CachedEngine):
         ``top_p`` fields.  Omitting them keeps provider transport identical
         across SHAPE-main, v8g and D1 without changing any workflow logic.
         """
-        if self.model_string in {"claude-sonnet-5", "claude-opus-4-8", "claude-opus-5"}:
+        if self.model_string in {"claude-sonnet-5", "claude-sonnet-5-5", "claude-opus-4-8", "claude-opus-5",
+                                  "claude-opus-5-5"}:
             return {}
         params = {"temperature": temperature}
         if top_p is not None:
@@ -187,9 +192,12 @@ class ChatAnthropic(EngineLM, CachedEngine):
         messages = [{"role": "user", "content": self._blocks(content)}]
 
         if response_format is not None:
-            # Structured output: one forced tool whose schema is the pydantic
-            # model's JSON schema; parse the tool input back into the model.
+            # Structured output: one tool whose schema is the pydantic model's JSON schema; parse the tool
+            # input back into the model. Most models take a FORCED tool_choice; claude-sonnet-5-5 rejects
+            # forced ("tool"/"any") tool_choice, so it gets "auto" (it reliably calls the lone tool) with a
+            # text->JSON fallback if it ever answers in prose instead.
             tool_name = getattr(response_format, "__name__", "structured_response")
+            forced = self.model_string not in _NO_FORCED_TOOL_CHOICE
             response = self.client.messages.create(
                 model=self.model_string,
                 system=sys_prompt_arg,
@@ -202,7 +210,7 @@ class ChatAnthropic(EngineLM, CachedEngine):
                     "description": f"Return the result strictly as {tool_name}.",
                     "input_schema": response_format.model_json_schema(),
                 }],
-                tool_choice={"type": "tool", "name": tool_name},
+                tool_choice={"type": "tool", "name": tool_name} if forced else {"type": "auto"},
             )
             parsed = None
             for block in response.content:
@@ -211,6 +219,13 @@ class ChatAnthropic(EngineLM, CachedEngine):
                         response_format, block.input
                     )
                     break
+            if parsed is None:
+                # No tool_use block (only possible on the "auto" route): parse the text as JSON.
+                text = "".join(getattr(b, "text", "") for b in response.content
+                               if getattr(b, "type", None) == "text").strip()
+                match = re.search(r"\{.*\}", text, flags=re.DOTALL)
+                if match:
+                    parsed = self._parse_structured_tool_input(response_format, json.loads(match.group(0)))
             return {"content": parsed, "usage": self._usage(response)}
 
         response = self.client.messages.create(

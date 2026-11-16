@@ -82,6 +82,105 @@ def run_suite(prep: Path, output: Path, *, model: str, max_rounds: int,
     return write_report(prep, output)
 
 
+def run_shape_only(prep: Path, output: Path, *, model: str, max_rounds: int, noise_band: float,
+                   cores: int | None = None, engine=None) -> dict:
+    """Run and score JUST the SHAPE arm (raw/harmony/scanorama baselines included for context, gpt_luna and
+    react_luna_harmony skipped) -- a model-matrix ablation, not the official 6-arm benchmark_contract roster
+    (`write_report`/`validate_arm_roster` enforce that exact set; this writes SHAPE_ONLY_REPORT.json, never
+    BENCHMARK_REPORT.json, so the two never collide or get confused for each other). react alone burns hours
+    and ~1M tokens per scenario (observed on deepseek-ai/DeepSeek-V4.1-Flash, scenario_2: 92 calls, 1.18M
+    tokens) that a model-comparison ablation doesn't need."""
+    from benchmarks.batch_correction_JUMP.runners import control as control_mod
+    from benchmarks.batch_correction_JUMP.runners import score as score_mod
+    from benchmarks.batch_correction_JUMP.runners.shape_arm import run as run_shape
+
+    output.mkdir(parents=True, exist_ok=True)
+    report_path = output / "SHAPE_ONLY_REPORT.json"
+    if report_path.exists():
+        raise SystemExit(f"{report_path} exists; use a fresh output directory")
+    control_path = prep / control_mod.CONTROL_DIR / "CONTROL.json"
+    if not control_path.exists():
+        control_mod.control(prep)
+    else:
+        existing = _read(control_path)
+        if existing.get("provenance") != control_mod.provenance():
+            raise SystemExit(f"CONTROL_STALE: move {control_path.parent} aside and rerun with the current code")
+    if engine is None:
+        from shape.agent.verification.vision_engine import build_vision_engine
+
+        engine = build_vision_engine(model)
+    if engine is None:
+        raise SystemExit(f"engine unavailable for {model}")
+
+    shape_dir = output / "shape_luna_harmony"
+    run_shape(prep, shape_dir, model=model, max_rounds=max_rounds, noise_band=noise_band, cores=cores,
+             engine=engine)
+    score_mod.final(shape_dir, prep)
+    return write_shape_only_report(prep, output)
+
+
+def write_shape_only_report(prep: Path, output: Path) -> dict:
+    """SHAPE_ONLY_REPORT.json: raw/harmony/scanorama (from the shared control, free) + shape_luna_harmony.
+    No react_luna_harmony or gpt_luna rows, and no benchmark_contract.validate_arm_roster call (that enforces
+    the full official 6-arm set, which this deliberately isn't) -- report_row's own per-row validation still
+    applies, so a malformed row still raises."""
+    from benchmarks.batch_correction_JUMP.runners.control import CONTROL_DIR, provenance
+    from benchmarks.batch_correction_JUMP.runners.prepare import load
+
+    summary, meta, _ = load(prep)
+    scenario = summary["scenario"]["name"]
+    commit = _git_commit()
+    control_path = prep / CONTROL_DIR / "CONTROL.json"
+    if not control_path.exists():
+        raise SystemExit(f"missing controls: {control_path}")
+    control = _read(control_path)
+    if control.get("provenance") != provenance():
+        raise SystemExit("CONTROL_STALE: controls were produced by different tool or metric code")
+
+    score_sets: dict[str, dict] = {}
+    runtime: dict[str, float] = {}
+    calls: dict[str, int] = {}
+    tokens: dict[str, int] = {}
+    for arm_id in ("raw", "harmony", "scanorama"):
+        arm = control["arms"][arm_id]
+        score_sets[arm_id] = arm
+        runtime[arm_id] = float(arm.get("tool_seconds") or 0.0)
+        calls[arm_id] = int(arm.get("tool_calls") or 0)
+        tokens[arm_id] = 0
+
+    shape_dir = output / "shape_luna_harmony"
+    shape_result = _read(shape_dir / "RESULT.json")
+    shape_meta = _read(shape_dir / "RUN_META.json")
+    shape_agent = _read(shape_dir / "AGENT_RUN.json")
+    if shape_meta.get("commit") != commit or shape_meta.get("scenario") != scenario:
+        raise SystemExit("INVALID_ARM_OUTPUT: SHAPE identity mismatch")
+    score_sets["shape_luna_harmony"] = shape_result["scores"]["agent"]
+    runtime["shape_luna_harmony"] = float(shape_agent["ended"] - shape_agent["started"])
+    calls["shape_luna_harmony"] = int(shape_result["usage"]["tool_calls_started"])
+    tokens["shape_luna_harmony"] = int((shape_agent.get("tokens") or {}).get("total_tokens") or 0)
+
+    roster = ("raw", "harmony", "scanorama", "shape_luna_harmony")
+    raw_test = score_sets["raw"]["test"]
+    n_profiles = int(summary.get("n_wells", len(meta)))
+    rows = [report_row(scenario, arm_id, score_sets[arm_id]["test"], raw_test, runtime=runtime[arm_id],
+                       n_calls=calls[arm_id], tokens=tokens[arm_id], n_profiles=n_profiles)
+            for arm_id in roster]
+
+    report = {"scenario": scenario, "git_commit": commit, "model": shape_agent.get("model"),
+              "roster": list(roster), "rows": rows,
+              "note": "shape-only model-matrix ablation -- gpt_luna and react_luna_harmony deliberately not "
+                      "run; see write_report/BENCHMARK_REPORT.json for the official 6-arm comparison."}
+    output.mkdir(parents=True, exist_ok=True)
+    report_path = output / "SHAPE_ONLY_REPORT.json"
+    report_path.write_text(json.dumps(report, indent=1, default=str), encoding="utf-8")
+    fieldnames = list(rows[0])
+    with (output / "SHAPE_ONLY_REPORT.csv").open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+    return report
+
+
 def report_row(scenario: str, arm_id: str, test: dict, raw_test: dict, *, runtime: float, n_calls: int,
                tokens: int, n_profiles: int) -> dict:
     """One report row: the arm's test-view scores and its cost per well profile."""
@@ -174,7 +273,8 @@ def write_report(prep: Path, output: Path) -> dict:
                                n_calls=calls[arm_id], tokens=tokens[arm_id], n_profiles=n_profiles))
 
     report = {
-        "scenario": scenario, "git_commit": commit, "model": benchmark_contract.LUNA_MODEL,
+        "scenario": scenario, "git_commit": commit,
+        "model": shape_agent.get("model") or benchmark_contract.LUNA_MODEL,
         "roster": list(roster), "rows": rows,
         "metric_note": (
             "One JUMP well profile is the denominator for the requested per-image fields. "

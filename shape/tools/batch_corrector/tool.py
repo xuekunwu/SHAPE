@@ -17,6 +17,7 @@ from typing import Any, Callable, Mapping
 import numpy as np
 
 from shape.tools.base import BaseTool
+from shape.utils import gpu_knn
 
 
 SKIPPED_NO_BATCH_EFFECT = "SKIPPED_NO_BATCH_EFFECT"
@@ -254,6 +255,8 @@ def _readout_neighbours(x: np.ndarray, k: int) -> np.ndarray:
     from sklearn.neighbors import NearestNeighbors
 
     k = min(k, len(x) - 1)
+    if gpu_knn.enabled():
+        return gpu_knn.knn(x, k, include_self=False)[0]
     return NearestNeighbors(n_neighbors=k + 1).fit(x).kneighbors(x, return_distance=False)[:, 1:]
 
 

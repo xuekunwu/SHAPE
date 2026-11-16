@@ -24,6 +24,8 @@ from collections.abc import Mapping
 
 import numpy as np
 
+from shape.utils import gpu_knn
+
 IDENTITY_KEYS = ("plate", "experiment", "well", "site")
 # The metadata tiers (`tier_of`), named by the columns they need; only the replicate tier has an
 # adopted proxy (ADOPTED_PROXY).
@@ -230,6 +232,8 @@ def health(vectors) -> dict:
 def _nearest(x: np.ndarray, k: int) -> np.ndarray:
     """Indices of each row's k nearest other rows of the L2-normalised `x` (cosine, stable order),
     computed in blocks of LEAKAGE_CHUNK query rows."""
+    if gpu_knn.enabled():
+        return gpu_knn.knn(x, k, "cosine", include_self=False)[0]
     out = np.empty((len(x), k), dtype=np.int64)
     for start in range(0, len(x), LEAKAGE_CHUNK):
         sim = x[start:start + LEAKAGE_CHUNK] @ x.T

@@ -124,88 +124,25 @@ default localhost bind and SSH-tunnel. See
 
 ### Running each benchmark
 
-Set `SAM=http://HOST:8137,http://HOST:8138,http://HOST:8139,http://HOST:8140` and
-`DINO=http://HOST:8237,http://HOST:8238,http://HOST:8239,http://HOST:8240` (or `127.0.0.1`
-for local services), and `DATA` to the dataset root. The datasets, their download links and
-the readouts each task is scored on are listed in `benchmarks/benchmark tasks.xlsx`.
-
-**Segmentation** — agentic VRR over Cellpose-SAM
-([`benchmarks/segmentation_NeurIPS22-CellSeg`](benchmarks/segmentation_NeurIPS22-CellSeg/README.md)):
+The inputs are on Hugging Face,
+[`SHAPE-agent/benchmark-data`](https://huggingface.co/datasets/SHAPE-agent/benchmark-data);
+download the folder a benchmark needs into `data/` from the repository root
+([`benchmarks/README.md`](benchmarks/README.md#data) lists the folders):
 
 ```bash
-python -m benchmarks.segmentation_NeurIPS22-CellSeg.runners.run_concurrent_benchmark \
-  --data-root "$DATA/NeurIPS22-CellSeg" --image-subdir images \
-  --sam-server-url "$SAM" --workers 32 --max-steps 8
-# self-contained alternative (one GPU-resident model for the run): drop
-# --sam-server-url and add --autostart-sam --sam-replicas 4
+hf download SHAPE-agent/benchmark-data --repo-type dataset --include "NeurIPS22-CellSeg/*" --local-dir data
 ```
 
-**Cropper** — the five-arm benchmark (MaskCrop, CellProfiler as a control, an LLM alone,
-ReAct, SHAPE) on the ground-truth masks
-([`benchmarks/cropper_NeurIPS22-CellSeg`](benchmarks/cropper_NeurIPS22-CellSeg/README.md)):
+Each benchmark's README gives its dataset, the GPU it needs and the commands for every arm:
 
-```bash
-python benchmarks/cropper_NeurIPS22-CellSeg/run_benchmark.py prepare --run-dir R \
-  --data-dir "$DATA/NeurIPS22-CellSeg" --n-images 30
-python benchmarks/cropper_NeurIPS22-CellSeg/run_benchmark.py run --run-dir R --arm shape --cores 8
-python benchmarks/cropper_NeurIPS22-CellSeg/run_benchmark.py compare --run-dir R
-```
-
-The many-process runner on predicted segmentation masks, used by the cell-state pipeline:
-
-```bash
-python -m benchmarks.cropper_NeurIPS22-CellSeg.runners.run_concurrent_benchmark \
-  --data-root "$DATA/NeurIPS22-CellSeg" --image-subdir images \
-  --masks-from-seg-run <segmentation-run-dir> --workers 32 --crop-max-iters 8
-```
-
-**Cell-state (HCMA)** — one-shot four-stage pipeline (segment, crop, DINOv3 embed,
-Harmony), every stage through its VRR loop
-([`benchmarks/cell_state_HCMA`](benchmarks/cell_state_HCMA/README.md)):
-
-```bash
-SAM_URLS="$SAM" DINO_URL="$DINO" \
-  bash benchmarks/cell_state_HCMA/run_pipeline.sh 48 8      # WORKERS SAM_PROCS [LIMIT]
-# stages are also runnable standalone: run_shape_hcma.py, stage3_embed.py,
-# stage4_harmony.py; scoring: evaluate.py / score_label.py / score_scib.py
-```
-
-**Representation (RxRx1)** — the self-supervised fine-tune of `Cell_State_Analyzer_Tool`
-tuned call by call, against frozen, default, ReAct, LLM-written-feature and external
-baselines ([`benchmarks/representation_RxRx1`](benchmarks/representation_RxRx1/README.md)):
-
-```bash
-python benchmarks/representation_RxRx1/run_rxrx1.py --help   # prepare|control|shape|score|finish
-```
-
-**Batch correction (JUMP)** — Harmony tuned by the budgeted VRR (`BatchCorrectionVerifier`
-through `StepVerifier`; the reasoner chooses every tool call and the final one), scored with
-the Arevalo composite in `quant.py` (CPU-only)
-([`benchmarks/batch_correction_JUMP`](benchmarks/batch_correction_JUMP/README.md)): the
-driver is `run_batch_benchmark.py` (`prepare` / `control` / `suite` / `report`) and the
-correction itself is `Batch_Corrector_Tool.execute`.
-
-**End to end (CPJUMP1, LIVECell, HCMA)** — the whole chain scored against a
-default-parameter control, with the same stage protocol offered to external coding agents
-([`full_CPJUMP1`](benchmarks/full_CPJUMP1/README.md),
-[`full_LIVECell`](benchmarks/full_LIVECell/README.md),
-[`full_HCMA`](benchmarks/full_HCMA/README.md)):
-
-```bash
-python -m benchmarks.full_CPJUMP1.harness.cli --help
-```
-
-**Baselines** — external coding agents (Claude Code / Codex) driven through the same
-segmentation and cropper tasks with a prolonged feedback loop, head to head against SHAPE
-([`benchmarks/baselines`](benchmarks/baselines)):
-
-```bash
-python -m benchmarks.baselines.run_baseline \
-  --agent claude-code --benchmark segmentation \
-  --data-root "$DATA/NeurIPS22-CellSeg" --iters 10 --min-iters 3 --sam-url "$SAM"
-# --agent codex for the Codex CLI; --benchmark cropper for the cropper task.
-# Requires the external agent CLI on PATH; GPU still comes from the shared SAM service.
-```
+| Benchmark | Entry point |
+|---|---|
+| [Segmentation](benchmarks/segmentation_NeurIPS22-CellSeg/README.md): agentic VRR over Cellpose-SAM against domain tools, an LLM alone and ReAct | `benchmarks/segmentation_NeurIPS22-CellSeg/runners/run_all_arms.sh` |
+| [Cropper](benchmarks/cropper_NeurIPS22-CellSeg/README.md): MaskCrop, CellProfiler, an LLM alone, ReAct and SHAPE on the ground-truth masks | `benchmarks/cropper_NeurIPS22-CellSeg/run_benchmark.py` |
+| [Batch correction (JUMP)](benchmarks/batch_correction_JUMP/README.md): Harmony tuned by the budgeted VRR, scored with the Arevalo metrics (CPU only) | `benchmarks/batch_correction_JUMP/run_batch_benchmark.py` |
+| [Representation (RxRx1)](benchmarks/representation_RxRx1/README.md): the self-supervised DINOv3 fine-tune tuned call by call | `benchmarks/representation_RxRx1/run_rxrx1.py` |
+| [End to end (CPJUMP1, ModalityProbe3)](benchmarks/full_CPJUMP1/README.md): the whole chain against a default-parameter control and external coding agents | `benchmarks/full_CPJUMP1/runners/run_all.sh` |
+| [Baselines](benchmarks/baselines/README.md): Claude Code and Codex on the segmentation and cropper tasks | `python -m benchmarks.baselines.run_baseline` |
 
 ## Case studies
 
@@ -216,8 +153,9 @@ positivity from brightfield alone against paired staining, and well-level cTnT-p
 proportions against flow cytometry. The
 [cardiac organoid](case%20studies/cardiac%20organoids/README.md) and
 [tissue](case%20studies/tissues/README.md) applications have the same structure: a
-`harness/` with the pinned data contract and a `runners/` with the entry points. Their raw
-images and labels are private and are not distributed here.
+`harness/` with the pinned data contract and a `runners/` with the entry points. Raw images
+and labels are not committed to Git; the cardiomyocyte datasets are public on Hugging Face
+(linked from that study's README).
 
 ## Development
 

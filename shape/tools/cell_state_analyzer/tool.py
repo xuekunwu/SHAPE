@@ -60,6 +60,7 @@ sys.path.insert(0, project_root)
 
 from shape.tools.base import BaseTool
 from shape.tools.cell_state_analyzer import quant
+from shape.utils import gpu_knn
 from shape.utils.agent_io import VisualizationConfig
 from shape.utils.image_data import ImageData
 from shape.utils.image_processor import ImageProcessor
@@ -272,6 +273,21 @@ def _crop_name(crops, idx):
     return path if isinstance(crops, ArrayCrops) else os.path.splitext(os.path.basename(path))[0]
 
 
+CROP_READ_THREADS = 16      # the up-front passes over every crop file (channel check, fingerprint) read this many at once
+
+
+def _parallel_map(fn, items):
+    """`list(map(fn, items))`, the calls spread over CROP_READ_THREADS threads (file reads and decoding release
+    the GIL); order and exceptions as the serial map, the first failing item's in item order."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    items = list(items)
+    if len(items) < 2 * CROP_READ_THREADS:
+        return [fn(item) for item in items]
+    with ThreadPoolExecutor(CROP_READ_THREADS) as pool:
+        return list(pool.map(fn, items))
+
+
 def infer_channel_spec(image_paths):
     """Inspect every crop and fail closed when channel count/layout is inconsistent."""
     if not image_paths:
@@ -279,11 +295,13 @@ def infer_channel_spec(image_paths):
     if isinstance(image_paths, ArrayCrops):     # one (C, H, W) for every row: its first crop is every crop's spec
         chw, layout = _channel_first(image_paths.raw(0), image_paths[0])
         return int(chw.shape[0]), [layout]
-    counts, layouts = [], []
-    for path in image_paths:
+    def spec(path):
         chw, layout = _channel_first(io.imread(path), path)
-        counts.append(int(chw.shape[0]))
-        layouts.append(layout)
+        return int(chw.shape[0]), layout
+
+    specs = _parallel_map(spec, image_paths)
+    counts = [count for count, _ in specs]
+    layouts = [layout for _, layout in specs]
     unique_counts = sorted(set(counts))
     if len(unique_counts) != 1:
         examples = [(str(path), count) for path, count in zip(image_paths, counts)][:8]
@@ -389,6 +407,108 @@ class SSL116View(nn.Module):
 
     def forward(self, x):
         return self.photometric(self.geometry(x))
+
+
+GPU_AUGMENT_ENV = "SHAPE_GPU_AUGMENT"      # "1": augmentation=strong runs batched on the GPU (off by default)
+
+
+def gpu_augment_enabled(device, augmentation):
+    return (os.environ.get(GPU_AUGMENT_ENV, "") == "1" and device.type == "cuda"
+            and augmentation == "strong")
+
+
+class GPUStrongAugment:
+    """augmentation=strong, batched on the GPU: the torchvision pipeline of `_get_augmentation_transform`
+    (RandomResizedCrop, h/v flip, RandomRotation(60), channel intensity jitter, GaussianBlur(23),
+    RandomErasing) with the same parameters and probabilities, drawn per sample from the CUDA generator
+    (saved and restored with the training state). Crop, flips and rotation are one affine `grid_sample`
+    (bilinear, no antialiasing; zero fill outside the rotated crop, as RandomRotation). Differences from
+    the CPU path: the crop box is the sampled area / ratio clamped to the image instead of 10 rejection
+    tries, and the random stream is the CUDA one. Input: zero-padded raw crops (B, C, H, W) in [0, 1]
+    with their true sizes (B, 2) = (h, w); output (B, C, size, size)."""
+
+    def __init__(self, scale_min=0.3, size=224, augment_color=True):
+        self.scale_min, self.size, self.augment_color = float(scale_min), int(size), bool(augment_color)
+
+    @staticmethod
+    def _u(n, lo, hi, device):
+        return lo + (hi - lo) * torch.rand(n, device=device)
+
+    @torch.no_grad()
+    def __call__(self, x, sizes):
+        B, C, H, W = x.shape
+        S, dev = self.size, x.device
+        x = x.float()
+        hw = sizes.to(dev).float()
+        # geometry: crop box (fractions of the image), flips, rotation -> one sampling grid
+        area = self._u(B, self.scale_min, 1.0, dev)
+        ratio = torch.exp(self._u(B, math.log(3 / 4), math.log(4 / 3), dev))
+        fw = torch.sqrt(area * ratio).clamp(max=1.0)
+        fh = torch.sqrt(area / ratio).clamp(max=1.0)
+        cx = fw / 2 + torch.rand(B, device=dev) * (1 - fw)
+        cy = fh / 2 + torch.rand(B, device=dev) * (1 - fh)
+        hflip = torch.where(torch.rand(B, device=dev) < 0.5, -1.0, 1.0)
+        vflip = torch.where(torch.rand(B, device=dev) < 0.2, -1.0, 1.0)
+        angle = self._u(B, -60.0, 60.0, dev) * (math.pi / 180)
+        lin = (torch.arange(S, device=dev, dtype=torch.float32) + 0.5) / S * 2 - 1
+        v, u = torch.meshgrid(lin, lin, indexing="ij")
+        c, s = torch.cos(angle).view(B, 1, 1), torch.sin(angle).view(B, 1, 1)
+        qx = c * u + s * v
+        qy = -s * u + c * v
+        inside = ((qx.abs() <= 1) & (qy.abs() <= 1)).unsqueeze(1).float()
+        qx, qy = qx * hflip.view(B, 1, 1), qy * vflip.view(B, 1, 1)
+        fx = cx.view(B, 1, 1) + qx * fw.view(B, 1, 1) / 2
+        fy = cy.view(B, 1, 1) + qy * fh.view(B, 1, 1) / 2
+        grid = torch.stack([2 * fx * hw[:, 1].view(B, 1, 1) / W - 1,
+                            2 * fy * hw[:, 0].view(B, 1, 1) / H - 1], dim=-1)
+        out = F.grid_sample(x, grid, mode="bilinear", padding_mode="zeros", align_corners=False) * inside
+        # per-channel intensity jitter, p 0.8
+        if self.augment_color:
+            scale = self._u(B * C, 0.8, 1.2, dev).view(B, C, 1, 1)
+            on = (torch.rand(B, 1, 1, 1, device=dev) < 0.8).float()
+            out = torch.clamp(out * (1 + on * (scale - 1)), 0.0, 1.0)
+        # Gaussian blur (23 x 23, sigma ~ U[0.1, 2]), p 0.8, reflect padding; separable, one kernel per sample
+        sigma = self._u(B, 0.1, 2.0, dev)
+        r = torch.arange(-11, 12, device=dev, dtype=torch.float32)
+        k = torch.exp(-(r.view(1, -1) ** 2) / (2 * sigma.view(-1, 1) ** 2))
+        k = k / k.sum(1, keepdim=True)
+        delta = (r == 0).float().view(1, -1)
+        k = torch.where((torch.rand(B, 1, device=dev) < 0.8), k, delta)
+        k = k.repeat_interleave(C, dim=0)                                  # (B*C, 23)
+        y = out.reshape(1, B * C, S, S)
+        y = F.conv2d(F.pad(y, (11, 11, 0, 0), mode="reflect"), k.view(B * C, 1, 1, 23), groups=B * C)
+        y = F.conv2d(F.pad(y, (0, 0, 11, 11), mode="reflect"), k.view(B * C, 1, 23, 1), groups=B * C)
+        out = y.view(B, C, S, S)
+        # random erasing, p 0.3, area U[0.02, 0.2], log-ratio U[log 0.3, log 3.3], value 0
+        ea = self._u(B, 0.02, 0.2, dev) * S * S
+        er = torch.exp(self._u(B, math.log(0.3), math.log(3.3), dev))
+        eh, ew = torch.round(torch.sqrt(ea * er)), torch.round(torch.sqrt(ea / er))
+        ok = (torch.rand(B, device=dev) < 0.3) & (eh < S) & (ew < S)
+        top = torch.floor(torch.rand(B, device=dev) * (S - eh + 1))
+        left = torch.floor(torch.rand(B, device=dev) * (S - ew + 1))
+        pix = torch.arange(S, device=dev, dtype=torch.float32)
+        rows = (pix.view(1, S) >= top.view(B, 1)) & (pix.view(1, S) < (top + eh).view(B, 1))
+        cols = (pix.view(1, S) >= left.view(B, 1)) & (pix.view(1, S) < (left + ew).view(B, 1))
+        box = (rows.unsqueeze(2) & cols.unsqueeze(1) & ok.view(B, 1, 1)).unsqueeze(1)
+        return out.masked_fill(box, 0.0)
+
+
+def collate_raw_views(batch):
+    """collate_fn of the GPU-augmentation training loader: the raw crops of both views zero-padded to the
+    batch's largest crop, their true sizes in identity["view_sizes"] (B, 4) = (h1, w1, h2, w2)."""
+    sizes = torch.tensor([[a.shape[-2], a.shape[-1], b.shape[-2], b.shape[-1]] for a, b, *_ in batch])
+    H, W = int(sizes[:, [0, 2]].max()), int(sizes[:, [1, 3]].max())
+
+    def pad(images):
+        out = images[0].new_zeros(len(images), images[0].shape[0], H, W)
+        for i, img in enumerate(images):
+            out[i, :, :img.shape[-2], :img.shape[-1]] = img
+        return out
+
+    v1, v2 = pad([b[0] for b in batch]), pad([b[1] for b in batch])
+    names, groups, identity = torch.utils.data.default_collate([b[2:] for b in batch])
+    identity["view_sizes"] = sizes
+    return v1, v2, names, groups, identity
 
 
 # When set, the environment variable LOADER_WORKERS_ENV caps the workers further (the repository's conftest.py
@@ -1157,19 +1277,21 @@ def embedding_fingerprint(params, crop_paths=()):
             json.dumps([row, m], sort_keys=True, default=str) for row, m in zip(crop_paths.rows, meta))}
         blob = json.dumps(payload, sort_keys=True, default=str, separators=(",", ":"))
         return hashlib.sha256(blob.encode("utf-8")).hexdigest()
-    crop_records = []
-    for raw_path in sorted(str(p) for p in crop_paths):
+    def content_digest(raw_path):
         digest = hashlib.sha256()
         try:
             with open(raw_path, "rb") as handle:
                 for chunk in iter(lambda: handle.read(1024 * 1024), b""):
                     digest.update(chunk)
-            content_digest = digest.hexdigest()
+            return digest.hexdigest()
         except OSError:
             # Retain deterministic legacy behavior for synthetic/nonexistent paths in
             # tests, while real crops are always content-addressed.
-            content_digest = None
-        crop_records.append({"path": raw_path, "sha256": content_digest})
+            return None
+
+    sorted_paths = sorted(str(p) for p in crop_paths)
+    crop_records = [{"path": raw_path, "sha256": digest}
+                    for raw_path, digest in zip(sorted_paths, _parallel_map(content_digest, sorted_paths))]
     payload["_crops"] = crop_records
     blob = json.dumps(payload, sort_keys=True, default=str, separators=(",", ":"))
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
@@ -1835,7 +1957,7 @@ class Cell_State_Analyzer_Tool(BaseTool):
                      patch_embed_lr_mult=1.0, clip_grad_norm=0.0, head_warmup_epochs=0.0,
                      gram_weight=0.0, gram_anchor=None, koleo_weight=0.0,
                      refresh_neighbours=None, nn_refresh_epochs=0.0, intensity_reference=None,
-                     early_stop=None):
+                     early_stop=None, gpu_augment=None):
         """Train the model with contrastive learning.
 
         field_aware: mask same-source-field crops out of each other's negatives (label-free,
@@ -1972,6 +2094,9 @@ class Cell_State_Analyzer_Tool(BaseTool):
                 train_loader.dataset.set_epoch(start_epoch + epoch)
                 for v1, v2, names, _, identity in tqdm(train_loader, desc=f"Epoch {epoch+1}/{max_epochs}"):
                     v1, v2 = v1.to(self.device), v2.to(self.device)
+                    if gpu_augment is not None:
+                        sizes = identity["view_sizes"]
+                        v1, v2 = gpu_augment(v1, sizes[:, :2]), gpu_augment(v2, sizes[:, 2:])
                     local_step = global_step - start_step
                     if (local_step < head_warmup_steps) != body_frozen:
                         body_frozen = not body_frozen      # heads-only warm-in: no grad for the body
@@ -2246,7 +2371,11 @@ class Cell_State_Analyzer_Tool(BaseTool):
             use_rep = "X"
         logger.info("Clustering representation: %s", representation)
 
-        sc.pp.neighbors(adata, use_rep=use_rep, n_neighbors=n_neighbors_int, metric="cosine")
+        if gpu_knn.enabled():       # SHAPE_GPU_KNN=1: exact kNN on the GPU instead of pynndescent
+            sc.pp.neighbors(adata, use_rep=use_rep, transformer=gpu_knn.ScanpyKnnTransformer(
+                n_neighbors_int, "cosine"))
+        else:
+            sc.pp.neighbors(adata, use_rep=use_rep, n_neighbors=n_neighbors_int, metric="cosine")
         sc.tl.umap(adata, min_dist=0.05, spread=1, random_state=42)
 
         # Perform clustering
@@ -2728,12 +2857,17 @@ class Cell_State_Analyzer_Tool(BaseTool):
             logger.info("Starting training...")
             train_transform = self._get_augmentation_transform(
                 augment_color=augment_color, augmentation=augmentation, crop_scale_min=crop_scale_min)
+            gpu_augment = (GPUStrongAugment(crop_scale_min, augment_color=augment_color)
+                           if gpu_augment_enabled(self.device, augmentation) else None)
+            if gpu_augment is not None:
+                logger.info("Augmentation strong runs on the GPU (%s=1)", GPU_AUGMENT_ENV)
             train_paths = rows_of(cell_crops, train_rows)
             units = CropUnits(rows_of(unit_ids, train_rows), seed)
             mask_column = {"same_site": "site", "same_well": "well"}.get(contrastive_mask)
             train_dataset = CellCropDataset(
                 train_paths, rows_of(groups, train_rows), image_names=rows_of(technical_groups, train_rows),
-                transform=train_transform, plate_ids=rows_of(plate_route["plate_ids"], train_rows),
+                transform=None if gpu_augment is not None else train_transform,
+                plate_ids=rows_of(plate_route["plate_ids"], train_rows),
                 units=units, view_pairing=view_pairing, affine=affine_of(train_rows), seed=seed,
             )
             validation = None
@@ -2818,6 +2952,8 @@ class Cell_State_Analyzer_Tool(BaseTool):
                 units.rng = np.random.default_rng(seed)
                 units.nn = initial_table
 
+                gpu_collate = {} if gpu_augment is None else {"collate_fn": collate_raw_views}
+
                 def make_train_loader(workers):
                     if batch_sampling == "random":
                         return DataLoader(
@@ -2826,13 +2962,13 @@ class Cell_State_Analyzer_Tool(BaseTool):
                             shuffle=True,
                             drop_last=n_train % resolved_batch_size == 1,
                             generator=torch.Generator().manual_seed(seed),
-                            **loader_kwargs(workers, pin_memory),
+                            **gpu_collate, **loader_kwargs(workers, pin_memory),
                         )
                     return DataLoader(
                         train_dataset,
                         batch_sampler=UnitBatchSampler(units, resolved_batch_size, batch_sampling),
                         generator=torch.Generator().manual_seed(seed),
-                        **loader_kwargs(workers, pin_memory),
+                        **gpu_collate, **loader_kwargs(workers, pin_memory),
                     )
 
                 train_workers = num_workers
@@ -2869,7 +3005,7 @@ class Cell_State_Analyzer_Tool(BaseTool):
                         gram_anchor=gram_anchor, koleo_weight=koleo_weight,
                         refresh_neighbours=train_neighbours if nn_pairing and nn_space == "current" else None,
                         nn_refresh_epochs=nn_refresh_epochs, intensity_reference=intensity_reference,
-                        early_stop=early_stop,
+                        early_stop=early_stop, gpu_augment=gpu_augment,
                     )
                     batch_attempts.append({
                         "batch_size": resolved_batch_size,

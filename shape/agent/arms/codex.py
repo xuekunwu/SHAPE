@@ -19,7 +19,10 @@ from .protocol import ACTIONS, BASE_URL, EFFORTS, EVIDENCE_POLICY, MalformedDeci
 # `_process` / `_redact` are referenced through `protocol` (not imported by name) so every backend shares ONE
 # patchable subprocess seam (`protocol._process`), the way the tests fake the CLI for all three arms at once.
 
-MODEL = "gpt-5.6-luna"
+# CPJUMP1's Codex arm ran gpt-5.6-luna before the new-model matrix moved to gpt-6-sol (git history); both
+# still serve on the Stanford Gateway, so re-running codex x luna (e.g. a seed2 reproducibility check) only
+# needs this set widened -- not a new routing path, unlike claude.py's Anthropic-direct split.
+ALLOWED_MODELS = ("gpt-6-sol", "gpt-5.6-luna")
 CLI_VERSION = "codex-cli 0.162.0"
 POLICY = "codex-cli-native-tools-v2"
 PROVIDER = "stanford"
@@ -38,8 +41,8 @@ DISABLED_FEATURES = (
 
 
 def _route(model):
-    if model != MODEL:
-        raise ValueError("CPJUMP1 Codex requires gpt-5.6-luna")
+    if model not in ALLOWED_MODELS:
+        raise ValueError(f"CPJUMP1 Codex requires one of {ALLOWED_MODELS}")
     for variable in ("LLM_API_BASE", "LLM_BASE_URL"):
         if os.environ.get(variable, BASE_URL).rstrip("/") != BASE_URL:
             raise ValueError("Codex requires the Stanford Gateway Responses route")
@@ -110,7 +113,7 @@ def command(model, schema, last_message, images=()):
 
 def stream_usage(trace: Path, model: str) -> dict:
     """Validate the documented exec JSONL event stream (any failure here is a basic CLI/LLM failure)."""
-    if model != MODEL:
+    if model not in ALLOWED_MODELS:
         raise ValueError("unexpected requested Codex model")
     try:
         events = [json.loads(s) for s in trace.read_text(encoding="utf-8").splitlines() if s.strip()]

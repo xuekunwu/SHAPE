@@ -45,26 +45,11 @@ sys.path.insert(0, str(_HERE / "runners"))      # the arms and the runners they 
 import cropper_arms as arm_lib  # noqa: E402
 import run_shape_crop as rsc  # noqa: E402
 import crop_qc  # noqa: E402
+from cropper_config import PIXEL_SUFFIXES  # noqa: E402
 from pairing import _find_image_mask_pairs  # noqa: E402
 from shape.agent.verification import base as vrr_base  # noqa: E402
 from shape.engine import usage as token_usage  # noqa: E402
 from shape.tools.single_cell_cropper.tool import SEGMENTER_DEFAULT_MIN_SIZE  # noqa: E402
-
-
-def load_exporter():
-    """This benchmark's export_run_records.py, loaded by path under its own module name: the segmentation and
-    batch-correction benchmarks have files of the same name, and a bare `import export_run_records` takes whichever
-    one a test run imported first (sys.modules is shared)."""
-    name = "cropper_export_run_records"
-    if name not in sys.modules:
-        spec = importlib.util.spec_from_file_location(name, _HERE / "export_run_records.py")
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[name] = module
-        spec.loader.exec_module(module)
-    return sys.modules[name]
-
-
-PIXEL_SUFFIXES = load_exporter().PIXEL_SUFFIXES       # stdlib only; it imports nothing from here
 
 # AP50 is not a readout: the input is the ground-truth mask (AP50 = 1 by definition) and no arm changes it.
 METRICS = (

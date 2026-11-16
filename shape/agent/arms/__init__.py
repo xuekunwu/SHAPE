@@ -17,7 +17,15 @@ from .protocol import (BASE_URL, EFFORTS, EVIDENCE_POLICY, MAX_INSPECT, SCHEMA, 
 BACKENDS = {"codex": "shape.agent.arms.codex", "claude": "shape.agent.arms.claude",
             "biomni": "shape.agent.arms.biomni"}
 AGENT_ARMS = ("codex", "claude", "biomni")
-ARM_MODELS = {"codex": "gpt-5.6-luna", "claude": "claude-sonnet-5", "biomni": "gpt-5.6-luna"}
+# Default model per arm (used when a run does not pass --model) and the full set each arm accepts.
+# A single arm may run several reasoners (biomni: gpt-* on the gateway or claude-* on Anthropic-direct);
+# ARM_ALLOWED is the membership check, ARM_MODELS[arm] the default. Each backend's route(model) enforces
+# the same set at invoke time (the only gate in staged mode, where preflight is not run).
+ARM_MODELS = {"codex": "gpt-6-sol", "claude": "claude-opus-5", "biomni": "gpt-6-sol"}
+ARM_ALLOWED = {"codex": frozenset({"gpt-6-sol"}),
+               "claude": frozenset({"claude-opus-5"}),
+               "biomni": frozenset({"gpt-6-sol", "claude-opus-5", "zai-org/GLM-5.3-Flash",
+                                    "deepseek-ai/DeepSeek-V4.1-Flash"})}
 ARM_NAMES = {"codex": "Codex", "claude": "Claude Code", "biomni": "Biomni"}
 
 
@@ -30,6 +38,6 @@ def get_backend(arm: str):
 
 backend = get_backend          # the stage orchestration's existing name for the registry lookup
 
-__all__ = ["BACKENDS", "AGENT_ARMS", "ARM_MODELS", "ARM_NAMES", "get_backend", "backend",
+__all__ = ["BACKENDS", "AGENT_ARMS", "ARM_MODELS", "ARM_ALLOWED", "ARM_NAMES", "get_backend", "backend",
            "Backend", "SCHEMA", "decision_problem", "_process", "_redact", "MalformedDecision",
            "RoundTimeout", "BASE_URL", "EVIDENCE_POLICY", "EFFORTS", "MAX_INSPECT", "read_json", "write_json"]

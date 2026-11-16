@@ -5,6 +5,9 @@
         control  --prep PREP
         suite    --prep PREP --output RUN [--model gpt-5.6-luna] [--max-rounds 8] [--noise-band 0.002] [--cores N]
         report   --prep PREP --output RUN          (rewrite the report of a finished suite)
+        shape-only --prep PREP --output RUN [--model gpt-5.6-luna] [--max-rounds 8] [--noise-band 0.002] [--cores N]
+                 (SHAPE alone, no gpt_luna/react_luna_harmony -- a model-matrix ablation, not the official
+                 6-arm roster; scored into OUT/SHAPE_ONLY_REPORT.json, never BENCHMARK_REPORT.json)
         react    --prep PREP --output OUT [--compare-run RUN] [--model gpt-5.6-luna] [--noise-band 0.002] [--cores N]
                  (the ReAct arm alone on a prep whose control stage has run, scored into OUT/REACT_REPORT.json;
                  with --compare-run, at the per-round cap that run's SHAPE arm recorded)
@@ -12,8 +15,7 @@
                  [--timeout 900] [--model gpt-5.6-luna] [--max-rounds 8] [--noise-band 0.002] [--cores N]
                  (the SHAPE arm alone at each reasoning-effort level, scored into OUT/SWEEP_REPORT.json)
 
-The implementation is in runners/; the records of a
-finished run go to results/ with export_run_records.py.
+The implementation is in runners/ (contract, config, prepare, control, the arms, score, suite, effort_sweep).
 """
 from __future__ import annotations
 
@@ -50,6 +52,13 @@ def main() -> None:
     rp = sub.add_parser("report")
     rp.add_argument("--prep", required=True)
     rp.add_argument("--output", required=True)
+    so = sub.add_parser("shape-only")
+    so.add_argument("--prep", required=True)
+    so.add_argument("--output", required=True)
+    so.add_argument("--model", default=DEFAULT.model)
+    so.add_argument("--max-rounds", type=int, default=DEFAULT.max_rounds)
+    so.add_argument("--noise-band", type=float, default=DEFAULT.noise_band)
+    so.add_argument("--cores", type=int, default=DEFAULT.cores)
     ra = sub.add_parser("react")
     ra.add_argument("--prep", required=True)
     ra.add_argument("--output", required=True)
@@ -86,6 +95,12 @@ def main() -> None:
         report = run_suite(Path(a.prep), Path(a.output), model=a.model, max_rounds=a.max_rounds,
                            noise_band=a.noise_band, cores=a.cores)
         print(json.dumps({"report": str(Path(a.output) / "BENCHMARK_REPORT.json"), "roster": report["roster"]}))
+    elif a.cmd == "shape-only":
+        from benchmarks.batch_correction_JUMP.runners.suite import run_shape_only
+
+        report = run_shape_only(Path(a.prep), Path(a.output), model=a.model, max_rounds=a.max_rounds,
+                                noise_band=a.noise_band, cores=a.cores)
+        print(json.dumps({"report": str(Path(a.output) / "SHAPE_ONLY_REPORT.json"), "roster": report["roster"]}))
     elif a.cmd == "report":
         from benchmarks.batch_correction_JUMP.runners.suite import write_report
 

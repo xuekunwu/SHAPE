@@ -17,6 +17,10 @@ import re
 import sys
 
 REFUSAL = "Code execution is not available in this benchmark. Give your decision inside solution tags."
+# Models that reject a request whose last message is an assistant message ("does not support assistant message
+# prefill. The conversation must end with a user message."). Biomni A1 appends each refused-execution
+# observation as an AIMessage, so a later generate can end with one -> _end_with_user fixes the request.
+NO_PREFILL_MODELS = frozenset({"claude-sonnet-5-5"})
 RECURSION_LIMIT = 30
 THREAD_ID = "cpjump1"    # A1's graph has a checkpointer: a stream needs a thread id (A1.go passes 42)
 SOLUTION = re.compile(r"<solution>(.*?)</solution>", re.DOTALL | re.IGNORECASE)     # as A1 matches it
@@ -44,8 +48,13 @@ def text_of(content) -> str:
     return "\n".join(parts)
 
 
-def redact(text: str, secret: str | None) -> str:
-    return text.replace(secret, "[REDACTED]") if secret else text
+def redact(text: str, secret) -> str:
+    """Replace every secret (a single value or an iterable of them) with [REDACTED]."""
+    secrets = [secret] if isinstance(secret, (str, bytes)) or secret is None else list(secret)
+    for value in secrets:
+        if value:
+            text = text.replace(value, "[REDACTED]")
+    return text
 
 
 def parse_solution(texts: list[str], schema: dict) -> dict:
@@ -126,18 +135,27 @@ class Silenced:
 
 
 def build(request: dict, workspace: Path):
-    """A1 with its resources cleared and code execution refused; (agent, the a1 module)."""
+    """A1 with its resources cleared and code execution refused; (agent, the a1 module). The reasoner is Biomni's
+    "Custom" OpenAI-compatible source against the gateway (gpt-*, LLM_API_KEY) or its native "Anthropic" source
+    (claude-*, ANTHROPIC_API_KEY); the gateway serves no claude model, so claude-* must use the Anthropic source."""
+    source = request.get("source", "Custom")
+    anthropic = source == "Anthropic"
     with Silenced():
         import biomni.agent.a1 as a1
-        agent = a1.A1(path=str(workspace / "biomni"), llm=request["model"], source="Custom",
-                      base_url=request["base_url"], api_key=os.environ["LLM_API_KEY"], use_tool_retriever=False,
-                      expected_data_lake_files=[], commercial_mode=False,
+        kwargs = dict(path=str(workspace / "biomni"), llm=request["model"], source=source,
+                      api_key=os.environ["ANTHROPIC_API_KEY" if anthropic else "LLM_API_KEY"],
+                      use_tool_retriever=False, expected_data_lake_files=[], commercial_mode=False,
                       timeout_seconds=int(request["timeout_seconds"]))
+        if request.get("base_url"):      # omitted for the Anthropic source (its SDK default endpoint)
+            kwargs["base_url"] = request["base_url"]
+        agent = a1.A1(**kwargs)
         agent.module2api = {}
         agent.library_content_dict = {}
         agent.data_lake_dict = {}
         agent.configure()
-        uncap(agent.llm)
+        uncap(agent.llm, anthropic)
+        if request["model"] in NO_PREFILL_MODELS:
+            _end_with_user(agent.llm)
         if request.get("reasoning_effort"):
             configure_reasoning(agent.llm, request["reasoning_effort"])
     return agent, a1
@@ -153,12 +171,60 @@ def configure_reasoning(llm, effort):
         raise RuntimeError("Biomni client did not retain reasoning_effort")
 
 
-def uncap(llm) -> None:
-    """As Codex's client (user, 2026-10-12): no output-token cap (Biomni's Custom source sets max_tokens 8192, the
-    reasoning tokens included) and no retries (LangChain's default 2; Codex: request/stream retries 0, so an API error
-    fails the arm). The OpenAI client is rebuilt with max_retries 0."""
-    llm.max_tokens = None
+def _drop_unsupported(llm) -> None:
+    """gpt-6-sol is a reasoning model that rejects the legacy Chat Completions `stop` and non-default `temperature`
+    (400 Unsupported parameter). Biomni's own guard (_ChatOpenAIResponsesNoStop) only triggers for gpt-5* names, so
+    gpt-6* gets a plain ChatOpenAI that still sends them. Strip both from every request payload (gpt-5.6-luna already
+    ran this way through Biomni's gpt-5 branch, so this is parity, not a behaviour change)."""
+    base = type(llm)._get_request_payload
+
+    def patched(input_, *, stop=None, **kwargs):
+        payload = base(llm, input_, stop=stop, **kwargs)
+        payload.pop("stop", None)
+        payload.pop("temperature", None)
+        return payload
+
+    llm._get_request_payload = patched
+
+
+def _end_with_user(llm) -> None:
+    """Keep every request's conversation ending with a user turn. Biomni A1 adds each refused-execution
+    observation (`<observation>...`) as an AIMessage, so a generate after one would send Anthropic a
+    conversation ending with an assistant message -- which claude-sonnet-5-5 rejects (no assistant-message
+    prefill). Before each invoke, convert a trailing assistant message to a human one (content preserved).
+    A1's own stored messages are untouched; only the copy sent to the API is fixed. No-op when the
+    conversation already ends with a non-assistant message."""
+    from langchain_core.messages import AIMessage, HumanMessage
+    base = llm.invoke
+
+    def patched(input_, *args, **kwargs):
+        if isinstance(input_, list) and input_ and isinstance(input_[-1], AIMessage):
+            input_ = [*input_[:-1], HumanMessage(content=input_[-1].content)]
+        return base(input_, *args, **kwargs)
+
+    # ChatAnthropic is a pydantic model: plain `llm.invoke = patched` goes through its __setattr__,
+    # which rejects any name that is not a declared field ("object has no field \"invoke\""— seed2's
+    # biomni_sonnet55 crash). object.__setattr__ bypasses that validation and sets the instance
+    # attribute directly; normal attribute lookup then finds it before the class's bound method.
+    object.__setattr__(llm, "invoke", patched)
+
+
+def uncap(llm, anthropic: bool = False) -> None:
+    """As Codex's client (user, 2026-10-12): no output-token cap (Biomni sets max_tokens 8192, the reasoning tokens
+    included) and no retries (LangChain's default 2; Codex: request/stream retries 0, so an API error fails the arm).
+    The OpenAI client is rebuilt with max_retries 0. Anthropic REQUIRES a max_tokens, so its cap is lifted high
+    (32000) rather than removed, and it has no root_client to rebuild."""
     llm.max_retries = 0
+    if anthropic:
+        llm.max_tokens = 32000
+        # claude-opus-5 rejects temperature ("deprecated for this model"); None makes langchain omit it.
+        try:
+            llm.temperature = None
+        except Exception:
+            _drop_unsupported(llm)
+        return
+    llm.max_tokens = None
+    _drop_unsupported(llm)
     if getattr(llm, "root_client", None) is not None:
         llm.root_client = llm.root_client.with_options(max_retries=0)
         llm.client = llm.root_client.chat.completions
@@ -198,7 +264,7 @@ def run(request: dict, workspace: Path) -> dict:
     outcome = parse_solution([text_of(m.content) for m in replies], request["schema"])
     if limited and "malformed" in outcome:
         outcome["malformed"] += f" (the step limit, recursion_limit {RECURSION_LIMIT}, ended the round)"
-    secret = os.environ.get("LLM_API_KEY")
+    secret = [os.environ.get("LLM_API_KEY"), os.environ.get("ANTHROPIC_API_KEY")]
     return {**outcome, "usage": usage_of(counter.messages), "steps": len(generated), "refused_executions": refused[0],
             **({"reasoning_effort": agent.llm.reasoning_effort} if request.get("reasoning_effort") else {}),
             "messages": [{"role": getattr(m, "type", type(m).__name__), "content": redact(text_of(m.content), secret)}
