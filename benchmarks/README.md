@@ -15,7 +15,6 @@ dataset and the commands that run every arm.
 | `full_CPJUMP1/` | the whole chain: segment -> crop -> embed -> batch-correct -> cluster | CPJUMP1 (A549 Cas9 CRISPR) and ModalityProbe3 | `harness/cli.py`; `runners/run_all.sh` picks the dataset, the phase and the arms (control, SHAPE, Codex, Claude Code, Biomni) |
 | `_shared/` | -- | -- | code more than one benchmark imports: `segmentation_metrics.py` (segmentation and cropper), `full_metrics.py` with `FULL_METRICS_CONTRACT.md` (the scorer of `full_CPJUMP1`), `react_arm.py` with `REACT_ARM_CONTRACT.md` (the ReAct arm of the segmentation, cropper, batch-correction and RxRx1 benchmarks), `runner.py` (the RxRx1 SHAPE arm), `harness/` (the segment, crop, embed, batch-correct and cluster workers, pinned model assets and agent-arm drivers of `full_CPJUMP1`, also used by `representation_RxRx1` and the case studies) and `workspace_template/` (the tool CLIs an external coding-agent arm is given) |
 | `gpu_services.sh` | -- | -- | start / stop / status the shared Cellpose-SAM and DINOv3 services on a GPU node, and print the URLs to export |
-| `benchmark tasks.xlsx` | -- | -- | the task table: datasets, the arms and the readouts each task is scored on |
 
 ## Data
 

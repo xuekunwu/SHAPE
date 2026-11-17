@@ -1,7 +1,7 @@
 """The VM platform (no Slurm) and the resume of an interrupted run by replay (contract amendment A8), plus the VM
 driver's helpers.
 
-Platform. `RXRX_PLATFORM=vm` (set by run_rxrx1.sh in its vm mode) selects the VM: the deadline of a stage is
+Platform. `RXRX_PLATFORM=vm` selects the VM: the deadline of a stage is
 `RXRX_DEADLINE_UTC` (YYYY-MM-DDTHH:MM:SSZ) or none (`deadline`), and a new run records `platform` and its
 `run_tag` (`RXRX_RUN_TAG`, a host label plus a UTC start stamp) in RUN_META.json (`platform_keys`). Without it
 everything is the cluster's: the deadline is the Slurm job's (`squeue %L`) and RUN_META.json gains no key.

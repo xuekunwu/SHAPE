@@ -31,6 +31,7 @@ ModalityProbe3:
 python -m benchmarks.full_CPJUMP1.runners.download_modality_probe3 --out data/CPJUMP1_modality_probe3
 python -m benchmarks.full_CPJUMP1.runners.prepare_modality_probe3 \
     --raw data/CPJUMP1_modality_probe3 --out data/CPJUMP1_modality_probe3/prepared
+python benchmarks/full_CPJUMP1/runners/fetch_modality_probe3_identities.py   # each well's treatment identity, for scoring
 ```
 
 ## Running the arms
