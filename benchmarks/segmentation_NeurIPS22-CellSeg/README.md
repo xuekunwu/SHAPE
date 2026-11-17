@@ -30,7 +30,8 @@ python benchmarks/segmentation_NeurIPS22-CellSeg/runners/prepare_dataset.py
 
 ```
 bash benchmarks/segmentation_NeurIPS22-CellSeg/runners/setup_seg_base_envs.sh build   # once: the cellpose3, stardist and microsam envs
-export SHAPE_SAM_SERVER_URL=http://...
+bash benchmarks/gpu_services.sh start 1 1 1   # on the GPU node: one Cellpose-SAM service; prints the URL
+export SHAPE_SAM_SERVER_URL=http://...         # the URL it printed (the arms need it)
 bash benchmarks/segmentation_NeurIPS22-CellSeg/runners/run_all_arms.sh lists
 bash benchmarks/segmentation_NeurIPS22-CellSeg/runners/run_all_arms.sh cellpose_sam|cellpose3|microsam|stardist|gpt|react|shape|shape_cohort
 bash benchmarks/segmentation_NeurIPS22-CellSeg/runners/run_all_arms.sh compare

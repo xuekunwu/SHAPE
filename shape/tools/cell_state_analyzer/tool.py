@@ -867,7 +867,7 @@ class DinoV3Projector(nn.Module):
                 f"{custom_repo_id} and register the filename here before selecting it."
             )
         model_filename = checkpoints[backbone_name]
-        hf_token = os.getenv("HUGGINGFACE_TOKEN")
+        hf_token = os.getenv("HUGGINGFACE_TOKEN") or None   # empty (gpu_services.sh exports it unset): anonymous, the repo is public
         
         logger.info(f"Downloading weights from Hugging Face Hub: {custom_repo_id}/{model_filename}")
         ckpt_path = hf_hub_download(

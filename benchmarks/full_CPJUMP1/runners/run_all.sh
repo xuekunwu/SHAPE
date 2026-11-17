@@ -122,7 +122,7 @@ do_segcrop() {
     local row; row="$(row_for "$slug")"; [ -z "$row" ] && { echo "unknown slug $slug"; continue; }
     IFS='|' read -r s arm model route <<< "$row"
     local out="$OUTDIR/$slug"
-    mkdir -p "$out"
+    mkdir -p "$OUTDIR"   # not $out: init_run creates the run dir and refuses one that exists
     [ -f "$out/crop_COMPLETE.json" ] && { echo "=== $slug crop already done -- skip ==="; continue; }
     launch "$slug" "$arm" "$model" "$route" "$out" segment crop > "$out.segcrop.log" 2>&1 &
     pids+=($!)

@@ -45,7 +45,7 @@ python benchmarks/full_CPJUMP1/runners/fetch_modality_probe3_identities.py   # e
 One script picks the dataset, the phase (segcrop / embed / all) and which arm slugs to run:
 
 ```
-export SHAPE_SAM_SERVER_URL=http://...
+export SHAPE_SAM_SERVER_URL=http://...   # optional: a Cellpose-SAM service (benchmarks/gpu_services.sh); unset, segment runs on the local GPU
 bash benchmarks/full_CPJUMP1/runners/run_all.sh --dataset cpjump1 all shape_gpt6sol codex_gpt6sol
 bash benchmarks/full_CPJUMP1/runners/run_all.sh --dataset probe3 all shape_luna shape_sonnet55
 ```
