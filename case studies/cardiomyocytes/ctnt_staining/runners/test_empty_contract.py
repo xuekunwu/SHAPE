@@ -49,13 +49,15 @@ def test_low_coverage_detection_is_opt_in_and_keeps_failed_visual_qc(tmp_path):
             np.testing.assert_array_equal(np.load(result['mask_path']),debris)
 
 
-def test_zero_crops_only_permitted_for_a_zero_instance_mask(tmp_path):
+def test_zero_crops_only_permitted_on_a_dataset_that_allows_empty_masks(tmp_path):
+    # An image with no retained crop contributes no cells when the dataset allows empty masks, whether its
+    # mask was empty or the crop loop rejected every cell; elsewhere it stops the stage.
     from benchmarks.full_CPJUMP1.harness.pipeline import retained_crops,CPJUMP1
     spec=importlib.import_module(BASE+'spec').STAINING
     row={'image_id':'i0'};mask=np.zeros((4,4),np.uint32)
     assert retained_crops(np.zeros((1,4,4)),row,[],set(),tmp_path,spec,mask)==([],[])
     mask[1,1]=1
-    with pytest.raises(RuntimeError):retained_crops(np.zeros((1,4,4)),row,[],set(),tmp_path,spec,mask)
+    assert retained_crops(np.zeros((1,4,4)),row,[],set(),tmp_path,spec,mask)==([],[])
     with pytest.raises(RuntimeError):retained_crops(np.zeros((5,4,4)),row,[],set(),tmp_path,CPJUMP1,None)
 
 
