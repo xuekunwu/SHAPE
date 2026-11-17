@@ -59,7 +59,8 @@ def main(source, out):
     if out.exists() and any(out.iterdir()):
         raise FileExistsError(out)
     rows = []
-    for folder in sorted(d for d in os.listdir(source) if (source / d).is_dir()):
+    # hidden folders (the .cache/ that `hf download --local-dir` writes) are not plate folders
+    for folder in sorted(d for d in os.listdir(source) if (source / d).is_dir() and not d.startswith(".")):
         m = FOLDER_RE.match(folder)
         if not m:
             raise ValueError(f"unexpected folder name: {folder}")
