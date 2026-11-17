@@ -33,7 +33,7 @@ python "case studies/cardiac organoids/segmentation/run_organoid_segmentation.py
 python "case studies/cardiac organoids/segmentation/run_organoid_segmentation.py" compare --manifest MANIFEST --run-dir RUN
 ```
 
-`--model-path` is the organoid checkpoint file (`shape_seg_co`); `microsam` and `stardist` need micro-sam and
+`--model-path` is the organoid checkpoint file, `hf download SHAPE-agent/organoid-segmenter shape_seg_co --local-dir models`; `microsam` and `stardist` need micro-sam and
 StarDist (with TensorFlow) installed. `--resume` continues an interrupted arm on the identical manifest and
 settings. `run_organoid_cohort.py` runs the
 SHAPE arm as a cohort (calibration sample, fast pass for confident groups, per-image VRR for the rest), and

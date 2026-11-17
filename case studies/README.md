@@ -22,5 +22,6 @@ Every LLM arm reads `LLM_API_KEY` and `LLM_BASE_URL` from the environment; the C
 Codex CLI and Node on `PATH`. The pinned model assets that `--assets-root` points at are built once with
 `python -m benchmarks.full_CPJUMP1.harness.cli assets --root ASSETS --dinov3-repo DINOV3 --weights DINOV3_WEIGHTS
 --cpsam CPSAM` (see [`benchmarks/full_CPJUMP1`](../benchmarks/full_CPJUMP1/README.md) for the three inputs). The
-organoid studies also need the trained organoid segmenter checkpoint (`shape_seg_co`), which this release does
-not distribute.
+organoid studies also need the trained organoid segmenter checkpoint `shape_seg_co`
+([SHAPE-agent/organoid-segmenter](https://huggingface.co/SHAPE-agent/organoid-segmenter)):
+`hf download SHAPE-agent/organoid-segmenter shape_seg_co --local-dir models`.

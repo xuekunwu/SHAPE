@@ -37,6 +37,6 @@ python -m "case studies.cardiac organoids.timecourse.compare" --control RUNS/con
     --shape RUNS/shape --codex RUNS/codex --out RUNS/comparison
 ```
 
-`--organoid-model` is the trained organoid segmenter checkpoint (`shape_seg_co`).
+`--organoid-model` is the trained organoid segmenter checkpoint, `hf download SHAPE-agent/organoid-segmenter shape_seg_co --local-dir models` (`CO_CKPT` = `models/shape_seg_co`).
 `e2e prepare --protocol co-fc-timecourse-ssl19-cvcol4-v1` selects the cross-validation protocol instead of the
 held-out split.

@@ -23,7 +23,7 @@ python "case studies/cardiac organoids/drug_screen/check_prepare.py" RUNS/prepar
 segment stage is the organoid segmentation cohort of `../cohort/organoid_cohort.py` (calibration sample plus a
 per-group fast pass); the crop stage is the shared harness's crop cohort.
 `SMOKE_ROOT` is the run folder (it reads the preparation from `$SMOKE_ROOT/prepared`), `CO_SRC` the source
-tree, `CO_ORGANOID_MODEL` the organoid checkpoint and
+tree, `CO_ORGANOID_MODEL` the organoid checkpoint (`hf download SHAPE-agent/organoid-segmenter shape_seg_co --local-dir models`) and
 `CO_ASSETS` the pinned asset root:
 
 ```
