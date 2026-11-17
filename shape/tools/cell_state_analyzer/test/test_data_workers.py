@@ -50,6 +50,12 @@ def test_workers_are_the_cpus_minus_one(linux):
     assert tool_mod.resolve_num_workers() == {"num_workers": 23, "usable_cpus": 24, "start_method": "fork"}
 
 
+def test_many_cpus_are_capped(linux):
+    linux.setattr(tool_mod.os, "cpu_count", lambda: 320)
+    assert tool_mod.resolve_num_workers() == {"num_workers": tool_mod.MAX_LOADER_WORKERS, "usable_cpus": 320,
+                                              "start_method": "fork"}
+
+
 def test_the_affinity_bounds_the_cpus(linux):
     linux.setattr(tool_mod.os, "sched_getaffinity", lambda pid: set(range(6)), raising=False)
     assert tool_mod.resolve_num_workers()["num_workers"] == 5

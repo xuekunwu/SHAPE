@@ -514,15 +514,18 @@ def collate_raw_views(batch):
 # When set, the environment variable LOADER_WORKERS_ENV caps the workers further (the repository's conftest.py
 # sets it to 0, so test DataLoaders load in the test process).
 LOADER_WORKERS_ENV = "SHAPE_DATALOADER_WORKERS"
+# At most this many workers: on a many-core host (320 CPUs) one worker per CPU exhausted the default 1024
+# open files (each worker holds queue pipes and locks) and loading gains nothing past a few dozen workers.
+MAX_LOADER_WORKERS = 32
 
 
 def resolve_num_workers():
     """The DataLoader worker processes of a call, from the hardware: the usable CPUs minus one (the main
-    process trains), at least 0, where the start method fork exists (Linux); 0 (every sample is made in the
-    main process) where it does not (Windows) or is unsafe (macOS). Usable CPUs: the process's CPU affinity
-    (os.sched_getaffinity) where available, else os.cpu_count(), and SLURM_CPUS_PER_TASK when it is set
-    and smaller. LOADER_WORKERS_ENV, when set, caps the workers. Returns {"num_workers", "usable_cpus",
-    "start_method"}."""
+    process trains), at least 0 and at most MAX_LOADER_WORKERS, where the start method fork exists (Linux); 0
+    (every sample is made in the main process) where it does not (Windows) or is unsafe (macOS). Usable CPUs:
+    the process's CPU affinity (os.sched_getaffinity) where available, else os.cpu_count(), and
+    SLURM_CPUS_PER_TASK when it is set and smaller. LOADER_WORKERS_ENV, when set, caps the workers. Returns
+    {"num_workers", "usable_cpus", "start_method"}."""
     if "fork" not in multiprocessing.get_all_start_methods() or sys.platform == "darwin":
         return {"num_workers": 0, "usable_cpus": None, "start_method": None}
     try:
@@ -535,7 +538,7 @@ def resolve_num_workers():
         slurm = 0
     if 0 < slurm < cpus:
         cpus = slurm
-    workers = max(0, cpus - 1)
+    workers = min(max(0, cpus - 1), MAX_LOADER_WORKERS)
     cap = os.environ.get(LOADER_WORKERS_ENV, "").strip()
     if cap:
         workers = min(workers, max(0, int(cap)))
