@@ -21,7 +21,7 @@ a non-localhost bind needs --allow-remote (see the SAM service security note).
 
   # Must be started from a REAL (non-sandboxed) shell -- inside the Claude Code tool sandbox
   # background CUDA processes are SIGKILLed. Launch via the `!` prefix or your own terminal:
-  setsid nohup .venv/bin/python -u -m shape.tools.cell_state_analyzer.dinov3_server \
+  setsid nohup python -u -m shape.tools.cell_state_analyzer.dinov3_server \
       --port 8237 --replicas 2 > dinov3_service_8237.log 2>&1 &
 """
 from __future__ import annotations

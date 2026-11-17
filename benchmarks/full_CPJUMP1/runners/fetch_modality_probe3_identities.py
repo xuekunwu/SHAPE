@@ -7,7 +7,7 @@ so both sites of a well always get the same identity -- this script doesn't need
 only the pre-existing cross-plate twin check (same well position, other plate) still applies.
 
     cd /path/to/SHAPE
-    .venv/bin/python benchmarks/full_CPJUMP1/runners/fetch_modality_probe3_identities.py
+    python benchmarks/full_CPJUMP1/runners/fetch_modality_probe3_identities.py
 """
 from __future__ import annotations
 

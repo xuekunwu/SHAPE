@@ -15,7 +15,7 @@ Blank-well screening (DNA_max >= 5000, probe1/probe2's established floor) now ch
 per well (2 sites x 2 plates) before committing.
 
     cd /path/to/SHAPE
-    .venv/bin/python benchmarks/full_CPJUMP1/runners/download_modality_probe3.py --n-wells 25 --workers 16
+    python benchmarks/full_CPJUMP1/runners/download_modality_probe3.py --n-wells 25 --workers 16
 """
 from __future__ import annotations
 

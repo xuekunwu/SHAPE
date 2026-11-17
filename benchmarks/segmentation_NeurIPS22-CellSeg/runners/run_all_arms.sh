@@ -19,6 +19,7 @@ cd "$(cd "$(dirname "$0")/../../.." && pwd)"
 export PYTHONPATH="$PWD:${PYTHONPATH:-}"
 set -a; [ -f .env ] && . ./.env; set +a
 CLI=benchmarks/segmentation_NeurIPS22-CellSeg/run_cellseg_benchmark.py
+PY="${PYTHON:-python}"
 RUN="${RUN_DIR:-benchmarks/segmentation_NeurIPS22-CellSeg/results/final}"
 DATA=data/NeurIPS22-CellSeg
 MODEL="${MODEL:-gpt-5.6-luna}"
@@ -29,11 +30,11 @@ need_sam() { [ -n "${SHAPE_SAM_SERVER_URL:-}" ] || { echo "set SHAPE_SAM_SERVER_
 
 run_lists() {
   n="${1:-616}"   # large enough to draw every image of every band (hard 213 / medium 171 / easy 616 = 1000)
-  .venv/bin/python "$CLI" lists --run-dir "$RUN" --data-root "$DATA" --n-per-band "$n" --seed 0
+  "$PY" "$CLI" lists --run-dir "$RUN" --data-root "$DATA" --n-per-band "$n" --seed 0
   for b in hard medium easy; do echo "  $b: $(wc -l < "$RUN"/lists/$b.txt) images"; done
 }
 
-run_domain() { .venv/bin/python "$CLI" run --run-dir "$RUN" --arm cellpose_sam --data-root "$DATA"; }   # needs SAM, same .venv
+run_domain() { "$PY" "$CLI" run --run-dir "$RUN" --arm cellpose_sam --data-root "$DATA"; }   # needs SAM
 
 run_baseline() {   # $1: arm name, $2: env dir
   local py="$2/bin/python"
@@ -42,15 +43,15 @@ run_baseline() {   # $1: arm name, $2: env dir
   "$py" "$CLI" run --run-dir "$RUN" --arm "$1" --data-root "$DATA"
 }
 
-run_gpt() { .venv/bin/python "$CLI" run --run-dir "$RUN" --arm gpt --data-root "$DATA" --model "$MODEL"; }
+run_gpt() { "$PY" "$CLI" run --run-dir "$RUN" --arm gpt --data-root "$DATA" --model "$MODEL"; }
 
-run_react() { need_sam; .venv/bin/python "$CLI" run --run-dir "$RUN" --arm react --data-root "$DATA" --model "$MODEL" --workers 8; }
+run_react() { need_sam; "$PY" "$CLI" run --run-dir "$RUN" --arm react --data-root "$DATA" --model "$MODEL" --workers 8; }
 
-run_shape() { need_sam; .venv/bin/python "$CLI" run --run-dir "$RUN" --arm shape --data-root "$DATA" --model "$MODEL"; }
+run_shape() { need_sam; "$PY" "$CLI" run --run-dir "$RUN" --arm shape --data-root "$DATA" --model "$MODEL"; }
 
-run_shape_cohort() { need_sam; .venv/bin/python "$CLI" run-set --run-dir "$RUN" --arm shape_cohort --data-root "$DATA" --model "$MODEL"; }
+run_shape_cohort() { need_sam; "$PY" "$CLI" run-set --run-dir "$RUN" --arm shape_cohort --data-root "$DATA" --model "$MODEL"; }
 
-run_compare() { .venv/bin/python "$CLI" compare --run-dir "$RUN"; }
+run_compare() { "$PY" "$CLI" compare --run-dir "$RUN"; }
 
 case "${1:?usage: run_all_arms.sh lists|cellpose_sam|cellpose3|microsam|stardist|baselines|gpt|react|shape|shape_cohort|all|compare}" in
   lists)         run_lists "${2:-}" ;;

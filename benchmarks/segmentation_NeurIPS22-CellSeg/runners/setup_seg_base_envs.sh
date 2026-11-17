@@ -60,7 +60,7 @@ run() {
     echo "===== $arm ($py) $(date -u +%H:%M:%SZ) ====="
     "$py" "$CLI" run --run-dir "$RUN" --arm "$arm" --data-root "$DATA" || echo "### $arm FAILED (exit $?)"
   done
-  echo "===== seg baselines done; compare: .venv/bin/python $CLI compare --run-dir $RUN ====="
+  echo "===== seg baselines done; compare: python $CLI compare --run-dir $RUN ====="
 }
 
 case "${1:-build}" in build) build;; run) run;; both) build && run;; *) echo "usage: $0 [build|run|both]";; esac

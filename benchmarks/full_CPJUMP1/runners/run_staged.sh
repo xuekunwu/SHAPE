@@ -39,7 +39,7 @@ set +a
 # overridable with $CODEX_BIN (an absolute .../bin dir).
 CODEX_BIN="${CODEX_BIN:-$(ls -d "$HOME"/shape/cache/envs/codex-*/bin 2>/dev/null | sort -V | tail -1 || true)}"
 if [ -n "$CODEX_BIN" ] && [ -d "$CODEX_BIN" ]; then export PATH="$CODEX_BIN:$PATH"; fi
-PY="${PYTHON:-$PWD/.venv/bin/python}"
+PY="${PYTHON:-python}"
 CLI="benchmarks.full_CPJUMP1.harness.cli"
 
 ARM="${1:?usage: run_staged.sh ARM PREP RUN ASSETS [STAGES...]}"

@@ -20,7 +20,7 @@ Transport is **pickle over HTTP**. `sam_server` also exposes the client helpers 
 cd /mnt/filesystem-r8/SHAPE
 
 # start (localhost only -- safe default)
-setsid nohup .venv/bin/python -u -m shape.tools.cell_segmenter.sam_server \
+setsid nohup python -u -m shape.tools.cell_segmenter.sam_server \
   --port 8137 --replicas 4 > sam_service_8137.log 2>&1 &
 
 # use it from the SHAPE agent
@@ -37,7 +37,7 @@ firewall). To go **fast**, see §5 (run more server *processes*, not more replic
 ### Localhost (default, safe)
 ```bash
 cd /mnt/filesystem-r8/SHAPE
-setsid nohup .venv/bin/python -u -m shape.tools.cell_segmenter.sam_server \
+setsid nohup python -u -m shape.tools.cell_segmenter.sam_server \
   --port 8137 --replicas 4 > sam_service_8137.log 2>&1 &
 echo "PID $!"
 ```
@@ -51,7 +51,7 @@ echo "PID $!"
 
 ### Verify it is up
 ```bash
-.venv/bin/python -c "from shape.tools.cell_segmenter.sam_batch import sam_health; print(sam_health('http://127.0.0.1:8137'))"
+python -c "from shape.tools.cell_segmenter.sam_batch import sam_health; print(sam_health('http://127.0.0.1:8137'))"
 # -> {'status': 'ok', 'model_type': 'cpsam', 'device': 'cuda', 'replicas': 4, 'idle': 4}
 ```
 
@@ -83,7 +83,7 @@ meta = sam_eval_path(URL, "cell_00001.bmp", kw, "/tmp/out/cell_00001_pred.tiff")
 
 ### Batch a whole folder
 ```bash
-.venv/bin/python -m shape.tools.cell_segmenter.sam_batch \
+python -m shape.tools.cell_segmenter.sam_batch \
   --images-dir data/NeurIPS22-CellSeg/images --out-dir /tmp/masks \
   --sam-url http://127.0.0.1:8137
 ```
@@ -107,7 +107,7 @@ A non-localhost bind is **refused by default** and requires an explicit opt-in:
 
 ```bash
 cd /mnt/filesystem-r8/SHAPE
-setsid nohup .venv/bin/python -u -m shape.tools.cell_segmenter.sam_server \
+setsid nohup python -u -m shape.tools.cell_segmenter.sam_server \
   --host 0.0.0.0 --allow-remote --port 8137 --replicas 4 > sam_service_8137.log 2>&1 &
 ```
 
@@ -136,7 +136,7 @@ export SHAPE_SAM_SERVER_URL=http://gpu-node.example.net:8137
 ```bash
 cd /mnt/filesystem-r8/SHAPE
 # after the server is up, prove an end-to-end call over the internal IP:
-.venv/bin/python - <<'PY'
+python - <<'PY'
 from shape.tools.cell_segmenter.sam_batch import sam_health, sam_eval_path
 import glob
 URL = "http://gpu-node.example.net:8137"
@@ -168,7 +168,7 @@ The GPU (single eval is far from saturating it) and VRAM (~4 GB/model of ~140 GB
 so run several processes on consecutive ports. `sam_batch` can launch and round-robin them for you:
 
 ```bash
-.venv/bin/python -m shape.tools.cell_segmenter.sam_batch \
+python -m shape.tools.cell_segmenter.sam_batch \
   --images-dir data/NeurIPS22-CellSeg/images --out-dir /tmp/masks \
   --autostart-sam --server-procs 8 --replicas 2      # 8 processes x 2 models = 16 evals in flight
 ```
@@ -180,7 +180,7 @@ For a **persistent** multi-process service, start the servers yourself and point
 them (comma-separated), so the client round-robins:
 ```bash
 for p in 8137 8138 8139 8140 8141 8142 8143 8144; do
-  setsid nohup .venv/bin/python -u -m shape.tools.cell_segmenter.sam_server \
+  setsid nohup python -u -m shape.tools.cell_segmenter.sam_server \
     --host 0.0.0.0 --allow-remote --port $p --replicas 2 > sam_service_$p.log 2>&1 &
 done
 # client:

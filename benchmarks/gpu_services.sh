@@ -19,7 +19,7 @@ cd "$(cd "$(dirname "$0")/.." && pwd)"           # repo root
 export PYTHONPATH="$PWD:${PYTHONPATH:-}"
 set -a; [ -f .env ] && . ./.env; set +a
 export HUGGINGFACE_TOKEN="${HUGGINGFACE_TOKEN:-$HF_TOKEN}"   # DINOv3 weights load needs it
-PY="${PYTHON:-$PWD/.venv/bin/python}"
+PY="${PYTHON:-python}"
 LOGDIR="$PWD/benchmarks/.gpu_service_logs"; mkdir -p "$LOGDIR"
 
 CMD="${1:-status}"

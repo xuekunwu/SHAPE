@@ -70,7 +70,7 @@ def main() -> None:
     else:
         print(f"difficulty-band reference MISSING: {METRICS_CSV}\n"
               f"  regenerate with:\n"
-              f"    .venv/bin/python benchmarks/segmentation_NeurIPS22-CellSeg/runners/run_cellpose_sam_only.py "
+              f"    python benchmarks/segmentation_NeurIPS22-CellSeg/runners/run_cellpose_sam_only.py "
               f"--data-root {data_root} --out-csv {METRICS_CSV}")
 
 

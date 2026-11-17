@@ -18,7 +18,7 @@ usage split: 70/15/15 deterministic per (plate, well) (sha256 terciles, same rul
 sites of a (plate, well) always land on the same side, since the split key doesn't include site.
 
     cd /path/to/SHAPE
-    .venv/bin/python benchmarks/full_CPJUMP1/runners/prepare_modality_probe3.py \
+    python benchmarks/full_CPJUMP1/runners/prepare_modality_probe3.py \
         --raw data/CPJUMP1_modality_probe3 --out data/CPJUMP1_modality_probe3/prepared
 """
 from __future__ import annotations

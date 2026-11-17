@@ -24,7 +24,7 @@ set -uo pipefail
 cd "$(cd "$(dirname "$0")/../../.." && pwd)"
 export PYTHONPATH="$PWD:${PYTHONPATH:-}"
 HERE="benchmarks/full_CPJUMP1/runners"
-PY="${PYTHON:-$PWD/.venv/bin/python}"
+PY="${PYTHON:-python}"
 ASSETS="data/CPJUMP1/assets"
 CLAUDE_ENV="$PWD/$HERE/.claude_api.env"
 ANTHROPIC_ENV="$PWD/$HERE/arms/anthropic_direct.env"
@@ -43,7 +43,7 @@ case "$DATASET" in
     PREP="data/CPJUMP1/prepared"
     OUTDIR="benchmarks/full_CPJUMP1/results/cpjump1"
     FINALIZE() { "$PY" -m benchmarks.full_CPJUMP1.harness.finalize_run "$@"; }
-    FIGURES() { "$PY" -m benchmarks.full_CPJUMP1.harness.figures "$@"; }
+    FIGURES() { :; }   # no figures module in this release
     # slug | arm | model | route(-|anthropic|claude|together-glm|together-deepseek)
     MATRIX=(
       "control|control|-|-"
