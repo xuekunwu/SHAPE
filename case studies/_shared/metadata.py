@@ -1,4 +1,5 @@
-"""Pinned, authenticated metadata access; never downloads complete image archives."""
+"""Pinned metadata access (anonymous, or with a Hugging Face token when one is set); never downloads complete image
+archives."""
 from __future__ import annotations
 
 import argparse
@@ -39,9 +40,7 @@ def archive_metadata(prefix: bytes, member_name: str) -> bytes:
 def fetch_metadata(spec: dict) -> bytes:
     from huggingface_hub import get_token, hf_hub_download, hf_hub_url
 
-    token = get_token()
-    if not token:
-        raise RuntimeError("Hugging Face login required; use hf auth login or HF_TOKEN")
+    token = get_token()   # None: anonymous access, enough for the public SHAPE-agent datasets
     if not spec["metadata_in_archive"]:
         path = hf_hub_download(repo_id=spec["repo_id"], repo_type="dataset",
                                revision=spec["revision"], filename=spec["metadata_path"], token=token)
@@ -49,8 +48,10 @@ def fetch_metadata(spec: dict) -> bytes:
     import requests
 
     url = hf_hub_url(spec["repo_id"], spec["archive"], repo_type="dataset", revision=spec["revision"])
-    with requests.get(url, headers={"Authorization": f"Bearer {token}",
-                      "Range": f"bytes=0-{PREFIX_BYTES - 1}"}, stream=True, timeout=30) as response:
+    headers = {"Range": f"bytes=0-{PREFIX_BYTES - 1}"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    with requests.get(url, headers=headers, stream=True, timeout=30) as response:
         if response.status_code not in (200, 206):
             raise RuntimeError(f"Hugging Face archive access failed (HTTP {response.status_code})")
         # Even if the server ignores Range, stop after the bounded prefix.
@@ -61,7 +62,7 @@ def fetch_metadata(spec: dict) -> bytes:
 def inventory(spec: dict) -> dict:
     from huggingface_hub import HfApi
 
-    info = HfApi(token=True).dataset_info(spec["repo_id"], revision=spec["revision"], files_metadata=True)
+    info = HfApi().dataset_info(spec["repo_id"], revision=spec["revision"], files_metadata=True)
     if info.sha != spec["revision"]:
         raise ValueError("dataset revision differs from pinned contract")
     files = {f.rfilename: f.size for f in info.siblings}
@@ -146,7 +147,7 @@ def main(spec_path: Path) -> None:
     spec = json.loads(spec_path.read_text(encoding="utf-8"))
     parser = argparse.ArgumentParser(description=spec["study"] + " data admission (not an E2E runner)")
     sub = parser.add_subparsers(dest="command", required=True)
-    inspect = sub.add_parser("inspect", help="verify authenticated access at the pinned HF revision")
+    inspect = sub.add_parser("inspect", help="verify access at the pinned HF revision")
     inspect.add_argument("--out", type=Path, help="fresh aggregate JSON report")
     fetch = sub.add_parser("fetch-metadata", help="fetch and verify metadata only; no full image download")
     fetch.add_argument("--out", type=Path, required=True, help="fresh private directory outside the repository")
