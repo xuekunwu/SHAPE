@@ -41,7 +41,7 @@ LLM_ARMS = ("gpt", "react", "shape")
 SET_ARMS = ("shape_cohort",)
 
 _BENCH = Path(__file__).resolve().parents[1]          # benchmarks/segmentation_NeurIPS22-CellSeg
-_PROMPT_FILE = _BENCH / "results" / "Prompt.txt"
+_PROMPT_FILE = _BENCH / "Prompt.txt"
 
 
 # --------------------------------------------------------------------------- #

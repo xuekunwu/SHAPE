@@ -1,0 +1,113 @@
+# Agent Task Prompt: Robust Single-Cell Instance Segmentation (NeurIPS22-CellSeg)
+
+## Objective
+
+You are given **ONE microscopy image** from the **NeurIPS 2022 Cell Segmentation
+Challenge** test set. (The benchmark as a whole spans many modalities — brightfield,
+phase-contrast, differential-interference-contrast, and fluorescence — and many tissue
+and cell types at widely varying resolutions, sizes and densities; that heterogeneity is
+context for how you adapt, but **you are solving only the single image in front of you**.)
+
+Autonomously produce, for **this one image**, a single **integer instance-label mask**
+in which each individual cell is one distinct label, aligned to the input image. That
+instance mask is the **one and only deliverable**, and its quality against the
+ground-truth mask is the sole objective.
+
+> **COMPLETION CRITERION (read this for deciding whether the task is done).**
+> The task is **COMPLETE for this image the moment one acceptable instance mask has been
+> produced and the judge accepts it.** There is **no counting step, no analysis step, and
+> no second tool to call** — the cell *count* is simply read off the mask's integer labels,
+> it is **not** a separate deliverable or a separate tool invocation. Do **not** judge the
+> task incomplete because "counting", "analysis", or "the other images" have not been done:
+> counting is derived from the mask, and each run handles exactly one image. **Once a good
+> instance mask for this image exists in memory, the task is DONE — stop.**
+
+---
+
+## Target
+
+Each whole cell is one instance, over its full extent (including faint cytoplasm, not only the nucleus).
+In a field where a few stained (nucleated, blue / purple) cells lie among many unstained or red cells,
+e.g. a blood smear, only the stained cells are cells to segment.
+
+---
+
+## Scope
+
+The task ends at the segmentation mask — nothing downstream of it. Cropping single
+cells, learning morphology embeddings, clustering, cell-state characterization, and any
+other downstream analysis are **outside this task**; do not invoke such steps even if
+the tools are available. Every action you take should serve the accuracy of the
+instance mask.
+
+---
+
+## Available Environment and Tools
+
+1. **Cellpose-SAM** — generalist single-cell segmentation across imaging modalities.
+2. **A vision-LLM segmentation judge** — inspects the mask-on-image overlay and reports
+   whether cells were missed or masks were spurious, to inform whether to re-segment.
+
+Use an alternative or supplementary method only if these are insufficient; if you do,
+explain why it was necessary and document the decision.
+
+No image-preprocessing tool is registered for this benchmark arm (it is still under
+development); segment the raw image directly.
+
+---
+
+## Approach — adapt per image
+
+The dataset is highly heterogeneous; no single fixed parameter set works everywhere.
+You choose the order of operations, the parameters (diameter, cell-probability and flow
+thresholds, minimum size, iterations, test-time augmentation, tile overlap), the QC
+thresholds, and any re-run decisions — from the image content and the intermediate
+results.
+
+### 1. Dataset Inspection
+* Discover the images and their modalities/resolutions where inferable.
+* Note images that are unusually large, low-contrast, or crowded.
+
+### 2. Quality Control
+* Assess each raw image, then segment it directly (no preprocessing tool is available
+  in this benchmark arm).
+
+### 3. Adaptive Segmentation (the core)
+* Estimate the cell scale from the image itself rather than assuming a fixed diameter;
+  the reliable signal is the segmented cells' own size, so measure it and correct the
+  scale when the first pass was clearly off.
+* Verify each segmentation: check for under-detection (textured foreground left
+  uncovered), over-segmentation, merged masks, and flow-rejected cells, and re-tune the
+  specific responsible knob rather than retrying blindly.
+* When the visual judge reports many missed or spurious masks, re-segment with the
+  indicated correction; when it confirms the masks are good, accept.
+
+### 4. Completion — when an image is done
+* **Every image must end with an instance mask.** Never conclude an image after only
+  inspecting or preprocessing it — preprocessing is preparation, not the deliverable.
+* Stop as soon as the judge confirms the masks are good; do not keep re-tuning a
+  segmentation that is already acceptable.
+* On a genuinely hard image where further in-scope re-tuning no longer improves the
+  masks, keep the best mask produced so far, record it as a best-effort result with the
+  limitation noted, and stop. Do not reach for out-of-scope steps to rescue it.
+
+### 5. Output
+* For each image, an integer instance-label mask aligned to the input.
+* A per-image record of the parameters used and the verification/adaptation decisions.
+
+---
+
+## Evaluation
+
+Predictions are scored against the ground-truth instance masks with standard instance
+metrics across IoU thresholds 0.50-0.95:
+
+* **AP**, **precision**, **recall**, and **F1** at IoU 0.50 (primary), plus AP at 0.75
+  and the mean over 0.50-0.95.
+* Predicted-vs-ground-truth **cell-count error**.
+* Aggregated micro-averaged across all evaluated images.
+
+The benchmark also reports **agentic activity**: per-image adaptive diameters, the
+number of within-stage re-tunes, diameter corrections, vision judgements, cross-stage
+feedbacks, and escalations — so segmentation quality can be read alongside how much the
+system actually reasoned and adapted.

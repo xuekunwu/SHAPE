@@ -28,7 +28,7 @@ class BenchmarkConfig:
     agent_max_steps: int = 10                   # shape: solve() max_steps (react: SHAPE's BUDGET rounds)
 
     # === Standalone SHAPE runners (run_shape_neurips_cellseg.py, run_concurrent_benchmark.py) ===
-    question_file: str = "results/Prompt.txt"      # relative to the benchmark directory
+    question_file: str = "Prompt.txt"      # relative to the benchmark directory
     question_fallback: str = "Segment and count every cell in each image."  # used if Prompt.txt missing
     enabled_tools: tuple = ("Cell_Segmenter_Tool",)  # segmenter only; no preprocess/crop/analyze
     max_steps: int = 8                          # max outer planner steps per image

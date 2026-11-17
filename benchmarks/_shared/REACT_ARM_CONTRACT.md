@@ -9,7 +9,7 @@ by it, and full_CPJUMP1 gains a `react` arm built the same way. Old ReAct result
 
 The prompt holds only:
 1. The task text, identical to the text SHAPE's agent gets for this task, including the task's own target definition
-   (for example CellSeg `results/Prompt.txt ## Target`).
+   (for example CellSeg `Prompt.txt ## Target`).
 2. The input description: the same facts SHAPE is given, with nothing SHAPE computes.
    The input images: the same raw inputs SHAPE sees (for example CellSeg's raw image, the file the segmenter gets),
    attached to the first question of each session only, labelled `INPUT IMAGE: <name>`, at the size of the other

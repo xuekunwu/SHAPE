@@ -476,7 +476,7 @@ def _safe_ap50(mask_path, gt_path):
 # Default query: the professional, correctly-scoped Prompt.txt (states the
 # segmentation-only boundary explicitly -- do NOT crop/cluster/analyze), read at
 # runtime so it stays in sync with the file on disk. `--prompt-file` overrides it.
-_PROMPT_FILE = Path(__file__).resolve().parents[1] / "results" / "Prompt.txt"
+_PROMPT_FILE = Path(__file__).resolve().parents[1] / "Prompt.txt"
 
 # Task 083: this benchmark (the "shape_main" arm) tests the SEGMENTOR only.
 # Image_Preprocessor_Tool is intentionally excluded from `enabled_tools` so the LLM
@@ -746,7 +746,7 @@ def main() -> None:
                              "separated list of stems. Overrides random sampling.")
     parser.add_argument("--prompt-file", type=Path,
                         help="Path to a text file with the agent's query prompt. Default: "
-                             "read benchmarks/segmentation_NeurIPS22-CellSeg/results/Prompt.txt at "
+                             "read benchmarks/segmentation_NeurIPS22-CellSeg/Prompt.txt at "
                              "runtime (the professional, segmentation-only-scoped prompt).")
     parser.add_argument("--model", default=_cfg.llm_model,
                         help="LLM the agent uses (planner + vision verifier). "

@@ -294,7 +294,7 @@ def run_react_arm(run_dir: Path, data_root: Path, *, bands=BANDS, limit: int | N
     """The react arm: an LLM plus Cell_Segmenter_Tool on the shared ReAct runner (`benchmarks/_shared/react_arm.py`,
     REACT_ARM_CONTRACT.md; the adapter `cellseg_arms.SegmenterAdapter`). Per band, one `run_react` over the band's
     listed images without a record, `workers` sessions at a time; the task text is SHAPE's in this benchmark (the
-    shape arm's question, `results/Prompt.txt`), the raw input image on each session's first question
+    shape arm's question, `Prompt.txt`), the raw input image on each session's first question
     (`SegmenterAdapter.input_images`), the engine SHAPE's verifier engine (`build_vision_engine`), no
     deadline. Each image's delivered call (the agent's finish, else its default call: `delivery`) is scored as
     `run_image` scores a mask, into the same record layout, plus `rounds`, `delivered_call`, `delivery`, `stop`,
