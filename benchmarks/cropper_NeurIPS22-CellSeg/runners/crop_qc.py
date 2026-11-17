@@ -1,4 +1,4 @@
-"""Single-cell crop QC -- OUR copy of SHAPE's GT-free crop metrics. Given the instance mask and a
+"""Single-cell crop QC -- the benchmark's copy of SHAPE's GT-free crop metrics. Given the instance mask and a
 crop bounding box for a target cell, measure how clean the crop is:
 
   neighbor_contamination = (foreground pixels of OTHER cells in the box) / (all foreground in box)

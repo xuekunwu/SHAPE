@@ -39,7 +39,6 @@ import numpy as np
 _HERE = Path(__file__).resolve().parent
 _REPO = _HERE.parents[1]
 sys.path.insert(0, str(_REPO))
-sys.path.insert(0, str(_REPO / "benchmarks" / "baselines" / "metrics"))
 sys.path.insert(0, str(_HERE / "runners"))      # the arms and the runners they reuse
 
 import cropper_arms as arm_lib  # noqa: E402
