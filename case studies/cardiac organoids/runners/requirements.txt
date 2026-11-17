@@ -1,2 +1,0 @@
-# Optional: only downloading the pinned private HF export needs this package.
-huggingface-hub>=0.34,<2

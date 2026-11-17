@@ -33,7 +33,6 @@ repository are not part of it.
 | [`shape/`](shape/) | the framework: tools, agent, verification, LLM engines, solver |
 | [`benchmarks/`](benchmarks/README.md) | public-dataset evaluations, one directory per tool and dataset |
 | [`case studies/`](case%20studies/README.md) | end-to-end applications on experimental data |
-| [`environments/`](environments/README.md) | the pinned runtimes a run records itself against |
 
 ## Install
 
@@ -46,9 +45,7 @@ python -m pip install -e .
 ```
 
 The segmentation tool needs Cellpose-SAM (`cellpose>=4.0`) and a CUDA-capable PyTorch
-build for anything beyond small images. To reproduce a benchmark runtime exactly, install
-a pinned lock from [`environments/`](environments/README.md) instead of resolving
-dependencies yourself.
+build for anything beyond small images.
 
 ## Quick start
 
@@ -147,15 +144,12 @@ Each benchmark's README gives its dataset, the GPU it needs and the commands for
 ## Case studies
 
 [`case studies/`](case%20studies/README.md) holds end-to-end applications on experimental
-datasets, as distinct from the public-dataset benchmarks. The
-[cardiomyocyte studies](case%20studies/cardiomyocytes/README.md) predict single-cell cTnT
-positivity from brightfield alone against paired staining, and well-level cTnT-positive
-proportions against flow cytometry. The
-[cardiac organoid](case%20studies/cardiac%20organoids/README.md) and
-[tissue](case%20studies/tissues/README.md) applications have the same structure: a
-`harness/` with the pinned data contract and a `runners/` with the entry points. Raw images
-and labels are not committed to Git; the cardiomyocyte datasets are public on Hugging Face
-(linked from that study's README).
+data, one directory per study, each README giving the data, the GPU it needs and the
+commands: cTnT positivity of iPSC-derived cardiomyocytes from brightfield alone, against
+staining (per cell) and flow cytometry (per well); cardiac-organoid segmentation, a
+time course and a drug screen; and cell-class probes of SSL embeddings of Xenium Prime
+tissue sections. The cardiomyocyte and organoid time-course and drug-screen data are public
+on Hugging Face under [SHAPE-agent](https://huggingface.co/SHAPE-agent).
 
 ## Development
 

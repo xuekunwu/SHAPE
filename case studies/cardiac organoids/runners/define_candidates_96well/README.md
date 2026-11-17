@@ -1,14 +1,36 @@
-# SHAPE run on the 96-well CO DEFINE candidates (250429_96well_CO_DEFINE candidates)
+# cardiac organoids/runners/define_candidates_96well
 
-Run scripts for 1141 phase-contrast + GFP images (12 plate/time-point folders). Segment and crop read the phase-contrast image; the SSL
-(embed) stage reads two-channel (PhaseContrast, GFP) crops cut at the boxes chosen on the phase image (`ssl_two_channel`).
-Train / validation only (8:2 by plate-well, all time points of a plate-well in one split, no evaluation set); the final embedding covers every
-crop. Image, well and plate identifiers are pseudonyms.
+SHAPE on a 96-well cardiac-organoid drug screen: 1,141 phase-contrast + GFP images in 12 plate / time-point
+folders. Segmentation and cropping read the phase-contrast image; the self-supervised embedding reads two-channel
+(phase contrast, GFP) crops cut at the boxes chosen on the phase image. The split is train / validation 8:2 by
+plate-well (every time point of a plate-well on one side, no held-out set); the final embedding covers every crop.
 
-| File | Purpose |
-|---|---|
-| `prepare_full.py`, `check_prepare.py` | prepare the images (public phase images, two-channel stacks, private GFP, split) and check the split contract |
-| `full_driver.py`, `post_full.py` | run segment, crop, embed through the shared harness (`validate`: 10 plate-wells at the full-run search settings; `full`: all images) and write the QA summary |
+## Dataset
 
-The full set runs on a single-GPU VM through `run_vm.sh`-style wrappers of `full_driver.py`. `full_driver.py` takes its run folder, source tree, organoid model and asset root from `SMOKE_ROOT`, `CO_SRC`, `CO_ORGANOID_MODEL` and `CO_ASSETS`.
-The segment stage uses the organoid cohort module in `../cohort`; the crop stage is the harness's crop cohort (mask-error check off).
+[SHAPE-agent/CO_drugscreen](https://huggingface.co/datasets/SHAPE-agent/CO_drugscreen): one folder per plate and
+time point (`<date>_<time>_Plate N_<baseline|dN>`). `prepare_full.py` writes the public phase-contrast images, the
+two-channel stacks, the private GFP files and the split; `check_prepare.py` checks the split contract:
+
+```
+hf download SHAPE-agent/CO_drugscreen --repo-type dataset --local-dir data/CO_drugscreen
+python "case studies/cardiac organoids/runners/define_candidates_96well/prepare_full.py" data/CO_drugscreen PREP
+python "case studies/cardiac organoids/runners/define_candidates_96well/check_prepare.py" PREP
+```
+
+## GPU
+
+One GPU. The segment stage runs the organoid segmentation cohort of `../cohort/organoid_cohort.py` (calibration
+sample plus per-group fast pass); the crop stage is the shared harness's crop cohort.
+
+## Running
+
+`full_driver.py` runs segment, crop and embed through the shared harness, each stage in its own process.
+`SMOKE_ROOT` is the run folder, `CO_SRC` the source tree, `CO_ORGANOID_MODEL` the organoid checkpoint and
+`CO_ASSETS` the pinned asset root:
+
+```
+export SMOKE_ROOT=RUNS CO_SRC=/path/to/SHAPE CO_ORGANOID_MODEL=CO_CKPT CO_ASSETS=ASSETS
+python "case studies/cardiac organoids/runners/define_candidates_96well/full_driver.py" run NAME shape validate   # 10 plate-wells
+python "case studies/cardiac organoids/runners/define_candidates_96well/full_driver.py" run NAME shape full       # all images
+python "case studies/cardiac organoids/runners/define_candidates_96well/post_full.py" NAME                         # QA summary
+```

@@ -1,57 +1,23 @@
 # SHAPE Case Studies
 
-End-to-end studies on experimental datasets, from microscopy images to a
-biological prediction and independent evaluation. Public-dataset evaluations
-belong in `benchmarks/`; experimental applications belong here, including when
-their data are distributed through Hugging Face.
+End-to-end applications of SHAPE on experimental data, one directory per study. Each study keeps its
+data contract (`harness/dataset.json` where it has one), its preparation step, the arms and one run
+entry point; its README gives the data, the GPU it needs and the commands that run every arm.
 
-## Study Areas
+| Study | Question | Data | Entry point |
+|---|---|---|---|
+| [`cardiomyocytes/ctnt_staining`](cardiomyocytes/ctnt_staining/README.md) | per-cell cTnT positivity from brightfield, against cTnT staining | [SHAPE-agent/iPSC-CM-cTnT_staining](https://huggingface.co/datasets/SHAPE-agent/iPSC-CM-cTnT_staining) | `runners/run.py` |
+| [`cardiomyocytes/ctnt_flowcytometry`](cardiomyocytes/ctnt_flowcytometry/README.md) | the cTnT-positive percentage of a well from brightfield, against flow cytometry | [SHAPE-agent/iPSC-CM-cTnT_flowcytometry](https://huggingface.co/datasets/SHAPE-agent/iPSC-CM-cTnT_flowcytometry) | `runners/run.py` |
+| [`cardiac organoids/fc_timecourse`](cardiac%20organoids/fc_timecourse/README.md) | culture day and Control vs FC from phase contrast (23 wells x 8 time points) | [SHAPE-agent/CO_timecourse](https://huggingface.co/datasets/SHAPE-agent/CO_timecourse) | `runners/e2e.py` |
+| [`cardiac organoids/runners/define_candidates_96well`](cardiac%20organoids/runners/define_candidates_96well/README.md) | segmentation, cropping and two-channel SSL embedding of a 1,141-image drug screen | [SHAPE-agent/CO_drugscreen](https://huggingface.co/datasets/SHAPE-agent/CO_drugscreen) | `full_driver.py` |
+| [`cardiac organoids/runners/segmentation`](cardiac%20organoids/runners/segmentation/README.md) | whole-organoid instance segmentation: SHAPE against non-LLM baselines, an LLM alone and ReAct | private (in-house images and instance masks) | `run_organoid_segmentation.py` |
+| [`tissues/runners/xenium_lineage_annotation`](tissues/runners/xenium_lineage_annotation/README.md) | cross-tissue cell classes of seven Xenium Prime sections | 10x Genomics Xenium Prime FFPE sections | `annotate.py` |
+| [`tissues/runners/xenium_lung_ssl`](tissues/runners/xenium_lung_ssl/README.md), [`xenium_organ_ssl`](tissues/runners/xenium_organ_ssl/README.md) | cell-type and cell-class linear probes of the arms' SSL embeddings | the arms' delivered embeddings | `evaluation/linear_probe*.py` |
 
-- [Cardiomyocytes](cardiomyocytes/): brightfield prediction of cTnT positivity,
-  with separate cell-level staining and well-level flow-cytometry studies.
-- [Cardiac organoids](cardiac%20organoids/): experimental study scope pending.
-- [Tissues](tissues/): Xenium Prime human lung cancer crops, three-arm SSL
-  embeddings scored by a cell-type linear probe on held-out spatial tiles.
+`_shared/metadata.py` is the Hugging Face metadata admission the two cardiomyocyte studies share
+(`run.py inspect`, `fetch-metadata`, `audit-metadata`). `basic_usage.py` is a minimal `solve()` example on
+the two bundled images, `iPSC-cardiomyocyte.tif` and `baseball.png`.
 
-## Shared End-to-End Design
-
-Use [`benchmarks/full_CPJUMP1`](../benchmarks/full_CPJUMP1/README.md)
-as the architectural reference: prepare and verify inputs, segment, crop, learn
-representations, apply batch correction when admitted, deliver predictions,
-and score against independent reference measurements. Study-specific adapters
-must define prediction units, labels, splits and biological endpoints;
-CPJUMP1's five-channel input and gene-retrieval endpoints do not apply here.
-
-Cardiomyocyte metadata admission is
-executable; the full image pipelines remain study designs, not completed runs. Pin the actual
-implementation commit, dataset revision and model assets when preparing a run.
-Reuse shared SHAPE tools and VRR/admission rules rather than copying a second
-implementation into each study. Quality-gate skips remain valid outcomes.
-
-Compare arms on identical inputs, splits, supervised-head policy and budgets.
-Record every observable internal operation: tool calls, parameters, evidence,
-LLM requests/responses, repairs, decisions, stage gates, selected artifacts,
-timestamps, usage, errors and checkpoint/resume provenance. This is a required
-audit contract for the future harness; this documentation does not implement it.
-Keep secret credentials out of exported records.
-
-Raw images, private labels, model weights and large outputs remain outside Git.
-Each implemented study should provide its data contract, preparation adapter,
-runner and scorer. Missing mappings or labels must block
-scoring, not silently become negative examples or zero proportions.
-
-## Directory Responsibilities
-
-Each cardiomyocyte sub-study has `harness/` (contracts and pipeline logic),
-and `runners/` (entry points and instructions).
-Cardiac organoids and tissues have the same structure. [Shared metadata admission](_shared/README.md)
-handles HF authentication and verification for both cardiomyocyte datasets.
-No private metadata tables or raw experimental images are committed.
-
-## Retained Legacy Files
-
-`basic_usage.py`, `iPSC-cardiomyocyte.tif` and `baseball.png` were retained when
-`examples/` was renamed. They are generic usage/smoke fixtures, not the datasets,
-labels or end-to-end runners for these studies. The TIFF has not been verified
-as a member of either linked cardiomyocyte dataset.
-
+Every LLM arm reads `LLM_API_KEY` and `LLM_BASE_URL` from the environment; the Codex arm also needs the
+Codex CLI and Node on `PATH`. The pinned model assets (DINOv3 source and weights, Cellpose-SAM weights)
+that `--assets-root` points at are built by `python -m benchmarks.full_CPJUMP1.harness.cli assets`.

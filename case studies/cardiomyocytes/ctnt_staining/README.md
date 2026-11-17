@@ -1,75 +1,44 @@
-# cTnT Staining: Cell-Level Classification
+# cardiomyocytes/ctnt_staining
 
-Status: authenticated dataset access and metadata admission are implemented.
-Image preparation, cell-label derivation and full pipeline execution are pending.
+Per-cell cTnT positivity of fixed iPSC-derived cardiomyocytes, predicted from brightfield alone and scored
+against labels derived from the cTnT fluorescence of the same cells. Three arms (`control`, `shape`, `codex`)
+segment, crop and embed the brightfield images (self-supervised DINOv3 fine-tune) and fit one per-cell
+classifier on the same prepared images and the same frozen 40/10/50 well split (seed 20261017). DAPI and cTnT
+enter only the reference labels and the scorer, never an arm's decisions.
 
-- [Harness](harness/): pinned data contract and metadata entry point.
-- [Runners](runners/): executable inspect/fetch/audit commands.
+## Dataset
 
-The embedded CSV carries image-level experimental metadata with no per-cell
-intensity or label columns.
+[SHAPE-agent/iPSC-CM-cTnT_staining](https://huggingface.co/datasets/SHAPE-agent/iPSC-CM-cTnT_staining):
+2,294 images of 574 wells (brightfield, DAPI, cTnT) in one archive. `harness/dataset.json` pins its revision,
+size and metadata hash; the metadata commands check them without downloading the images:
 
-Source: [SHAPE-agent/iPSC-CM-cTnT_staining](https://huggingface.co/datasets/SHAPE-agent/iPSC-CM-cTnT_staining).
-Fixed iPSC-derived cardiomyocytes are imaged in brightfield, DAPI and cTnT/Cy5.
-The target is a **per-cell cTnT-positive label (0/1)** derived from fluorescence,
-predicted using the corresponding brightfield morphology alone.
+```
+python "case studies/cardiomyocytes/ctnt_staining/runners/run.py" inspect
+python "case studies/cardiomyocytes/ctnt_staining/runners/run.py" fetch-metadata --out OUT
+```
 
-## Reference Labels
+`prepare-full` prepares every well, `prepare-pilot` the fixed 20% pilot (same image, well and split IDs), from
+the extracted `cTnT_composite/` folder (`RAW`) and the frozen well split (`SPLIT`); `freeze-references`
+fixes the matched reference cells. Both prepare commands pin the metadata of the original local backup
+(sha256 `c1b2a9ea...`), not the public archive's donor-free CSV (`9514170e...`).
 
-Define reference cell IDs and spatial masks independently of the compared arms,
-register the channels and quantify background-corrected cTnT intensity per cell.
-Freeze the intensity statistic, compartment, illumination/background correction
-and threshold protocol using assay controls or development data before evaluation.
-Do not assume a universal numeric threshold or retune it on held-out predictions.
+```
+python "case studies/cardiomyocytes/ctnt_staining/runners/run.py" prepare-full --raw RAW --frozen-split SPLIT --out PREP
+python "case studies/cardiomyocytes/ctnt_staining/runners/run.py" freeze-references --help
+```
 
-DAPI can support reference annotations, but a nucleus is not automatically a
-whole-cell mask. Resolve multinucleated cells, merged objects and crowded borders
-explicitly. Retain raw measurements, threshold provenance, label and QC status;
-ambiguous or saturated measurements are flagged, never silently labeled negative.
-If thresholds are calibrated per acquisition batch, require predefined independent
-controls rather than fitting a threshold to each test field.
+## GPU
 
-Every evaluable reference cell has one label. Each arm's predicted objects must
-be matched to these references with the same frozen matching rule. Reference
-fluorescence images, masks, intensities and held-out labels remain outside the
-agent's and predictor's inputs. Arm-specific masks must not redefine ground truth.
+One GPU per arm (Cellpose-SAM segmentation and the DINOv3 fine-tune run locally).
 
-## Proposed Data Contract
+## Running the arms
 
-These are proposed prepared-record fields; the pinned source schema is audited
-separately and does not yet supply the private cell-reference table:
+```
+python "case studies/cardiomyocytes/ctnt_staining/runners/run.py" pack --out SNAPSHOT.tar.gz   # prints the source sha256
+python "case studies/cardiomyocytes/ctnt_staining/runners/run.py" run --prep PREP --references REFS \
+    --assets-root ASSETS --expected-source SHA256 --arm control|shape|codex --out RUN --allow-exploratory-full
+```
 
-- Image manifest: `image_id`, `sample_id`, globally unique `well_id`,
-  `differentiation_batch_id`, `acquisition_id`, `split`, `brightfield_path`,
-  image hash, axes and pixel size.
-- Private reference manifest: `image_id`, DAPI/cTnT paths and hashes, verified
-  channel identifiers and registration transform/QC.
-- Cell labels: `image_id`, `reference_cell_id`, reference mask ID, corrected cTnT
-  intensity, intensity statistic, threshold, threshold protocol ID, `ctnt_positive`
-  (0/1 for evaluable cells), QC status and exclusion reason.
-- Predictions: `image_id`, predicted cell ID, mask/crop provenance,
-  `ctnt_positive_probability` in [0, 1] and binary prediction using a frozen
-  **classifier** threshold. This threshold differs from the fluorescence
-  threshold that defines the reference label.
-
-Training labels may be exposed to the supervised head after splits are frozen;
-held-out references are available only to independent evaluation.
-
-## End-to-End Evaluation
-
-Brightfield -> segment -> crop -> SSL embedding -> admitted batch handling ->
-supervised cell classifier -> frozen predictions -> independent fluorescence labels.
-
-Predeclare a matched-cell classification endpoint (proposed primary: AUROC;
-secondary: AUPRC, sensitivity, specificity, F1, balanced accuracy and probability
-calibration). Pair it with mandatory reference-cell detection recall, precision,
-matching coverage and excluded-cell counts by sample and label. Report undefined
-metrics explicitly for single-class groups. A classifier score on detected cells
-alone is not a complete end-to-end success criterion: missed positive cells and
-unmatched false detections must remain visible.
-
-Aggregate to per-image/sample positive fractions as a secondary endpoint with
-explicit denominators. Require sample-level confidence intervals and a predefined
-coverage criterion before comparing arms; do not improve apparent classification
-performance by dropping difficult cells. Segmentation accuracy needs independent
-mask annotations; cTnT intensity alone does not establish mask accuracy.
+Use a fresh `--out` per arm; `--smoke` runs a small technical check first. `--allow-exploratory-full` is needed to
+score the full data against the fixed pseudo-reference; on the pilot pass `--pilot-manifest PREP/PILOT.json`
+instead.
