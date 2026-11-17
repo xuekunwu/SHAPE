@@ -12,10 +12,6 @@ the docstring of `annotate.py`.
 Each section's transcript h5ad with raw counts and its 10x `cells.parquet` (10x Genomics Xenium Prime datasets),
 and the CellTypist models named in `markers.py`.
 
-## GPU
-
-Not required (CPU; scanpy, CellTypist 1.7.1).
-
 ## Running
 
 ```

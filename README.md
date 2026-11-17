@@ -79,46 +79,7 @@ print(result["direct_output"])
 ## Benchmarks
 
 Evaluation harnesses live in [`benchmarks/`](benchmarks/README.md), one directory per tool
-and dataset. The segmentation benchmark and the segment and crop stages of the end-to-end
-benchmark call a **shared, separately deployed Cellpose-SAM service**; the embed stage and the
-RxRx1 representation benchmark need a local GPU; the cropper and batch-correction benchmarks
-run on CPU.
-
-### Shared GPU model services
-
-Run the GPU models as long-lived services and point every benchmark's workers at them over
-HTTP. Scale throughput with independent **server processes** (a single process plateaus at
-about 2x serial on the Python GIL), and put several on consecutive ports; clients
-round-robin a comma-separated URL list. Launch from a real shell (a sandbox may SIGKILL
-background CUDA).
-
-```bash
-bash benchmarks/gpu_services.sh start     # 4 SAM processes x 2 replicas + DINOv3
-bash benchmarks/gpu_services.sh urls      # prints the SAM_URLS / DINO_URL to export
-```
-
-Or start them by hand:
-
-```bash
-# Cellpose-SAM (segmentation) - 4 processes x 2 replicas on 8137-8140
-for p in 8137 8138 8139 8140; do
-  setsid nohup .venv/bin/python -u -m shape.tools.cell_segmenter.sam_server \
-    --host 0.0.0.0 --allow-remote --port $p --replicas 2 > sam_$p.log 2>&1 &
-done
-
-# DINOv3 (embedding) - 4 processes x 2 replicas on 8237-8240
-export HUGGINGFACE_TOKEN=$HF_TOKEN
-for p in 8237 8238 8239 8240; do
-  setsid nohup .venv/bin/python -u -m shape.tools.cell_state_analyzer.dinov3_server \
-    --host 0.0.0.0 --allow-remote --port $p --replicas 2 > dinov3_$p.log 2>&1 &
-done
-```
-
-`--host 0.0.0.0 --allow-remote` exposes the service on the private network so workers on
-other nodes can reach it. **Security:** the transport is pickle (a remote-code-execution
-surface) — only enable `--allow-remote` on a trusted, firewalled network, or keep the
-default localhost bind and SSH-tunnel. See
-[`shape/tools/cell_segmenter/SAM_SERVICE.md`](shape/tools/cell_segmenter/SAM_SERVICE.md).
+and dataset.
 
 ### Running each benchmark
 
@@ -131,7 +92,7 @@ download the folder a benchmark needs into `data/` from the repository root
 hf download SHAPE-agent/benchmark-data --repo-type dataset --include "NeurIPS22-CellSeg/*" --local-dir data
 ```
 
-Each benchmark's README gives its dataset, the GPU it needs and the commands for every arm:
+Each benchmark's README gives its dataset and the commands for every arm:
 
 | Benchmark | Entry point |
 |---|---|
@@ -144,8 +105,7 @@ Each benchmark's README gives its dataset, the GPU it needs and the commands for
 ## Case studies
 
 [`case studies/`](case%20studies/README.md) holds end-to-end applications on experimental
-data, one directory per study, each README giving the data, the GPU it needs and the
-commands: cTnT positivity of iPSC-derived cardiomyocytes from brightfield alone, against
+data, one directory per study, each README giving the data and the commands: cTnT positivity of iPSC-derived cardiomyocytes from brightfield alone, against
 staining (per cell) and flow cytometry (per well); cardiac-organoid segmentation, a
 time course and a drug screen; and cell-class probes of SSL embeddings of Xenium Prime
 tissue sections. The cardiomyocyte and organoid time-course and drug-screen data are public

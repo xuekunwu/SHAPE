@@ -23,10 +23,6 @@ python benchmarks/batch_correction_JUMP/run_batch_benchmark.py prepare \
     --microscope-config data/JUMP/inputs/microscope_config.csv --arevalo-cache DIR
 ```
 
-## GPU
-
-Not required (CPU; large scenarios need a large-memory node).
-
 ## Running the arms
 
 ```

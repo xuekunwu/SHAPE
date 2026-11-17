@@ -24,11 +24,6 @@ python "case studies/cardiac organoids/runners/segmentation/run_organoid_segment
     --manifest MANIFEST --image-root IMAGES --label-root MASKS
 ```
 
-## GPU
-
-One GPU per arm process. The four Cellpose-based arms need Cellpose 4, `microsam` needs micro-sam, `stardist`
-needs StarDist with a TensorFlow GPU build. `--model-path` is the organoid checkpoint file (`shape_seg_co`).
-
 ## Running the arms
 
 ```
@@ -38,7 +33,9 @@ python "case studies/cardiac organoids/runners/segmentation/run_organoid_segment
 python "case studies/cardiac organoids/runners/segmentation/run_organoid_segmentation.py" compare --manifest MANIFEST --run-dir RUN
 ```
 
-`--resume` continues an interrupted arm on the identical manifest and settings. `run_organoid_cohort.py` runs the
+`--model-path` is the organoid checkpoint file (`shape_seg_co`); `microsam` and `stardist` need micro-sam and
+StarDist (with TensorFlow) installed. `--resume` continues an interrupted arm on the identical manifest and
+settings. `run_organoid_cohort.py` runs the
 SHAPE arm as a cohort (calibration sample, fast pass for confident groups, per-image VRR for the rest), and
 `run_organoid_bounded.py` the same cohort in fixed 64-image shards with per-pass checkpoints and `--resume`:
 

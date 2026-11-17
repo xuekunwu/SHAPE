@@ -2,7 +2,7 @@
 
 End-to-end applications of SHAPE on experimental data, one directory per study. Each study keeps its
 data contract (`harness/dataset.json` where it has one), its preparation step, the arms and one run
-entry point; its README gives the data, the GPU it needs and the commands that run every arm.
+entry point; its README gives the data and the commands that run every arm.
 
 | Study | Question | Data | Entry point |
 |---|---|---|---|

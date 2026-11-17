@@ -17,14 +17,11 @@ python "case studies/cardiac organoids/runners/define_candidates_96well/prepare_
 python "case studies/cardiac organoids/runners/define_candidates_96well/check_prepare.py" PREP
 ```
 
-## GPU
-
-One GPU. The segment stage runs the organoid segmentation cohort of `../cohort/organoid_cohort.py` (calibration
-sample plus per-group fast pass); the crop stage is the shared harness's crop cohort.
-
 ## Running
 
-`full_driver.py` runs segment, crop and embed through the shared harness, each stage in its own process.
+`full_driver.py` runs segment, crop and embed through the shared harness, each stage in its own process. The
+segment stage is the organoid segmentation cohort of `../cohort/organoid_cohort.py` (calibration sample plus a
+per-group fast pass); the crop stage is the shared harness's crop cohort.
 `SMOKE_ROOT` is the run folder, `CO_SRC` the source tree, `CO_ORGANOID_MODEL` the organoid checkpoint and
 `CO_ASSETS` the pinned asset root:
 

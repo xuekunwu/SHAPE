@@ -22,10 +22,6 @@ Pass `--data-dir data/NeurIPS22-CellSeg` to `prepare`.
 
 Validate it with `benchmarks/segmentation_NeurIPS22-CellSeg/runners/prepare_dataset.py`.
 
-## GPU
-
-Not required (CPU only).
-
 ## Running the arms
 
 ```

@@ -11,10 +11,6 @@ The prepared section (`PREP`, with `public/images.json` giving each cell's split
 embeddings (`RUN` per arm) and the CellTypist labels exported as `cell_id,celltype_final` to
 `celltype_final.csv.gz`.
 
-## GPU
-
-Not required for the probe (CPU).
-
 ## Running
 
 ```

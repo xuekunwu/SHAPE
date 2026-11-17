@@ -2,7 +2,7 @@
 
 Datasets and eval drivers used to evaluate the SHAPE agent end to end, one directory per
 tool per dataset: `benchmarks/<eval-task>_<dataset>/`. Each directory's `README.md` gives the
-dataset, the GPU it needs and the commands that run every arm.
+dataset and the commands that run every arm.
 
 ## Index (tool -> eval task -> dataset)
 

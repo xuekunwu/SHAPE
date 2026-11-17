@@ -12,10 +12,6 @@ with the same epoch ceiling and a 48 h deadline. The labels are the cross-tissue
 Per organ and draw, the prepared draw (`PREP`), the arms' delivered embeddings (`RUN` per arm) and the class
 labels (`class.csv.gz` of `xenium_lineage_annotation`).
 
-## GPU
-
-Not required for the evaluation (CPU).
-
 ## Running
 
 ```

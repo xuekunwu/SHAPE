@@ -33,16 +33,6 @@ python -m benchmarks.full_CPJUMP1.runners.prepare_modality_probe3 \
     --raw data/CPJUMP1_modality_probe3 --out data/CPJUMP1_modality_probe3/prepared
 ```
 
-## GPU services
-
-`segment`/`crop` call the shared Cellpose-SAM service; `embed` needs a local GPU (SSL
-fine-tuning/inference, DINOv3).
-
-```
-bash benchmarks/gpu_services.sh start
-bash benchmarks/gpu_services.sh urls   # SHAPE_SAM_SERVER_URL to export
-```
-
 ## Running the arms
 
 One script picks the dataset, the phase (segcrop / embed / all) and which arm slugs to run:

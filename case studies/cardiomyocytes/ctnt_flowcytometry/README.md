@@ -23,10 +23,6 @@ python "case studies/cardiomyocytes/ctnt_flowcytometry/runners/run.py" prepare \
 
 `run.py inspect`, `fetch-metadata` and `audit-metadata` check the pinned contract without the images.
 
-## GPU
-
-One GPU per arm (Cellpose-SAM segmentation and the DINOv3 fine-tune run locally).
-
 ## Running the arms
 
 ```

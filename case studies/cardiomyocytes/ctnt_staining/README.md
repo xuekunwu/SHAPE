@@ -27,10 +27,6 @@ python "case studies/cardiomyocytes/ctnt_staining/runners/run.py" prepare-full -
 python "case studies/cardiomyocytes/ctnt_staining/runners/run.py" freeze-references --help
 ```
 
-## GPU
-
-One GPU per arm (Cellpose-SAM segmentation and the DINOv3 fine-tune run locally).
-
 ## Running the arms
 
 ```

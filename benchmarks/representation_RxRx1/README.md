@@ -19,10 +19,6 @@ python benchmarks/representation_RxRx1/run_rxrx1.py prepare --cell-type HEPG2 --
 python benchmarks/representation_RxRx1/run_rxrx1.py assets --output-root DIR   # run on a login node: it downloads
 ```
 
-## GPU
-
-Needed for `control`, `shape` and `score` (local DINOv3 fine-tuning/inference -- no remote service).
-
 ## Running the arms
 
 ```
