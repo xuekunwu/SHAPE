@@ -19,5 +19,8 @@ entry point; its README gives the data and the commands that run every arm.
 the two bundled images, `iPSC-cardiomyocyte.tif` and `baseball.png`.
 
 Every LLM arm reads `LLM_API_KEY` and `LLM_BASE_URL` from the environment; the Codex arm also needs the
-Codex CLI and Node on `PATH`. The pinned model assets (DINOv3 source and weights, Cellpose-SAM weights)
-that `--assets-root` points at are built by `python -m benchmarks.full_CPJUMP1.harness.cli assets`.
+Codex CLI and Node on `PATH`. The pinned model assets that `--assets-root` points at are built once with
+`python -m benchmarks.full_CPJUMP1.harness.cli assets --root ASSETS --dinov3-repo DINOV3 --weights DINOV3_WEIGHTS
+--cpsam CPSAM` (see [`benchmarks/full_CPJUMP1`](../benchmarks/full_CPJUMP1/README.md) for the three inputs). The
+organoid studies also need the trained organoid segmenter checkpoint (`shape_seg_co`), which this release does
+not distribute.

@@ -22,7 +22,13 @@ CPJUMP1, from Hugging Face (the 5,000 TIFFs under `raw/` plus `manifest.json`, t
 ```
 hf download SHAPE-agent/benchmark-data --repo-type dataset --include "CPJUMP1/*" --local-dir data
 python -m benchmarks.full_CPJUMP1.harness.cli prepare --data data/CPJUMP1 --out data/CPJUMP1/prepared
+python -m benchmarks.full_CPJUMP1.harness.cli assets --root data/CPJUMP1/assets \
+    --dinov3-repo DINOV3 --weights DINOV3_WEIGHTS --cpsam CPSAM
 ```
+`DINOV3` is a checkout of facebookresearch/dinov3 at commit `6876159a11b4df116f30f667f8c9888617df0751`,
+`DINOV3_WEIGHTS` the ViT-B/16 weights `dinov3_vitb16_pretrain_lvd1689m-73cec8be.pth` of Meta's DINOv3 release
+(sha256 `73cec8be...`) and `CPSAM` the Cellpose-SAM weights file (`cpsam`, which Cellpose 4 downloads to
+`~/.cellpose/models/`). `assets` copies them into a pinned, offline root; a compute node then needs no network.
 `runners/download_cpjump1.py` fetches the same files from the Cell Painting Gallery instead
 (`--manifest benchmarks/full_CPJUMP1/runners/manifest.json --out data/CPJUMP1`).
 

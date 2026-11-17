@@ -11,13 +11,24 @@ label enters any arm's decision.
 
 ## Dataset
 
-RxRx1 HEPG2 (and optionally HUVEC/RPE/U2OS). `prepare` builds the tool inputs and stages the pinned
-DINOv3 assets from the task-116 preps:
+[RxRx1](https://www.rxrx.ai/rxrx1) (`metadata.csv` and `rxrx1-images.zip`), HEPG2 by default (also HUVEC, RPE,
+U2OS). `build_prep` cuts the nucleus-centred 6-channel crops and splits the wells into a FULL prep and its run prep,
+under the names `runners/config.py` (`PREPS`) expects in `--data-root`; `prepare` then builds the tool inputs from
+them and `assets` stages the pinned DINOv3 source and weights:
 
 ```
-python benchmarks/representation_RxRx1/run_rxrx1.py prepare --cell-type HEPG2 --data-root DIR --output-root DIR
-python benchmarks/representation_RxRx1/run_rxrx1.py assets --output-root DIR   # run on a login node: it downloads
+python -m benchmarks.representation_RxRx1.runners.build_prep prepare --metadata RXRX1/metadata.csv \
+    --images RXRX1/rxrx1-images.zip --cell-type HEPG2 --datasets train,test --n-experiments 11 \
+    --output PREPS/prep_hepg2_e11_v3
+python -m benchmarks.representation_RxRx1.runners.build_prep subsample --prep PREPS/prep_hepg2_e11_v3 \
+    --output PREPS/prep_hepg2_e11_v3_t10 --train-well-fraction 0.1
+python benchmarks/representation_RxRx1/run_rxrx1.py prepare --cell-type HEPG2 --data-root PREPS --output-root DIR
+python benchmarks/representation_RxRx1/run_rxrx1.py assets --output-root DIR   # downloads: run where there is network
 ```
+
+The `build_prep` options above (all 11 HEPG2 experiments of the train and test sets, positive-control wells, the
+defaults otherwise) follow the prep names; the original task-116 preps were not kept, so they are not checked
+against them.
 
 ## Running the arms
 

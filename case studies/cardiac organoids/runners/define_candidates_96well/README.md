@@ -13,8 +13,8 @@ two-channel stacks, the private GFP files and the split; `check_prepare.py` chec
 
 ```
 hf download SHAPE-agent/CO_drugscreen --repo-type dataset --local-dir data/CO_drugscreen
-python "case studies/cardiac organoids/runners/define_candidates_96well/prepare_full.py" data/CO_drugscreen PREP
-python "case studies/cardiac organoids/runners/define_candidates_96well/check_prepare.py" PREP
+python "case studies/cardiac organoids/runners/define_candidates_96well/prepare_full.py" data/CO_drugscreen RUNS/prepared
+python "case studies/cardiac organoids/runners/define_candidates_96well/check_prepare.py" RUNS/prepared
 ```
 
 ## Running
@@ -22,7 +22,8 @@ python "case studies/cardiac organoids/runners/define_candidates_96well/check_pr
 `full_driver.py` runs segment, crop and embed through the shared harness, each stage in its own process. The
 segment stage is the organoid segmentation cohort of `../cohort/organoid_cohort.py` (calibration sample plus a
 per-group fast pass); the crop stage is the shared harness's crop cohort.
-`SMOKE_ROOT` is the run folder, `CO_SRC` the source tree, `CO_ORGANOID_MODEL` the organoid checkpoint and
+`SMOKE_ROOT` is the run folder (it reads the preparation from `$SMOKE_ROOT/prepared`), `CO_SRC` the source
+tree, `CO_ORGANOID_MODEL` the organoid checkpoint and
 `CO_ASSETS` the pinned asset root:
 
 ```
