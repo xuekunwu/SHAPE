@@ -26,7 +26,7 @@ python "case studies/cardiomyocytes/ctnt_flowcytometry/runners/run.py" prepare \
 ## Running the arms
 
 ```
-python "case studies/cardiomyocytes/ctnt_flowcytometry/runners/run.py" pack --out SNAPSHOT.tar.gz   # prints the source sha256
+python "case studies/cardiomyocytes/ctnt_flowcytometry/runners/run.py" pack --out SNAPSHOT.tar.gz   # --expected-source is the source_sha256 it prints, not archive_sha256
 python "case studies/cardiomyocytes/ctnt_flowcytometry/runners/run.py" run --prep PREP \
     --arm control|shape|codex|claude|biomni --assets-root ASSETS --expected-source SHA256 --out RUN
 ```

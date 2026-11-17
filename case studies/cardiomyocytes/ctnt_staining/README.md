@@ -30,7 +30,7 @@ python "case studies/cardiomyocytes/ctnt_staining/runners/run.py" freeze-referen
 ## Running the arms
 
 ```
-python "case studies/cardiomyocytes/ctnt_staining/runners/run.py" pack --out SNAPSHOT.tar.gz   # prints the source sha256
+python "case studies/cardiomyocytes/ctnt_staining/runners/run.py" pack --out SNAPSHOT.tar.gz   # --expected-source is the source_sha256 it prints, not archive_sha256
 python "case studies/cardiomyocytes/ctnt_staining/runners/run.py" run --prep PREP --references REFS \
     --assets-root ASSETS --expected-source SHA256 --arm control|shape|codex --out RUN --allow-exploratory-full
 ```

@@ -29,7 +29,7 @@ python -m "case studies.cardiac organoids.fc_timecourse.runners.e2e" prepare --s
 
 ```
 E2E="case studies.cardiac organoids.fc_timecourse.runners.e2e"
-python -m "$E2E" pack --out SNAPSHOT.tar.gz            # prints the source sha256 the runs are bound to
+python -m "$E2E" pack --out SNAPSHOT.tar.gz            # --expected-source is the source_sha256 it prints, not archive_sha256
 python -m "$E2E" run --prep PREP --out RUNS/control --arm control --assets-root ASSETS \
     --organoid-model CO_CKPT --expected-source SHA256 --cores 8
 # the same for --arm shape and --arm codex; --smoke runs a 6-image technical check first
