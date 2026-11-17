@@ -33,7 +33,7 @@ SCHEMA = {"type": "object", "additionalProperties": False,
 
 def registry(stage, spec=None):
     """The stage's lever registry; `spec` (a Dataset) selects its own segmenter's CARD for the segment stage."""
-    from benchmarks.full_HCMA.harness.shape_arm import tools_common
+    from benchmarks._shared.harness.shape_arm import tools_common
     from .cli import REPO
     if stage == "segment" and spec is not None and spec.segment_tool != "cell_segmenter":
         from .pipeline import segment_registry
@@ -42,7 +42,7 @@ def registry(stage, spec=None):
 
 
 def parameters(stage, given, spec=None):
-    from benchmarks.full_HCMA.harness.shape_arm import tools_common
+    from benchmarks._shared.harness.shape_arm import tools_common
     if not isinstance(given, dict):
         raise ValueError("params_json must encode an object")
     levers = registry(stage, spec)
@@ -87,7 +87,7 @@ def setup(root: Path, model: str, evidence: list[Path]) -> Path:
 
 
 def command(prompt, model, settings, session=None):
-    from benchmarks.full_HCMA.harness.agents import claude_cmd
+    from benchmarks._shared.harness.agents import claude_cmd
     cmd = claude_cmd(prompt, model, session, [], str(settings))
     cmd[cmd.index("--allowedTools") + 1] = "Read"
     return cmd + ["--tools", "Read", "--setting-sources", "", "--strict-mcp-config",
@@ -121,7 +121,7 @@ def response(trace: Path, model: str):
 
 
 def invoke(root, prompt, model, settings, deadline, index, session=None):
-    from benchmarks.full_HCMA.harness.agents import stream, kill_run_processes
+    from benchmarks._shared.harness.agents import stream, kill_run_processes
     trace = root / "traces" / f"round_{index:03d}.jsonl"
     trace.parent.mkdir(exist_ok=True)
     try:

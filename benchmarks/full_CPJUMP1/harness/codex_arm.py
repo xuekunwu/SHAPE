@@ -130,7 +130,7 @@ def registry(stage):
     does)."""
     if stage != "embed":
         return native.registry(stage)
-    from benchmarks.full_HCMA.harness.shape_arm import tools_common
+    from benchmarks._shared.harness.shape_arm import tools_common
     from shape.utils.schemas import card_lever_fields, lever_spec
     from .cli import REPO
     C = tools_common()
@@ -203,7 +203,7 @@ def cell_rules(value, with_parent: bool) -> list[dict]:
 def parameters(stage, given):
     """Registry parameters only, each checked against its CARD type and range; crop also takes SHAPE's cell rules
     (`cell_rules`, `rules_parent`). Raises ValueError."""
-    from benchmarks.full_HCMA.harness.shape_arm import tools_common
+    from benchmarks._shared.harness.shape_arm import tools_common
     C = tools_common()
     if not isinstance(given, dict):
         raise ValueError("parameters must be a JSON object")
@@ -364,7 +364,7 @@ class StageRun:
 
     def __init__(self, stage, prep, run, config):
         from .cli import REPO
-        from benchmarks.full_HCMA.harness.shape_arm import tools_common
+        from benchmarks._shared.harness.shape_arm import tools_common
         self.arm, self.backend = config["arm"], backend(config["arm"])
         self.backend.route(config["model"])
         self.stage, self.prep, self.run, self.config = stage, Path(prep), Path(run), config

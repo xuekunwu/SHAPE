@@ -6,7 +6,7 @@ statistics and the image leakage, on hand-computed cases and against a copy of t
 reference. CARD: the 16 levers (A11: 15 in 4 Families, plus max_epochs) parse with the shared parser
 (`schemas.card_lever_fields` / `lever_spec`) to the contract's Family / Type / Range / Default, every Default equals
 the execute() signature default (init_from is a verifier lever without a kwarg), the lead paragraph defines the
-Families and names no key levers, and the sections the linear verifier and full_HCMA read stay. CPU only; no tool call.
+Families and names no key levers, and the sections the linear verifier and the shared harness read stay. CPU only; no tool call.
 """
 import hashlib
 import inspect

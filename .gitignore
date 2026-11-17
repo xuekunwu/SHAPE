@@ -1,12 +1,9 @@
 logs/
 todo.*
-benchmarks/baselines/results
 benchmarks/batch_correction_JUMP/results
-benchmarks/cell_state_HCMA/results
 benchmarks/full_CPJUMP1/results
 benchmarks/cropper_NeurIPS22-CellSeg/results
 benchmarks/segmentation_NeurIPS22-CellSeg/results
-benchmarks/full_HCMA/cache
 benchmarks/full_CPJUMP1/results_summary
 
 

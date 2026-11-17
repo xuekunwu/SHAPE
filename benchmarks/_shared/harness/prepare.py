@@ -28,7 +28,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from benchmarks.cell_state_HCMA.hcma_labels import normalize_cell_state
+from .hcma_labels import normalize_cell_state
 
 REQUIRED = ("image_id", "image_filename", "relative_path", "parent_image_id", "source", "cell_type",
             "organ_category", "image_modality", "magnification")

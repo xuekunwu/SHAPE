@@ -81,7 +81,7 @@ def preflight(args) -> dict:
         if not os.environ.get("LLM_API_KEY") or os.environ.get("LLM_BASE_URL", "").rstrip("/") not in (
                 "https://llm-gateway.example.edu/v1", "https://api.openai.com/v1"):
             raise RuntimeError("require SHAPE LLM_API_KEY and a verified LLM_BASE_URL")
-        from benchmarks.full_HCMA.harness.shape_arm import build_engine
+        from benchmarks._shared.harness.shape_arm import build_engine
         from shape.engine import usage
         before = usage.total_tokens()
         from benchmarks.full_CPJUMP1.harness import pipeline

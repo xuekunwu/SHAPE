@@ -35,7 +35,7 @@ KNN_K = 10
 KNN_CHUNK = 1024
 LOGREG = {"solver": "lbfgs", "max_iter": 2000, "class_weight": "balanced", "random_state": 0}
 BOOTSTRAP, BOOTSTRAP_SEED = 1000, 0
-CELL_CAP, CELL_SEED = 100, 0          # cells per unit in the cell-level probes (full_HCMA's MAX_CELLS, SAMPLE_SEED)
+CELL_CAP, CELL_SEED = 100, 0          # cells per unit in the cell-level probes (harness/score.py's MAX_CELLS, SAMPLE_SEED)
 METRICS = ("mAP", "macro_f1", "balanced_accuracy")
 PROBE_METRICS = ("balanced_accuracy", "macro_f1")
 UNITS = ("cell", "unit")
@@ -140,7 +140,7 @@ def unit_profiles(cells: np.ndarray, cell_unit: np.ndarray, n_units: int, chunk:
 def cap_cells(cell_unit: np.ndarray, cell_ids=None, cap: int = CELL_CAP, seed: int = CELL_SEED) -> np.ndarray:
     """Row indices of <= `cap` cells per unit (cells with unit -1 left out): a unit's cells sorted by cell id (None:
     by row), permuted by numpy.random.default_rng(seed).permutation (a fresh generator per unit), the first `cap` of
-    that permutation in sorted order (full_HCMA's SAMPLE_RULE); a unit with fewer cells keeps all of them."""
+    that permutation in sorted order (harness/score.py's SAMPLE_RULE); a unit with fewer cells keeps all of them."""
     cell_unit = np.asarray(cell_unit, dtype=np.int64)
     keys = np.arange(len(cell_unit)) if cell_ids is None else np.asarray(cell_ids).astype(str)
     order = np.lexsort((keys, cell_unit))

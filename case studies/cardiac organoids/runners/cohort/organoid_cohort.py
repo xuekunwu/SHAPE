@@ -36,7 +36,7 @@ def segmentation(prep: Path, run: Path, config: dict, images: list[dict]) -> Non
     engine = pipeline.engine_for(config, "segment")
     if engine is None or config.get("segmentation_regime") != REGIME:
         return pipeline.segmentation(prep, run, config, images)
-    from benchmarks.full_HCMA.harness.shape_arm import segment_resolution, tools_common
+    from benchmarks._shared.harness.shape_arm import segment_resolution, tools_common
     from shape.agent.verification import segmentation_cohort
 
     spec = pipeline.dataset(config)

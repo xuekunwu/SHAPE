@@ -50,7 +50,7 @@ def test_pilot_rejects_changed_parent_or_membership(tmp_path,monkeypatch):
 @pytest.mark.parametrize("stage,effort", [("segment","medium"),("crop","medium"),("embed","high"),("batch","high")])
 def test_image_medium_reaches_engine_without_changing_frozen_pilot(stage, effort, monkeypatch):
     from benchmarks.full_CPJUMP1.harness import pipeline
-    from benchmarks.full_HCMA.harness import shape_arm
+    from benchmarks._shared.harness import shape_arm
     from shape.agent.verification import vision_engine
     protocol = reasoning.reasoning_protocol("image-medium")
     for key,value in pipeline.stage_env("shape",stage,protocol).items():

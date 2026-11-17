@@ -99,7 +99,7 @@ def test_an_empty_mask_is_an_error_where_the_dataset_does_not_allow_it(world, mo
 
 @pytest.mark.parametrize('mask_check', [True, False])
 def test_crop_one_hands_the_mask_check_switch_to_the_crop_task(world, monkeypatch, mask_check):
-    from benchmarks.full_HCMA.harness import shape_arm
+    from benchmarks._shared.harness import shape_arm
     from shape.agent.verification import step_verifier
     prep, run, config, rows, masks = world
     seen = {}

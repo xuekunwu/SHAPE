@@ -2,7 +2,7 @@
 # CPJUMP1 staged orchestration — run the five stages ONE AT A TIME against a shared run dir,
 # so GPU-bound stages (segment, embed) go on a GPU node while CPU stages (crop, batch,
 # cluster) run anywhere, each reading the previous stage's on-disk artifacts. This is the
-# cell_state_HCMA run_pipeline.sh pattern applied to CPJUMP1, using the harness's OWN
+# staged pattern applied to CPJUMP1, using the harness's OWN
 # single-stage worker (`cli stage <name> --prep --run`) rather than the monolithic
 # `cli run`, so no stage logic is duplicated.
 #

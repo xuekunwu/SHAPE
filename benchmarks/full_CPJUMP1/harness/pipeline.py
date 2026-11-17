@@ -241,9 +241,6 @@ def dataset(config: dict) -> Dataset:
     name = config.get("dataset", "CPJUMP1")
     if name == "CPJUMP1":
         return CPJUMP1
-    if name == "LIVECell":
-        from benchmarks.full_LIVECell.harness.spec import LIVECELL
-        return LIVECELL
     if name == "co_fc_timecourse":
         return importlib.import_module("case studies.cardiac organoids.fc_timecourse.runners.spec").for_config(config)
     if name == "ctnt_flowcytometry":
@@ -415,7 +412,7 @@ def engine_for(config: dict, stage: str):
     any other arm."""
     if config["arm"] != "shape":
         return None
-    from benchmarks.full_HCMA.harness.shape_arm import build_engine
+    from benchmarks._shared.harness.shape_arm import build_engine
     from shape.agent.verification.vision_engine import build_vision_engine
     settings = check_stage_env(config["arm"], stage, config.get("reasoning", {}).get("protocol"))
     raw = build_vision_engine(config["model"]) if config.get("model") else None
@@ -531,7 +528,7 @@ def _require_segmenter_gpu(tool) -> None:
     delegates every eval to a remote GPU-resident SAM server ($SHAPE_SAM_SERVER_URL) and is
     deliberately CPU-only (see Cell_Segmenter_Tool's shared-server branch). Then the GPU lives
     on the server, so a CPU device here is correct, not a silent fallback. This lets the GPU
-    stage run on a CPU node that points at a remote SAM service (the cell_state_HCMA pattern)."""
+    stage run on a CPU node that points at a remote SAM service."""
     if getattr(tool, "_sam_server_url", None):
         return
     if tool.device.type != "cuda":
@@ -546,7 +543,7 @@ SEGMENTERS = {"cell_segmenter": ("Cell_Segmenter_Tool", {"model_type": "cpsam", 
 def segment_registry(spec: Dataset) -> dict:
     """{lever: LeverInfo} of the dataset's segmenter: the template registry for Cellpose-SAM, the organoid CARD's
     `## Levers` (parsed the same way) for the organoid segmenter."""
-    from benchmarks.full_HCMA.harness.shape_arm import tools_common
+    from benchmarks._shared.harness.shape_arm import tools_common
     C = tools_common()
     repo = Path(__file__).resolve().parents[3]
     if spec.segment_tool == "cell_segmenter":
@@ -561,7 +558,7 @@ def segment_registry(spec: Dataset) -> dict:
 def segmenter(spec: Dataset, tool_params: dict | None = None) -> dict:
     """The dataset's segmenter on the GPU: {tool, name, fixed (the kwargs no arm sets), registry, defaults
     (the CARD defaults, then `tool_params`)}. Raises when the tool fell back to the CPU."""
-    from benchmarks.full_HCMA.harness.shape_arm import tools_common
+    from benchmarks._shared.harness.shape_arm import tools_common
     if spec.segment_tool not in SEGMENTERS:
         raise ValueError(f"unknown segment tool {spec.segment_tool!r}")
     name, fixed = SEGMENTERS[spec.segment_tool]
@@ -583,7 +580,7 @@ def segmenter(spec: Dataset, tool_params: dict | None = None) -> dict:
 
 
 def _segmentation_per_image(prep: Path, run: Path, config: dict, images: list[dict], engine) -> None:
-    from benchmarks.full_HCMA.harness.shape_arm import segment_one, tools_common
+    from benchmarks._shared.harness.shape_arm import segment_one, tools_common
 
     spec = dataset(config)
     C = tools_common()
@@ -683,7 +680,7 @@ def _segment_image_worker(task) -> dict:
     worker (like _crop_image) and delegates to the remote SAM service via $SHAPE_SAM_SERVER_URL,
     which the spawned process inherits from the parent's environment."""
     prep, run, config, row = task
-    from benchmarks.full_HCMA.harness.shape_arm import tools_common
+    from benchmarks._shared.harness.shape_arm import tools_common
     from shape.tools.cell_segmenter.tool import Cell_Segmenter_Tool
     spec = dataset(config)
     C = tools_common()
@@ -745,7 +742,7 @@ def _segmentation_cohort(prep: Path, run: Path, config: dict, images: list[dict]
     `parameter_source` in segmentation.json."""
     if (config.get('segmentation_adaptive') or {}).get('routing_policy') == 'conditional_cohort_v2':
         return _segmentation_shared(prep, run, config, images, engine)
-    from benchmarks.full_HCMA.harness.shape_arm import segment_resolution, tools_common
+    from benchmarks._shared.harness.shape_arm import segment_resolution, tools_common
     from shape.agent.verification import segmentation_cohort
     from shape.tools.cell_segmenter.tool import Cell_Segmenter_Tool
 
@@ -874,7 +871,7 @@ def _segmentation_cohort_organoid(prep: Path, run: Path, config: dict, images: l
     VRR from the consensus. Same records and files as `_segmentation_cohort` (the Cellpose-SAM cohort, untouched), and
     `_segmentation_per_image`'s handling of the organoid segmenter's failed visual QC (the mask is kept, the complaint
     recorded as defaults_qc_error)."""
-    from benchmarks.full_HCMA.harness.shape_arm import segment_resolution, tools_common
+    from benchmarks._shared.harness.shape_arm import segment_resolution, tools_common
     from shape.agent.verification import segmentation_cohort
 
     spec = dataset(config)
@@ -962,7 +959,7 @@ def _segmentation_shared(prep, run, config, images, engine):
     from shape.agent.verification.segmentation_shared_native import run_native
     from shape.tools.cell_segmenter.tool import Cell_Segmenter_Tool
     from shape.tools.cell_segmenter.cache_runtime import configure
-    from benchmarks.full_HCMA.harness.shape_arm import tools_common
+    from benchmarks._shared.harness.shape_arm import tools_common
     C = tools_common(); registry = C.tool_levers('segment', Path(__file__).resolve().parents[3])
     defaults = {k:C.normal_default(v) for k,v in registry.items()}
     defaults.update(config.get('tool_params',{}))
@@ -1026,7 +1023,7 @@ def _crop_image(task) -> tuple[list, list, dict | None, dict | None]:
     """One image's crop work (its crop VRR when searched, the delivery call, the box and rejection checks, the
     retained crops); top-level so a worker process can run it. Returns (kept, excluded, search record, the worker
     process's token usage or None in this process)."""
-    from benchmarks.full_HCMA.harness.shape_arm import crop_one, tools_common
+    from benchmarks._shared.harness.shape_arm import crop_one, tools_common
     from shape.engine import usage
     from shape.tools.single_cell_cropper.tool import Single_Cell_Cropper_Tool
 
@@ -1177,7 +1174,7 @@ def _crop_reroute_empty(prep: Path, run: Path, config: dict, defaults: dict, eng
     cohort's upstream preflight grouping cannot see ahead of time. `pending`: [(row, mask)]. Returns
     {image_id: (kept, excluded, record)}; if the full search ALSO retains nothing, kept is empty (a genuinely
     cell-less image), left for the caller's aggregate check to surface."""
-    from benchmarks.full_HCMA.harness.shape_arm import crop_one, tools_common
+    from benchmarks._shared.harness.shape_arm import crop_one, tools_common
     from shape.tools.single_cell_cropper.tool import Single_Cell_Cropper_Tool
 
     C = tools_common()
@@ -1218,7 +1215,7 @@ def _cropping_cohort(prep: Path, run: Path, config: dict, images: list[dict], en
     at its params in spawned workers (the cropper is CPU-bound). Records each image's SEARCH/COHORT record and the
     shared cohort record (COHORT_RECORD.json), like the segmentation cohort."""
     from types import SimpleNamespace
-    from benchmarks.full_HCMA.harness.shape_arm import crop_one, tools_common
+    from benchmarks._shared.harness.shape_arm import crop_one, tools_common
     from shape.agent.verification import segmentation_cohort
     from shape.tools.single_cell_cropper.tool import Single_Cell_Cropper_Tool
     from shape.engine import usage
@@ -1405,7 +1402,7 @@ def codex_calls(stage: str, prep: Path, run: Path, config: dict, images: list[di
     params)`. Calls run in parallel over the cores: segmentation calls in threads sharing one GPU model under a lock,
     crop calls in worker processes (`_in_processes`; threads=True: tests only). A call the tool fails is recorded as
     failed, not fatal. Writes run/<image>/<call>/{result.json, CALL.json, tool/...}."""
-    from benchmarks.full_HCMA.harness.shape_arm import tools_common
+    from benchmarks._shared.harness.shape_arm import tools_common
 
     rows = {r["image_id"]: r for r in images}
     calls = list(config["calls"])
@@ -1432,7 +1429,7 @@ def codex_calls(stage: str, prep: Path, run: Path, config: dict, images: list[di
 def _codex_call(task, segment=None) -> None:
     """One Codex arm call (`codex_calls`); top-level so a worker process can run a crop call. `segment`: the shared
     (segmenter, its lock, the CARD defaults) of a segmentation call."""
-    from benchmarks.full_HCMA.harness.shape_arm import CROP_GROUP
+    from benchmarks._shared.harness.shape_arm import CROP_GROUP
     from shape.tools.single_cell_cropper.tool import Single_Cell_Cropper_Tool
 
     stage, prep, run, config, row, mask, call = task
@@ -1501,7 +1498,7 @@ def compile_cell_rules(image, mask: dict, ident: str, params: dict, rules: list,
     crop metadata (`CropAgenticVerifier.quantify`, as SHAPE reads a parent call); the rules apply in order on top of
     the call's own cell_overrides. Returns (the compiled cell_overrides, the rules as compiled with the cells each
     matched). Raises ValueError (a rule that matches no cell, auto_tighten outside mask_bbox, an unreadable parent)."""
-    from benchmarks.full_HCMA.harness.shape_arm import CROP_GROUP
+    from benchmarks._shared.harness.shape_arm import CROP_GROUP
     from shape.agent.verification.base import INPUT
     from shape.agent.verification.verifiers.crop import CropAgenticVerifier, CropTask, input_record
 
@@ -1566,7 +1563,7 @@ def representation(prep: Path, run: Path, config: dict, images: list[dict]) -> N
     from shape.agent.verification.step_verifier import StepVerifier
     from shape.agent.verification.verifiers.representation import RepresentationAgenticVerifier, RepresentationTask, frozen_params
     from shape.tools.cell_state_analyzer.tool import Cell_State_Analyzer_Tool
-    from benchmarks.full_HCMA.harness.shape_arm import _log_to
+    from benchmarks._shared.harness.shape_arm import _log_to
     from benchmarks.representation_RxRx1.runners.epoch_budget import FixedEpochVerifier
 
     # The embed stage (DINOv3 inference + SSL training) uses the GPU when CUDA is available and
@@ -1743,7 +1740,7 @@ def batch_correction(prep: Path, run: Path, config: dict, images: list[dict]) ->
         BatchCorrectionVerifier, BatchTask, adapt_batch_correction, uncorrected_result, admission_evidence, admission_rule,
         blas_limits)
     from shape.tools.batch_corrector.tool import Batch_Corrector_Tool, DEFAULT_CONFIG
-    from benchmarks.full_HCMA.harness.shape_arm import _log_to
+    from benchmarks._shared.harness.shape_arm import _log_to
 
     spec = dataset(config)
     engine = engine_for(config, "batch")

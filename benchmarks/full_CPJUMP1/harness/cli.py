@@ -68,7 +68,7 @@ def code_identity(expected: str, branch: str = DEFAULT_BRANCH) -> dict:
 
 
 def asset_environment(root: Path) -> dict:
-    from benchmarks.full_HCMA.harness.assets import DINOV3_COMMIT, WEIGHTS_SHA256, tree_digest, tool_env, check_hf_offline
+    from benchmarks._shared.harness.assets import DINOV3_COMMIT, WEIGHTS_SHA256, tree_digest, tool_env, check_hf_offline
     record = read_json(root / "assets" / "ASSETS.json")
     hub = record["dinov3_hub"]
     if hub["commit"] != DINOV3_COMMIT or tree_digest(Path(hub["path"]))[0] != hub["tree_sha256"]:
@@ -83,8 +83,8 @@ def asset_environment(root: Path) -> dict:
         raise ValueError("pinned DINOv3 source path does not match benchmark environment")
     # Do not allow a preexisting alternate cache to bypass the pinned assets. A remote SAM
     # service ($SHAPE_SAM_SERVER_URL) is NOT a bypass: it runs the SAME pinned cpsam weights on
-    # a GPU node so a CPU orchestration node can delegate segmentation (the cell_state_HCMA
-    # pattern). It is therefore kept when set; the DINOv3 inference server url is still dropped
+    # a GPU node so a CPU orchestration node can delegate segmentation. It
+    # is therefore kept when set; the DINOv3 inference server url is still dropped
     # because the embed stage trains and must use the local pinned backbone, not a remote one.
     for key in ("HF_HUB_CACHE", "HUGGINGFACE_HUB_CACHE", "SHAPE_DINO_SERVER_URL"):
         os.environ.pop(key, None)
@@ -113,7 +113,7 @@ def preflight(args) -> dict:
     result = {**identity, "assets": assets, "gpu": torch.cuda.get_device_name(),
               "gpu_memory_bytes": torch.cuda.get_device_properties(0).total_memory, "search_strategies": strategies}
     if args.arm == "shape":
-        from benchmarks.full_HCMA.harness.shape_arm import build_engine
+        from benchmarks._shared.harness.shape_arm import build_engine
         from shape.engine import usage
         from shape.engine.factory import provider_of
         # The reasoner's provider follows the model id and the environment: gpt-* -> the OpenAI-compatible
@@ -299,7 +299,7 @@ def run(args, spec=CPJUMP1, smoke=None, extra=None) -> None:
         deliver(args, spec, record, provenance, "SMOKE_COMPLETE" if args.smoke else spec.marker)
     except BaseException as error:
         if args.arm in AGENT_ARMS and os.name == "posix":
-            from benchmarks.full_HCMA.harness.agents import kill_run_processes
+            from benchmarks._shared.harness.agents import kill_run_processes
             for root in [args.out / f"{args.arm}_preflight", *[args.out / "agent" / s for s in STAGES[:-1]]]:
                 kill_run_processes(root, grace=2)
         record.update(status="failed", error=f"{type(error).__name__}: {error}")
@@ -517,7 +517,7 @@ def main(argv=None) -> None:
     if args.command == "prepare":
         prepare(args.data, args.out, merged_dir=args.merged_dir)
     elif args.command == "assets":
-        from benchmarks.full_HCMA.harness.assets import build
+        from benchmarks._shared.harness.assets import build
         if args.prep is not None:
             rows = load_prepared(args.prep, verify_pixels=True)
             record = read_json(args.prep / "PREPARE.json")

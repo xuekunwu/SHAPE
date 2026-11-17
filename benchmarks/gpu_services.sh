@@ -1,7 +1,7 @@
 #!/bin/bash
 # One-shot GPU model services for the SHAPE benchmarks: start / stop / status the shared
 # Cellpose-SAM and DINOv3 HTTP services on a GPU node, bound for remote access so CPU
-# orchestration nodes on the same network can delegate to them (the cell_state_HCMA /
+# orchestration nodes on the same network can delegate to them (the
 # full_CPJUMP1 segment pattern). Run this ON THE GPU NODE, from a real shell (background CUDA
 # is SIGKILLed inside a sandbox).
 #

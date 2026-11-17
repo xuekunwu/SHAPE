@@ -28,7 +28,7 @@ def prepare(export_root, codex_trajectory, output):
     costs = [r for r in table("multilayer_evaluation/COSTS.csv") if r["arm"] in ARMS]
     write_csv(evidence / "stage_costs.csv", costs)
     process = load("multilayer_evaluation/PROCESS.json")
-    # This is an adapted mapping, not a native full_HCMA process score.
+    # This is an adapted mapping, not a native harness process score.
     write(evidence / "agentic_mapping.json", process)
     dapi = load("analysis_all_cells_umap_v2/DAPI_CROP.json")
     write(evidence / "dapi_crop_summary.json", {k: v for k, v in dapi.items() if k != "per_image"})

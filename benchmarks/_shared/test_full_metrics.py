@@ -164,7 +164,7 @@ def test_scores_with_misses_is_sklearn_over_the_class_labels():
 def test_cap_cells_is_deterministic_per_unit_and_matches_the_hcma_sample():
     import pandas as pd
 
-    from benchmarks.full_HCMA.harness.score import sample_cells
+    from benchmarks._shared.harness.score import sample_cells
 
     rng = np.random.default_rng(7)
     unit = rng.integers(0, 5, 900)

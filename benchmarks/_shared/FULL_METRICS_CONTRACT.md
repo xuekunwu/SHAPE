@@ -1,6 +1,6 @@
 # Full benchmark metric contract (user decision 2026-10-11)
 
-Applies to every end-to-end `full_*` benchmark (full_HCMA, full_CPJUMP1, later ones). Scoring runs after delivery;
+Applies to every end-to-end `full_*` benchmark (today full_CPJUMP1). Scoring runs after delivery;
 labels are read only by the scorer. One shared implementation: `benchmarks/_shared/full_metrics.py`. The
 representation_RxRx1 SSL benchmark keeps its own reading. Its probe core (`scores`, `chance`, `knn_predict`,
 `logreg_predict`) moves into the shared module unchanged, and `representation_RxRx1/runners/secondary.py` imports it,
@@ -15,13 +15,11 @@ so the probe is the same code everywhere.
 | balanced accuracy | the probe's mean per-class recall over the classes with a true sample (sklearn) |
 
 Probe settings:
-- train on the split's train side and test on its test side, then swap the sides and average (full_CPJUMP1,
-  full_HCMA; exception: full_LIVECell's main split is one fold, heldout_fit -> heldout_test, single-shot, never
-  swapped; a split's folds may hold several parts whose test predictions are pooled into the fold's confusion
-  matrix);
+- train on the split's train side and test on its test side, then swap the sides and average; a split's folds
+  may hold several parts whose test predictions are pooled into the fold's confusion matrix;
 - classifiers: kNN (cosine, k = 10, majority vote, the representation_RxRx1 tie rules) and logistic regression
   (StandardScaler, lbfgs, max_iter 2000, class_weight balanced, random_state 0);
-- units: cells and unit profiles; the cell-level probes use at most 100 cells per unit (the HCMA cap), sampled
+- units: cells and unit profiles; the cell-level probes use at most 100 cells per unit (the harness cap), sampled
   deterministically from that arm's own delivered and agent-excluded cells (per unit: its cells sorted by cell id,
   permuted by `numpy.random.default_rng(0)`, the first 100; fewer cells: all of them); a sampled excluded cell
   (CPJUMP1 `excluded_cells.json`, HCMA the chain's excluded cells) is a test cell without a prediction, a miss, as
@@ -38,8 +36,6 @@ Splits and guards:
 | benchmark | label (scorer only) | unit | main split | guard split |
 |---|---|---|---|---|
 | full_CPJUMP1 | gene (110 evaluation genes; development genes excluded) | well | cross-plate (train plate A, test plate B, and the reverse) | cross-plate AND cross-guide (the test well's guide never seen for that gene in training) |
-| full_HCMA | morph class (7) | image (micrograph) | cross-micrograph (grouped folds by `parent_id`) | cross-source (grouped by `source`) |
-| full_LIVECell | cell type (8) | unit (type, well, time point) | cross-time, one fold, single-shot: fit on heldout_fit (stages 2-3), test on heldout_test (stages 4-5), never the reverse | cross-time AND cross-well: one fold, one part per well index k (test = heldout_test units of well index k, train = heldout_fit units of the other well indices), the parts' test predictions pooled |
 
 full_CPJUMP1 unit profiles: batch correction runs on well profiles only, so the mAP verdict and the unit-level
 probes use the delivered corrected well profile (batch correction is part of what is evaluated) and the

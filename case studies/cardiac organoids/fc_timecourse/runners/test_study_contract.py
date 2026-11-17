@@ -433,7 +433,7 @@ def test_organoid_segmentation_cohort_regime(tmp_path, monkeypatch):
     from dataclasses import replace
     from types import SimpleNamespace
     import threading
-    import benchmarks.full_HCMA.harness.shape_arm as hcma
+    import benchmarks._shared.harness.shape_arm as hcma
     from benchmarks.full_CPJUMP1.harness import pipeline
     from shape.agent.verification import segmentation_cohort
 

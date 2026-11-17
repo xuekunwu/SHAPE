@@ -55,7 +55,7 @@ def main(argv: list[str] | None = None) -> int:
     cfg = C.load_config()
     if cfg["repo"] not in sys.path:
         sys.path.insert(0, cfg["repo"])
-    cov = importlib.import_module("benchmarks.full_HCMA.harness.coverage")
+    cov = importlib.import_module("benchmarks._shared.harness.coverage")
 
     run = Path(cfg["run"])
     print(cov.describe(cov.final_check(run)) if args.chain else lever_coverage(cov, run))

@@ -21,7 +21,7 @@ is in the run prep), unused = the FULL train-well cells outside the run prep, he
 The tool sees the run prep only (`tool_input`: train + val). Each part is written into "<dir>.partial" and renamed
 when complete; an existing prep is never overwritten.
 
-`build_assets` stages the pinned DINOv3 code and weights for offline loading (full_HCMA's helpers); `check_assets`
+`build_assets` stages the pinned DINOv3 code and weights for offline loading (the shared harness's helpers); `check_assets`
 returns the tool environment that points the analyzer at them.
 """
 from __future__ import annotations
@@ -235,10 +235,10 @@ def tool_input(summary: dict, cells, splits=TOOL_SPLITS, keys=TOOL_KEYS) -> tupl
 
 def build_assets(output_root: Path, *, dinov3_repo: Path, weights: Path) -> Path:
     """<output_root>/assets: the pinned DINOv3 checkout as torch.hub's cache of facebookresearch/dinov3 and the pinned
-    weights in the Hugging Face cache layout (full_HCMA's helpers, without its Cellpose weights), ASSETS.json with
+    weights in the Hugging Face cache layout (the shared harness's helpers, without its Cellpose weights), ASSETS.json with
     every path and sha256. Refuses to overwrite; returns ASSETS.json. Every filesystem step retries a transient
     failure (`fs_retry`); ASSETS.json is written before the rename, so assets/ never exists without it."""
-    from benchmarks.full_HCMA.harness import assets
+    from benchmarks._shared.harness import assets
 
     root = Path(output_root).absolute()
     final = root / "assets"
@@ -268,7 +268,7 @@ def build_assets(output_root: Path, *, dinov3_repo: Path, weights: Path) -> Path
 def check_assets(output_root: Path) -> dict[str, str]:
     """The tool environment (TORCH_HOME, HF_HOME, HF_HUB_OFFLINE=1, ...) of the pinned assets, after checking that the
     copies the analyzer loads still match ASSETS.json. Set it before the analyzer is imported."""
-    from benchmarks.full_HCMA.harness import assets
+    from benchmarks._shared.harness import assets
 
     path = Path(output_root) / "assets" / "ASSETS.json"
     if not path.exists():

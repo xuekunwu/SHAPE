@@ -18,8 +18,8 @@ MATCH_FIELDS = ("seed", "cores", "budget_hours", "train_cells_per_site", "infere
 # the other benchmarks) does not change what a run delivers or how it is scored.
 SHARED = ("shape", "benchmarks/_shared/full_metrics.py", "benchmarks/full_CPJUMP1/harness/pipeline.py",
           "benchmarks/full_CPJUMP1/harness/score.py", "benchmarks/full_CPJUMP1/harness/data.py",
-          "benchmarks/full_CPJUMP1/harness/merged.py", "benchmarks/full_HCMA/harness",
-          "benchmarks/full_HCMA/workspace_template", "benchmarks/representation_RxRx1/runners/epoch_budget.py",
+          "benchmarks/full_CPJUMP1/harness/merged.py", "benchmarks/_shared/harness",
+          "benchmarks/_shared/workspace_template", "benchmarks/representation_RxRx1/runners/epoch_budget.py",
           "benchmarks/full_CPJUMP1/harness/claude_arm.py")     # the native workers' registry, inputs and outputs
 # the agent-arm protocol and the run driver: their diffs are reported, not refused (QC 2026-10-12)
 PROTOCOL = ("benchmarks/full_CPJUMP1/harness/codex_arm.py", "benchmarks/full_CPJUMP1/harness/cli.py",

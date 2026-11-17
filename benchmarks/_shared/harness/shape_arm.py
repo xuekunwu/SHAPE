@@ -383,7 +383,7 @@ def segment_resolution(C, tool, item: dict, levers: list[str], defaults: dict, e
 
 def segment_search(job: dict, *, engine=None) -> dict:
     """The per-image segmentation searches of one run (in the child process `python -m
-    benchmarks.full_HCMA.harness.shape_arm segment-search JOB.json`, which holds the GPU; tests call it directly).
+    benchmarks._shared.harness.shape_arm segment-search JOB.json`, which holds the GPU; tests call it directly).
     `job`: {"config": the workspace's tools/_config.json, "items": [{image_id, path, request, s001_record, s001_mask,
     s001_overlay, s001_error}], "levers", "defaults" (S001's params), "stop_at" (epoch: no new search after it),
     "model", "scratch", "log_dir", "workers" (images at a time, one segmenter instance)}. Returns {"images":
@@ -450,7 +450,7 @@ def _run_child_search(job_path: Path, out_path: Path, repo: Path, log: Path) -> 
     env.pop("SHAPE_SAM_SERVER_URL", None)          # the segmenter in process, as in the segment CLI (agents._SCRUB)
     env["PYTHONPATH"] = os.pathsep.join(p for p in (str(repo), os.environ.get("PYTHONPATH", "")) if p)
     with open(log, "w", encoding="utf-8") as handle:
-        code = subprocess.run([sys.executable, "-m", "benchmarks.full_HCMA.harness.shape_arm", "segment-search",
+        code = subprocess.run([sys.executable, "-m", "benchmarks._shared.harness.shape_arm", "segment-search",
                                str(job_path), str(out_path)], cwd=repo, env=env, stdout=handle,
                               stderr=subprocess.STDOUT).returncode
     if code != 0 or not out_path.exists():
@@ -1043,10 +1043,10 @@ def run_shape(root: Path, repo: Path, out: Path, *, model: str | None, budget_ho
 
 
 def main(argv: list[str] | None = None) -> None:
-    """`python -m benchmarks.full_HCMA.harness.shape_arm segment-search JOB.json OUT.json` (the segmentation child)."""
+    """`python -m benchmarks._shared.harness.shape_arm segment-search JOB.json OUT.json` (the segmentation child)."""
     argv = list(sys.argv[1:] if argv is None else argv)
     if len(argv) != 3 or argv[0] != "segment-search":
-        raise SystemExit("usage: python -m benchmarks.full_HCMA.harness.shape_arm segment-search JOB.json OUT.json")
+        raise SystemExit("usage: python -m benchmarks._shared.harness.shape_arm segment-search JOB.json OUT.json")
     job = json.loads(Path(argv[1]).read_text(encoding="utf-8"))
     _write(Path(argv[2]), segment_search(job))
 

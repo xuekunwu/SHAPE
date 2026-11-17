@@ -21,7 +21,7 @@ if str(REPO) not in sys.path:
 
 cohort = importlib.import_module('case studies.cardiac organoids.runners.cohort.organoid_cohort')
 from benchmarks.full_CPJUMP1.harness import pipeline  # noqa: E402
-from benchmarks.full_HCMA.harness import shape_arm  # noqa: E402
+from benchmarks._shared.harness import shape_arm  # noqa: E402
 from shape.agent.verification import segmentation_cohort  # noqa: E402
 
 SMALL = (24, 32)

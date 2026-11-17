@@ -7,7 +7,7 @@ metadata level (`full` | `none`, workspace.blank_metadata); the comparison uses 
 same prep, metadata level and GPU model.
 
 Labels at two levels: the coarse `morph_class` (primary; the versioned mapping
-benchmarks/full_HCMA/morph_classes.csv, cell_state -> morph_class, its sha256 recorded; a missing
+benchmarks/_shared/harness/morph_classes.csv, cell_state -> morph_class, its sha256 recorded; a missing
 file, a cell_state of the prep without a row or an empty morph_class -> status NO_CLASS_MAP, nothing
 scored) and the fine `cell_state`. The reserved morph_class `unscored` (cell_states of mixed lineage)
 leaves its images out of the coarse level entirely (neither voters nor scored cells, not a class);
@@ -149,7 +149,7 @@ TYPE_BOOT_RULE = (f"paired cluster bootstrap over the fine cell_state types ({N_
                   "in the resample); SE = sd, CI = the 2.5 / 97.5 percentiles; reported next to the class "
                   "bootstrap, which keeps the verdict")
 FIGURE = "umap_scored.png"
-CLASS_MAP = Path(__file__).resolve().parents[1] / "morph_classes.csv"     # versioned; written by the master
+CLASS_MAP = Path(__file__).resolve().parent / "morph_classes.csv"     # versioned; written by the master
 NO_CLASS_MAP = "NO_CLASS_MAP"
 UNSCORED = "unscored"     # reserved morph_class: left out of the coarse level, kept in the fine level
 UNSCORABLE = "unscorable"     # a label with fewer than 2 parent micrographs among the expected images
@@ -160,7 +160,7 @@ VOTE = "dino_weighted"
 VOTE_RULE = (f"DINO's weighted kNN vote (Caron et al. 2021, eval_knn.py): each of the k neighbours votes for its "
              f"label with weight exp(cosine similarity / {KNN_TEMPERATURE}), the weights summed per label")
 NAME_NEEDLES = ("Human_Cell_Morphology_Atlas", "HCMA_metadata", "cell_state_HCMA", "hcma_labels",
-                "full_HCMA/harness", "full_HCMA.harness", "shape.agent", "shape/agent",
+                "_shared/harness", "_shared.harness", "shape.agent", "shape/agent",
                 "labels.csv", "scorable.csv", "folds.csv", "PREPARE_PRIVATE", "SUBSET_", "orig_image_id", "private/",
                 "FULL_HCMA_TOOL_STUBS", "allow_tool_stubs", "key_helper", ".claude-full-hcma", "api.sh",
                 ".deadline", "TOOLS_SHA256", "DATA_SHA256", "readlink", "realpath", "morph_classes")
