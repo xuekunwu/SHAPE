@@ -14,7 +14,7 @@ from benchmarks.full_CPJUMP1.harness.data import digest
 REPO = Path(__file__).resolve().parents[4]
 ROOTS = ("shape", "benchmarks", "case studies/_shared", "case studies/cardiomyocytes",
          "case studies/cardiac organoids/fc_timecourse", "case studies/cardiac organoids/runners/cohort",
-         "case studies/cardiac organoids/runners/define_candidates_96well", "environments/benchmark")
+         "case studies/cardiac organoids/runners/define_candidates_96well")
 SUFFIXES = {".py", ".md", ".json", ".toml", ".lock", ".txt", ".yaml", ".yml", ".sh", ".csv"}
 SKIP = {"results", "__pycache__", ".git"}
 

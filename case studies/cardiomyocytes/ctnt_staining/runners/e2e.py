@@ -47,8 +47,8 @@ def preflight(args):
             from benchmarks.full_CPJUMP1.harness.codex_arm import backend
             model_preflight.update(backend('codex').preflight(args.out.parent/'codex_preflight',args.model))
     from shape.utils.runtime_environment import capture
-    # $SHAPE_BENCHMARK_LOCK: another pinned runtime under environments/benchmark (the H200 VM: linux-py312-cu130-h200)
-    environment=capture(data.REPO/os.environ.get('SHAPE_BENCHMARK_LOCK','environments/benchmark/linux-py312-cu128/requirements.lock.txt'))
+    lock=os.environ.get('SHAPE_BENCHMARK_LOCK')   # optional: an exact package lock the installed set is checked against
+    environment=capture(data.REPO/lock if lock else None)
     data.write_json(args.out.parent/'ENVIRONMENT.json',environment)
     return dict(status='complete',source_sha256=args.expected_source,arm=args.arm,model=args.model,
         gpu=torch.cuda.get_device_name(),assets=assets,reasoning_effort='high',

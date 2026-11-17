@@ -50,9 +50,9 @@ def environment_record(out: Path) -> None:
     environment (the shared cluster env carries two dist-info records of one package), record every installed
     distribution as found, with the refusal, instead of stopping the run."""
     from shape.utils.runtime_environment import capture
-    lock = data.REPO / 'environments/benchmark/linux-py312-cu128/requirements.lock.txt'
+    lock = os.environ.get('SHAPE_BENCHMARK_LOCK')    # optional: an exact package lock to check against
     try:
-        record = capture(lock if lock.is_file() else None)
+        record = capture(data.REPO / lock if lock else None)
     except RuntimeError as refusal:
         import platform
         from importlib import metadata

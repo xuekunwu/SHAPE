@@ -13,7 +13,7 @@ from .artifacts import REPO
 from .artifacts import digest
 from .artifacts import fresh_output
 
-ROOTS = ("shape", "benchmarks", "case studies/_shared", "case studies/cardiomyocytes", "environments/benchmark")
+ROOTS = ("shape", "benchmarks", "case studies/_shared", "case studies/cardiomyocytes")
 SUFFIXES = {".py", ".md", ".json", ".toml", ".lock", ".txt", ".yaml", ".yml", ".sh", ".csv"}
 
 
