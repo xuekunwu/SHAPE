@@ -13,9 +13,7 @@ dataset, the GPU it needs and the commands that run every arm.
 | `batch_correction_JUMP/` | `Batch_Corrector_Tool` (Harmony) | JUMP (Arevalo protocol, scenarios 1-5) | `run_batch_benchmark.py` (`prepare` / `control` / `suite` / `report`); the arms in `runners/` (the SHAPE arm is `runners/shape_arm.py`); vendored upstream preprocessing and its provenance in its `README.md` |
 | `representation_RxRx1/` | `Cell_State_Analyzer_Tool` (SSL fine-tune of DINOv3) | RxRx1 (HEPG2 by default) | `run_rxrx1.py` (`prepare` / `assets` / `control` / `external` / `shape` / `llm` / `react` / `score` / `finish`; the SHAPE arm is `runners/shape_arm.py`, scored by well mAP in `runners/score.py`) |
 | `full_CPJUMP1/` | the whole chain: segment -> crop -> embed -> batch-correct -> cluster | CPJUMP1 (A549 Cas9 CRISPR) and ModalityProbe3 | `harness/cli.py`; `runners/run_all.sh` picks the dataset, the phase and the arms (control, SHAPE, Codex, Claude Code, Biomni) |
-| `full_HCMA/` | -- | -- | not a benchmark in this release: the shared harness (`harness/`, `workspace_template/`) that `full_CPJUMP1` and `representation_RxRx1` import |
-| `baselines/` | -- | NeurIPS22-CellSeg | `run_baseline.py`: external coding agents (Claude Code, Codex) on the segmentation and cropper tasks, head to head against SHAPE |
-| `_shared/` | -- | -- | `segmentation_metrics.py`, `full_metrics.py` (the metric contract of the `full_*` benchmarks), the shared ReAct runner, `live_agent_check.py` |
+| `_shared/` | -- | -- | code more than one benchmark imports: `segmentation_metrics.py` (segmentation and cropper), `full_metrics.py` with `FULL_METRICS_CONTRACT.md` (the scorer of `full_CPJUMP1`), `react_arm.py` with `REACT_ARM_CONTRACT.md` (the ReAct arm of the segmentation, cropper, batch-correction and RxRx1 benchmarks), `runner.py` (the RxRx1 SHAPE arm), `harness/` (the segment, crop, embed, batch-correct and cluster workers, pinned model assets and agent-arm drivers of `full_CPJUMP1`, also used by `representation_RxRx1` and the case studies) and `workspace_template/` (the tool CLIs an external coding-agent arm is given) |
 | `gpu_services.sh` | -- | -- | start / stop / status the shared Cellpose-SAM and DINOv3 services on a GPU node, and print the URLs to export |
 | `benchmark tasks.xlsx` | -- | -- | the task table: datasets, the arms and the readouts each task is scored on |
 
@@ -32,7 +30,7 @@ hf download SHAPE-agent/benchmark-data --repo-type dataset --include "NeurIPS22-
 
 | Folder | Size | Used by |
 |---|---|---|
-| `NeurIPS22-CellSeg/` | 3.4 GB | `segmentation_NeurIPS22-CellSeg`, `cropper_NeurIPS22-CellSeg`, `baselines` |
+| `NeurIPS22-CellSeg/` | 3.4 GB | `segmentation_NeurIPS22-CellSeg`, `cropper_NeurIPS22-CellSeg` |
 | `CPJUMP1/` | 12.8 GB | `full_CPJUMP1` (CPJUMP1) |
 | `JUMP/` | 15.4 GB | `batch_correction_JUMP` |
 

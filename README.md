@@ -82,9 +82,10 @@ print(result["direct_output"])
 ## Benchmarks
 
 Evaluation harnesses live in [`benchmarks/`](benchmarks/README.md), one directory per tool
-and dataset. All of them run the **concurrent** harness (many CPU worker processes) and
-delegate GPU work to **shared, separately deployed model services**, which is the
-recommended setup for scale.
+and dataset. The segmentation benchmark and the segment and crop stages of the end-to-end
+benchmark call a **shared, separately deployed Cellpose-SAM service**; the embed stage and the
+RxRx1 representation benchmark need a local GPU; the cropper and batch-correction benchmarks
+run on CPU.
 
 ### Shared GPU model services
 
@@ -141,8 +142,7 @@ Each benchmark's README gives its dataset, the GPU it needs and the commands for
 | [Cropper](benchmarks/cropper_NeurIPS22-CellSeg/README.md): MaskCrop, CellProfiler, an LLM alone, ReAct and SHAPE on the ground-truth masks | `benchmarks/cropper_NeurIPS22-CellSeg/run_benchmark.py` |
 | [Batch correction (JUMP)](benchmarks/batch_correction_JUMP/README.md): Harmony tuned by the budgeted VRR, scored with the Arevalo metrics (CPU only) | `benchmarks/batch_correction_JUMP/run_batch_benchmark.py` |
 | [Representation (RxRx1)](benchmarks/representation_RxRx1/README.md): the self-supervised DINOv3 fine-tune tuned call by call | `benchmarks/representation_RxRx1/run_rxrx1.py` |
-| [End to end (CPJUMP1, ModalityProbe3)](benchmarks/full_CPJUMP1/README.md): the whole chain against a default-parameter control and external coding agents | `benchmarks/full_CPJUMP1/runners/run_all.sh` |
-| [Baselines](benchmarks/baselines/README.md): Claude Code and Codex on the segmentation and cropper tasks | `python -m benchmarks.baselines.run_baseline` |
+| [End to end (CPJUMP1, ModalityProbe3)](benchmarks/full_CPJUMP1/README.md): the whole chain against a default-parameter control and external coding agents (Codex, Claude Code, Biomni) | `benchmarks/full_CPJUMP1/runners/run_all.sh` |
 
 ## Case studies
 
@@ -171,4 +171,6 @@ them; run the suite on a machine that has what the part under test uses.
 
 SHAPE is released under the [CC BY 4.0 license](LICENSE). Redistributed third-party source
 sits under `benchmarks/batch_correction_JUMP/runners/vendor/` with its own licence and its
-provenance in that benchmark's README.
+provenance in that benchmark's README. The benchmark datasets on Hugging Face keep their
+upstream licences, listed on the
+[dataset card](https://huggingface.co/datasets/SHAPE-agent/benchmark-data).
