@@ -13,7 +13,7 @@ set -eo pipefail
 cd "$(cd "$(dirname "$0")/../../.." && pwd)"
 export PYTHONPATH="$PWD:${PYTHONPATH:-}"; export PYTHONNOUSERSITE=1
 ENVROOT="${SEG_ENVROOT:-$HOME/shape/cache/envs}"; mkdir -p "$ENVROOT"
-SP="$HOME/shape/cache/envs/seg_stardist"; CP3="$HOME/shape/cache/envs/seg_cellpose3"; MS="$HOME/shape/cache/envs/seg_microsam"
+SP="$ENVROOT/seg_stardist"; CP3="$ENVROOT/seg_cellpose3"; MS="$ENVROOT/seg_microsam"   # where run_all_arms.sh looks
 SCORE="numpy scipy scikit-image tifffile pillow"
 CLI=benchmarks/segmentation_NeurIPS22-CellSeg/run_cellseg_benchmark.py
 RUN=benchmarks/segmentation_NeurIPS22-CellSeg/results/seg3arm_luna
