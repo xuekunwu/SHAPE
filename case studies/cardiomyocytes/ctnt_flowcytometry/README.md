@@ -10,14 +10,14 @@ train / validation / held-out wells, seed 20261015.
 ## Dataset
 
 [SHAPE-agent/iPSC-CM-cTnT_flowcytometry](https://huggingface.co/datasets/SHAPE-agent/iPSC-CM-cTnT_flowcytometry):
-an image archive and the standalone metadata CSV that `harness/dataset.json` pins. From the repository root:
+an image archive and the standalone metadata CSV that `dataset.json` pins. From the repository root:
 
 ```
 hf download SHAPE-agent/iPSC-CM-cTnT_flowcytometry --repo-type dataset \
     --revision b4717abe28ecf9e2b82b02028bd9f2ed369b3243 --local-dir data/iPSC-CM-cTnT_flowcytometry
-python "case studies/cardiomyocytes/ctnt_flowcytometry/runners/run.py" materialize \
+python "case studies/cardiomyocytes/ctnt_flowcytometry/run.py" materialize \
     data/iPSC-CM-cTnT_flowcytometry data/ctnt_flowcytometry_raw          # the 600 pinned TIFFs, size and hash checked
-python "case studies/cardiomyocytes/ctnt_flowcytometry/runners/run.py" prepare \
+python "case studies/cardiomyocytes/ctnt_flowcytometry/run.py" prepare \
     --data-root data/ctnt_flowcytometry_raw --out PREP                    # pixel check and the fixed well split
 ```
 
@@ -26,8 +26,8 @@ python "case studies/cardiomyocytes/ctnt_flowcytometry/runners/run.py" prepare \
 ## Running the arms
 
 ```
-python "case studies/cardiomyocytes/ctnt_flowcytometry/runners/run.py" pack --out SNAPSHOT.tar.gz   # --expected-source is the source_sha256 it prints, not archive_sha256
-python "case studies/cardiomyocytes/ctnt_flowcytometry/runners/run.py" run --prep PREP \
+python "case studies/cardiomyocytes/ctnt_flowcytometry/run.py" pack --out SNAPSHOT.tar.gz   # --expected-source is the source_sha256 it prints, not archive_sha256
+python "case studies/cardiomyocytes/ctnt_flowcytometry/run.py" run --prep PREP \
     --arm control|shape|codex|claude|biomni --assets-root ASSETS --expected-source SHA256 --out RUN
 ```
 

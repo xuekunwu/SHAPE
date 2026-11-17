@@ -256,7 +256,7 @@ Resource limits never certify segmentation quality. `quality_certified=false`,
 `negative_confirmed` and `accepted_with_flags` retain their separate meanings.
 
 For a hard wall deadline and process fault isolation, use the bounded cohort
-runner in case studies/cardiac organoids/runners/segmentation. It keeps one GPU
+runner in case studies/cardiac organoids/segmentation. It keeps one GPU
 model process, fixed shards, per-pass journal and per-image predictions, and
 explicit resume validation. The ordinary in-process solve path only checks soft
 limits between operations; it cannot interrupt a native CUDA call already running.

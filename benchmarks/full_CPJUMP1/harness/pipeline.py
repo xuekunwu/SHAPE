@@ -242,11 +242,11 @@ def dataset(config: dict) -> Dataset:
     if name == "CPJUMP1":
         return CPJUMP1
     if name == "co_fc_timecourse":
-        return importlib.import_module("case studies.cardiac organoids.fc_timecourse.runners.spec").for_config(config)
+        return importlib.import_module("case studies.cardiac organoids.timecourse.spec").for_config(config)
     if name == "ctnt_flowcytometry":
-        return importlib.import_module("case studies.cardiomyocytes.ctnt_flowcytometry.runners.dataset.contract").for_config(config)
+        return importlib.import_module("case studies.cardiomyocytes.ctnt_flowcytometry.contract").for_config(config)
     if name == "ctnt_staining":
-        return importlib.import_module("case studies.cardiomyocytes.ctnt_staining.runners.spec").for_config(config)
+        return importlib.import_module("case studies.cardiomyocytes.ctnt_staining.spec").for_config(config)
     if name == "ModalityProbe":
         return MODALITY_PROBE
     if name == "ModalityProbe2":
