@@ -42,6 +42,7 @@ Requires **Python 3.10+**.
 git clone <this repository>
 cd SHAPE
 python -m pip install -e .
+python -m pip install -e ".[batch-metrics]"   # for the benchmarks: copairs, scib-metrics, scanorama
 ```
 
 The segmentation tool needs Cellpose-SAM (`cellpose>=4.0`) and a CUDA-capable PyTorch
