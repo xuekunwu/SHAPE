@@ -12,7 +12,8 @@ entry point; its README gives the data and the commands that run every arm.
 | [`cardiac organoids/drug_screen`](cardiac%20organoids/drug_screen/README.md) | segmentation, cropping and two-channel SSL embedding of a 1,141-image drug screen | [SHAPE-agent/CO_drugscreen](https://huggingface.co/datasets/SHAPE-agent/CO_drugscreen) | `full_driver.py` |
 | [`cardiac organoids/segmentation`](cardiac%20organoids/segmentation/README.md) | whole-organoid instance segmentation: SHAPE against non-LLM baselines, an LLM alone and ReAct | private (in-house images and instance masks) | `run_organoid_segmentation.py` |
 | [`tissues/xenium_lineage_annotation`](tissues/xenium_lineage_annotation/README.md) | cross-tissue cell classes of seven Xenium Prime sections | 10x Genomics Xenium Prime FFPE sections | `annotate.py` |
-| [`tissues/xenium_lung_ssl`](tissues/xenium_lung_ssl/README.md), [`xenium_organ_ssl`](tissues/xenium_organ_ssl/README.md) | cell-type and cell-class linear probes of the arms' SSL embeddings | the arms' delivered embeddings | `evaluation/linear_probe*.py` |
+| [`tissues/xenium_lung_ssl`](tissues/xenium_lung_ssl/README.md) | SSL embeddings of single-cell crops of a lung cancer section, scored by a cell-type linear probe | 10x Genomics Xenium Prime FFPE human lung cancer | `e2e.py` |
+| [`tissues/xenium_organ_ssl`](tissues/xenium_organ_ssl/README.md) | cell-class linear probes of the arms' SSL embeddings across organs | the arms' delivered embeddings | `linear_probe_v3.py` |
 
 `_shared/metadata.py` is the Hugging Face metadata admission the two cardiomyocyte studies share
 (`run.py inspect`, `fetch-metadata`, `audit-metadata`). `basic_usage.py` is a minimal `solve()` example on

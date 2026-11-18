@@ -110,7 +110,8 @@ data, one directory per study, each README giving the data and the commands: cTn
 staining (per cell) and flow cytometry (per well); cardiac-organoid segmentation, a
 time course and a drug screen; and cell-class probes of SSL embeddings of Xenium Prime
 tissue sections. The cardiomyocyte and organoid time-course and drug-screen data are public
-on Hugging Face under [SHAPE-agent](https://huggingface.co/SHAPE-agent).
+on Hugging Face under [SHAPE-agent](https://huggingface.co/SHAPE-agent); the Xenium sections are
+10x Genomics public datasets.
 
 ## Development
 
