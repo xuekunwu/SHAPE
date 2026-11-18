@@ -182,7 +182,7 @@ def main(argv=None):
     c=sub.add_parser('pack');c.add_argument('--out',type=Path,required=True)
     for command in ['prepare-pilot','prepare-full']:
         c=sub.add_parser(command);c.add_argument('--raw',type=Path,required=True);c.add_argument('--out',type=Path,required=True)
-        c.add_argument('--frozen-split',type=Path,required=True);c.add_argument('--workers',type=int,default=16)
+        c.add_argument('--frozen-split',type=Path,help='private/splits.json of an earlier preparation, to check against (default: none)');c.add_argument('--workers',type=int,default=16)
     for command in ['run','reference-segment']:
         c=sub.add_parser(command);c.add_argument('--prep',type=Path,required=True);c.add_argument('--out',type=Path,required=True)
         c.add_argument('--assets-root',type=Path,required=True);c.add_argument('--expected-source',required=True)

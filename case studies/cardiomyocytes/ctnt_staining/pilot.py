@@ -14,7 +14,7 @@ from ..ctnt_flowcytometry.plate_ssl_routing import eligible_plates
 
 SPLIT_SEED=20261017
 PILOT_SEED=20261016
-METADATA_SHA='c1b2a9eab66dea54830fb299305ed33665f27abed79b303400a308438ff6d2c2'
+METADATA_SHA=data.SPEC['metadata_sha256']   # the public archive's metadata CSV (dataset.json); the pre-release local backup was c1b2a9ea...
 PROTOCOL='staining-pilot20-fixed-wells-local-backup-v1'
 FULL_PROTOCOL='staining-full-fixed-wells-local-backup-v1'
 
@@ -64,12 +64,13 @@ def prepare(raw,out,frozen_split,workers=16,all_wells=False):
     """The fixed 20% pilot, or with all_wells every well of the same frozen split (same image/well IDs as the pilot)."""
     data.fresh_output(out,raw)
     metadata=raw/'cTnT_composite_metadata.csv'
-    if data.digest(metadata)!=METADATA_SHA:raise ValueError('local-backup metadata changed')
+    if data.digest(metadata)!=METADATA_SHA:raise ValueError('metadata differs from the dataset.json pin')
     with metadata.open(encoding='utf-8-sig',newline='') as stream:original=list(csv.DictReader(stream))
     if len(original)!=2294:raise ValueError('source row count changed')
     full,splits=metadata_rows(original)
-    old=data.read_json(frozen_split)
-    if old['seed']!=SPLIT_SEED or old['wells']!=splits:raise ValueError('full well split differs from completed smoke')
+    if frozen_split is not None:   # optional check against an earlier preparation's private/splits.json
+        old=data.read_json(frozen_split)
+        if old['seed']!=SPLIT_SEED or old['wells']!=splits:raise ValueError('full well split differs from completed smoke')
     if all_wells:
         chosen=full
         if len({r['well'] for r in chosen})!=574:raise ValueError('unexpected full well count')
@@ -117,10 +118,12 @@ def prepare(raw,out,frozen_split,workers=16,all_wells=False):
     public=[result[r['image_id']][0] for r in chosen];private={r['image_id']:result[r['image_id']][1] for r in chosen}
     data.write_json(out/'public/images.json',public);data.write_json(out/'private/images.json',private)
     data.write_json(out/'sampling/FULL_METADATA.json',full)
-    shutil.copy2(frozen_split,out/'private/splits.json')
+    if frozen_split is not None:shutil.copy2(frozen_split,out/'private/splits.json')
+    else:data.write_json(out/'private/splits.json',dict(protocol=data.PROTOCOL,seed=SPLIT_SEED,unit='well',ratios=[.4,.1,.5],   # data.prepare's layout
+        counts=dict(Counter(splits.values())),wells=splits,balance_fields=['acquisition_prefix_from_plate_id','plate_id']))
     wells={r['well']:r for r in public}
     sampled={'seed':SPLIT_SEED} if all_wells else {'seed':SPLIT_SEED,'pilot_seed':PILOT_SEED,'pilot_fraction':.2}
-    record={'status':'complete','dataset':'ctnt_staining','protocol':data.PROTOCOL,'revision':'local-backup-c1b2a9ea',
+    record={'status':'complete','dataset':'ctnt_staining','protocol':data.PROTOCOL,'revision':data.SPEC['revision'],
         'metadata_sha256':METADATA_SHA,'images':len(public),'wells':len(wells),'full_dataset_images':2294,'full_dataset_wells':574,
         **sampled,
         'images_sha256':data.digest(out/'public/images.json'),'private_images_sha256':data.digest(out/'private/images.json'),
