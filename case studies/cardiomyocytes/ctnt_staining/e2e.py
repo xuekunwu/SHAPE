@@ -115,7 +115,7 @@ def run(args):
         reasoning={'protocol':protocol},shape_policy={'crop_vrr_workers':args.cores},
         ssl_epoch_budget=pipeline.ssl_epoch_budget(rows,128),references=str(args.references.resolve()),
         reference_complete_sha256=data.digest(args.references/'REFERENCE_COMPLETE.json'),
-        private_evaluation_root=str(args.out.parent/'private_evaluation'/args.arm),minimum_matching_iou=.5,
+        private_evaluation_root=str(args.out.parent/'private_evaluation'/args.out.name),minimum_matching_iou=.5,
         minimum_reference_coverage=.8,bootstrap_draws=200 if args.smoke else 1000,
         prediction_channels=['Brightfield'],evaluation_channels=['Brightfield','DAPI','TroponinT'],
         segmentation_regime='per-image' if args.smoke else 'cohort',fraction=args.fraction,
