@@ -20,7 +20,8 @@ def test_channel_layout_detection_supports_hw_chw_and_hwc():
 
 def test_channel_layout_detection_fails_closed_when_ambiguous():
     with pytest.raises(ValueError, match="Ambiguous channel layout"):
-        _channel_first(np.zeros((3, 3, 3), dtype=np.uint8))
+        _channel_first(np.zeros((5, 3, 8), dtype=np.uint8))
+    assert _channel_first(np.zeros((3, 3, 3), dtype=np.uint8))[1] == "CHW"   # a square tie is a channel-first crop
 
 
 def test_channel_inference_checks_every_crop(monkeypatch):

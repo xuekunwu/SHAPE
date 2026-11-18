@@ -1553,7 +1553,7 @@ def test_agentic_the_benchmarks_request_states_the_approved_target():
 
     verifier = SegmentationAgenticVerifier()
     verifier.request = (Path(__file__).resolve().parents[4] / "benchmarks" / "segmentation_NeurIPS22-CellSeg"
-                        / "results" / "Prompt.txt").read_text(encoding="utf-8")
+                        / "Prompt.txt").read_text(encoding="utf-8")
     assert verifier.target() == ("Target (from the request)", (
         "Each whole cell is one instance, over its full extent (including faint cytoplasm, not only the nucleus).\n"
         "In a field where a few stained (nucleated, blue / purple) cells lie among many unstained or red cells,\n"

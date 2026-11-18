@@ -2401,7 +2401,7 @@ class Cell_State_Analyzer_Tool(BaseTool):
         # Deduplicate by source_image_id
         metadata_by_image = {}
         metadata_path_by_image = {}   # task 038 C4: locate each image's kept-crops manifest
-        for f in sorted(metadata_files, key=os.path.getmtime):
+        for f in sorted(metadata_files, key=lambda p: (os.path.getmtime(p), p)):   # name breaks mtime ties: a coarse clock gives files written together one mtime
             try:
                 with open(f, 'r') as fp:
                     data = json.load(fp)
