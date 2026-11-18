@@ -49,17 +49,14 @@ def probe_dependencies(name):
 
 
 def gateway_preflight(out_dir):
-    from urllib.parse import urlsplit
     from shape.agent.verification.vision_engine import build_vision_engine, structured_smoke
     from pydantic import BaseModel
     from typing import Literal
 
     if not os.environ.get("LLM_API_KEY"):
         raise RuntimeError("LLM_API_KEY is missing; use the SHAPE gateway configuration")
-    url = urlsplit(os.environ.get("LLM_BASE_URL", ""))
-    if (url.scheme != "https" or url.netloc != "llm-gateway.example.edu"
-            or url.path.rstrip("/") != "/v1" or url.query or url.fragment):
-        raise RuntimeError("This study requires LLM_BASE_URL=https://llm-gateway.example.edu/v1")
+    from benchmarks.full_CPJUMP1.harness.gateway_route import validate
+    route = validate(os.environ.get("LLM_BASE_URL", ""))      # an https gateway (or the verified loopback proxy)
     engine = build_vision_engine(MODEL)
     if engine is None:
         raise RuntimeError("No gateway engine; no model/provider fallback is permitted")
@@ -74,7 +71,7 @@ def gateway_preflight(out_dir):
         raise RuntimeError("Structured multimodal preflight failed")
     dump(Path(out_dir) / "PREFLIGHT.json", {"model": MODEL,
          "reasoning_effort": os.environ.get("SHAPE_REASONING_EFFORT", "high"),
-         "endpoint": "https://llm-gateway.example.edu/v1", "text_and_vision_structured": True})
+         "endpoint": route["base_url"], "text_and_vision_structured": True})
     return engine
 
 

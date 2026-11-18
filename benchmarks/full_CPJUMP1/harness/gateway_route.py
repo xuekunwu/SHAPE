@@ -11,10 +11,13 @@ PLACEHOLDER = "local-proxy-no-upstream-credential"
 
 
 def validate(base_url):
+    """The route of LLM_BASE_URL: an https endpoint with no credentials in the URL is a direct route (the user's own
+    OpenAI-compatible gateway; the record keeps its URL), else only the verified SSH loopback proxy below."""
     base_url = base_url.rstrip("/")
-    if base_url in DIRECT:
-        return {"base_url": base_url, "upstream": base_url, "transport": "direct"}
     url = urllib.parse.urlsplit(base_url)
+    if base_url in DIRECT or (url.scheme == "https" and url.hostname and not (url.username or url.password)
+                              and not url.query and not url.fragment):
+        return {"base_url": base_url, "upstream": base_url, "transport": "direct"}
     if (os.environ.get("SHAPE_LOCAL_GATEWAY_PROXY") != "ssh-loopback-v1" or url.scheme != "http" or
             url.hostname != "127.0.0.1" or not url.port or url.path != "/v1" or
             url.username or url.password or url.query or url.fragment or
