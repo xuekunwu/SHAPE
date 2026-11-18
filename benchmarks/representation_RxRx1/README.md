@@ -17,12 +17,16 @@ under the names `runners/config.py` (`PREPS`) expects in `--data-root`; `prepare
 them and `assets` stages the pinned DINOv3 source and weights:
 
 ```
-python -m benchmarks.representation_RxRx1.runners.build_prep prepare --metadata RXRX1/metadata.csv \
+mkdir -p RXRX1 && cd RXRX1     # RxRx1 as rxrx.ai distributes it (rxrx1-images.zip is 49 GB)
+curl -L -O https://storage.googleapis.com/rxrx/rxrx1/rxrx1-metadata.zip && unzip rxrx1-metadata.zip
+curl -L -O https://storage.googleapis.com/rxrx/rxrx1/rxrx1-images.zip && cd ..
+python -m benchmarks.representation_RxRx1.runners.build_prep prepare --metadata RXRX1/rxrx1/metadata.csv \
     --images RXRX1/rxrx1-images.zip --cell-type HEPG2 --datasets train,test --n-experiments 11 \
     --output PREPS/prep_hepg2_e11_v3
 python -m benchmarks.representation_RxRx1.runners.build_prep subsample --prep PREPS/prep_hepg2_e11_v3 \
     --output PREPS/prep_hepg2_e11_v3_t10 --train-well-fraction 0.1
-python benchmarks/representation_RxRx1/run_rxrx1.py prepare --cell-type HEPG2 --data-root PREPS --output-root DIR
+python benchmarks/representation_RxRx1/run_rxrx1.py prepare --cell-type HEPG2 --data-root PREPS --output-root DIR \
+    --dinov3-repo DINOV3 --weights DINOV3_WEIGHTS      # the two DINOv3 inputs of benchmarks/full_CPJUMP1 `cli assets`
 python benchmarks/representation_RxRx1/run_rxrx1.py assets --output-root DIR   # downloads: run where there is network
 ```
 
