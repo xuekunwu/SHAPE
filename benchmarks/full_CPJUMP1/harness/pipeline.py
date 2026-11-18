@@ -241,6 +241,8 @@ def dataset(config: dict) -> Dataset:
     name = config.get("dataset", "CPJUMP1")
     if name == "CPJUMP1":
         return CPJUMP1
+    if name == "xenium_lung_ssl":
+        return importlib.import_module("case studies.tissues.xenium_lung_ssl.spec").for_config(config)
     if name == "co_fc_timecourse":
         return importlib.import_module("case studies.cardiac organoids.timecourse.spec").for_config(config)
     if name == "ctnt_flowcytometry":

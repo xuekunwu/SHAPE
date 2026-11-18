@@ -487,12 +487,9 @@ _SHAPE_MAIN_TOOLS = [Cell_Segmenter_Tool.__name__]
 
 
 def _default_question() -> str:
-    try:
-        return _PROMPT_FILE.read_text(encoding="utf-8")
-    except OSError:
-        # Defensive fallback if Prompt.txt is ever missing -- keeps the benchmark
-        # runnable (still segmentation-scoped via the planner's counting mapping).
-        return "Segment and count every cell in each image."
+    # The task prompt is a benchmark input: a missing Prompt.txt is an error (FileNotFoundError), as it is for the
+    # gpt arm, never a silent simpler question (which once ran the shape and react arms on the wrong task).
+    return _PROMPT_FILE.read_text(encoding="utf-8")
 
 
 def run_batch(image_dir: Path, label_dir: Path, output_root: Path, *,

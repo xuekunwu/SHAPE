@@ -1,0 +1,40 @@
+{
+  "dataset": "xenium_lung_ssl",
+  "description": "Xenium Prime human lung cancer FFPE section: four-channel morphology crops of every segmented cell",
+  "crop_pattern": "{cell_id}.tiff",
+  "expected_cells": 278328,
+  "channels": [
+    "DAPI",
+    "ATP1A1/CD45/E-Cadherin",
+    "18S",
+    "alphaSMA/Vimentin"
+  ],
+  "dtype": "uint16",
+  "min_crop_side": 5,
+  "sample": {
+    "fraction": 0.1,
+    "seed": 20261025,
+    "rule": "random.Random(seed).sample(sorted cell IDs, round(fraction x cells))"
+  },
+  "split": {
+    "protocol": "xenium-lung-ssl-sample10-tile500-well250-415-v2",
+    "seed": 20261025,
+    "unit": "spatial tile",
+    "tile_um": 500,
+    "tile_rule": "(floor(x_centroid / tile_um), floor(y_centroid / tile_um))",
+    "ratio": {
+      "development_train": 4,
+      "development_val": 1,
+      "evaluation_only": 5
+    },
+    "assignment": "tiles holding sampled cells, seeded shuffle; a tile joins the first usage (train, val, held-out) whose cumulative target the cells before it have not reached",
+    "well_um": 250,
+    "well_rule": "the (floor(x / well_um), floor(y / well_um)) neighborhood, nested in one split tile; each crop is one site"
+  },
+  "smoke": {
+    "development_train": 240,
+    "development_val": 60,
+    "evaluation_only": 300,
+    "rule": "per usage, whole wells of at least two crops in sha256 order of the well ID until the count is reached"
+  }
+}
