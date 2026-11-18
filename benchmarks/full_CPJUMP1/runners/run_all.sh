@@ -144,6 +144,12 @@ do_embed() {
     fi
     [ -f "$out/RESULT.json" ] && { echo "=== $slug already scored -- skip ==="; continue; }
     extra=(); [ "$slug" != control ] && [ -n "$have_ctrl" ] && extra=(--control "$ctrl")
+    if [ -n "${SMOKE:-}" ]; then      # a smoke is a technical check of every stage; finalize scores full deliveries only
+      launch "$slug" "$arm" "$model" "$route" "$out" embed batch cluster \
+        && echo "=== $slug smoke: every stage complete (a smoke is not scored) ===" \
+        || echo "### $slug FAILED (exit $?) -- re-run to resume ###"
+      continue
+    fi
     launch "$slug" "$arm" "$model" "$route" "$out" embed batch cluster \
       && FINALIZE --prep "$PREP" --run "$out" "${extra[@]}" \
       && FIGURES --run "$out" --level both \

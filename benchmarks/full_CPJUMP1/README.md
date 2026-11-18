@@ -51,4 +51,5 @@ bash benchmarks/full_CPJUMP1/runners/run_all.sh --dataset probe3 all shape_luna 
 ```
 
 `JOBS=N` controls how many arms run concurrently during `segcrop` (CPU); `embed` always runs one
-arm at a time (GPU). See `run_all.sh`'s own header for the full arm matrix per dataset.
+arm at a time (GPU). `SMOKE=1` runs every stage on the dataset's few smoke images, a technical check that is not
+scored. See `run_all.sh`'s own header for the full arm matrix per dataset.
