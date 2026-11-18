@@ -17,24 +17,37 @@ python "case studies/cardiomyocytes/ctnt_staining/run.py" inspect
 python "case studies/cardiomyocytes/ctnt_staining/run.py" fetch-metadata --out OUT
 ```
 
-`prepare-full` prepares every well, `prepare-pilot` the fixed 20% pilot (same image, well and split IDs), from
-the extracted `cTnT_composite/` folder (`RAW`) and the frozen well split (`SPLIT`); `freeze-references`
-fixes the matched reference cells. Both prepare commands pin the metadata of the original local backup
-(sha256 `c1b2a9ea...`), not the public archive's donor-free CSV (`9514170e...`).
+From the repository root, download and extract the archive (`RAW` is the extracted `cTnT_composite/` folder):
 
 ```
-python "case studies/cardiomyocytes/ctnt_staining/run.py" prepare-full --raw RAW --frozen-split SPLIT --out PREP
-python "case studies/cardiomyocytes/ctnt_staining/run.py" freeze-references --help
+hf download SHAPE-agent/iPSC-CM-cTnT_staining --repo-type dataset     --revision 16fb6c44c1f9f90da6ab712966856e5973581891 --local-dir data/iPSC-CM-cTnT_staining
+tar -xzf data/iPSC-CM-cTnT_staining/iPSC-CM-cTnT_staining.tar.gz -C data/iPSC-CM-cTnT_staining
+```
+
+`prepare-full` prepares every well, `prepare-pilot` the fixed 20% pilot (456 images of 114 wells; the same image,
+well and split IDs). Both check the metadata against `dataset.json` and derive the 40/10/50 well split from it
+(`--frozen-split` optionally checks it against an earlier preparation's `private/splits.json`):
+
+```
+RUN_PY="case studies/cardiomyocytes/ctnt_staining/run.py"
+python "$RUN_PY" prepare-pilot --raw data/iPSC-CM-cTnT_staining/cTnT_composite --out PREP   # or prepare-full
 ```
 
 ## Running the arms
 
+The reference cells are fixed once, before the arms: `reference-segment` segments the brightfield images with the
+frozen Cellpose-SAM defaults (the fixed algorithmic pseudo-reference) and `freeze-references` matches them to the
+fluorescence labels. `--fraction` (default 0.05) and `--seed` select the images; `reference-segment` and `run` must
+use the same ones, so that every image an arm runs on has a reference.
+
 ```
-python "case studies/cardiomyocytes/ctnt_staining/run.py" pack --out SNAPSHOT.tar.gz   # --expected-source is the source_sha256 it prints, not archive_sha256
-python "case studies/cardiomyocytes/ctnt_staining/run.py" run --prep PREP --references REFS \
-    --assets-root ASSETS --expected-source SHA256 --arm control|shape|codex --out RUN --allow-exploratory-full
+python "$RUN_PY" pack --out SNAPSHOT.tar.gz   # --expected-source is the source_sha256 it prints, not archive_sha256
+python "$RUN_PY" reference-segment --prep PREP --out REFSEG --assets-root ASSETS --expected-source SHA256
+python "$RUN_PY" freeze-references --prep PREP --masks REFSEG --out REFS     --kind fixed_algorithmic_pseudo_reference --allow-exploratory
+python "$RUN_PY" run --prep PREP --references REFS --assets-root ASSETS --expected-source SHA256     --arm control|shape|codex --out RUN --smoke
 ```
 
-Use a fresh `--out` per arm; `--smoke` runs a small technical check first. `--allow-exploratory-full` is needed to
-score the full data against the fixed pseudo-reference; on the pilot pass `--pilot-manifest PREP/PILOT.json`
-instead.
+`--masks` is the `reference-segment` output folder. Use a fresh `--out` per arm; `--smoke` limits each arm's search
+(two rounds) on the selected images. To score the whole prepared set, pass `--fraction 1` to `reference-segment`
+and `run`, and to `run` either `--allow-exploratory-full` (prepare-full) or `--pilot-manifest PREP/PILOT.json`
+(prepare-pilot).
