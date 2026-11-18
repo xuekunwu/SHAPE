@@ -22,13 +22,17 @@ python "case studies/cardiac organoids/drug_screen/check_prepare.py" RUNS/prepar
 `full_driver.py` runs segment, crop and embed through the shared harness, each stage in its own process. The
 segment stage is the organoid segmentation cohort of `../cohort/organoid_cohort.py` (calibration sample plus a
 per-group fast pass); the crop stage is the shared harness's crop cohort.
-`SMOKE_ROOT` is the run folder (it reads the preparation from `$SMOKE_ROOT/prepared`), `CO_SRC` the source
-tree, `CO_ORGANOID_MODEL` the organoid checkpoint (`hf download SHAPE-agent/organoid-segmenter shape_seg_co --local-dir models`) and
-`CO_ASSETS` the pinned asset root:
+`SMOKE_ROOT` is the run folder (it reads the preparation from `$SMOKE_ROOT/prepared`, so put `RUNS/prepared` there),
+`CO_SRC` a pinned source snapshot (the time course's `pack` archive, extracted; the driver checks every file against
+its `SOURCE_SNAPSHOT.json`), `CO_ORGANOID_MODEL` the organoid checkpoint
+(`hf download SHAPE-agent/organoid-segmenter shape_seg_co --local-dir models`) and `CO_ASSETS` the pinned asset root:
 
 ```
-export SMOKE_ROOT=RUNS CO_SRC=/path/to/SHAPE CO_ORGANOID_MODEL=CO_CKPT CO_ASSETS=ASSETS
-python "case studies/cardiac organoids/drug_screen/full_driver.py" run NAME shape validate   # 10 plate-wells
-python "case studies/cardiac organoids/drug_screen/full_driver.py" run NAME shape full       # all images
-python "case studies/cardiac organoids/drug_screen/post_full.py" NAME                         # QA summary
+python -m "case studies.cardiac organoids.timecourse.e2e" pack --out SNAPSHOT.tar.gz
+mkdir SRC && tar -xzf SNAPSHOT.tar.gz -C SRC
+export SMOKE_ROOT=$PWD/RUNS CO_SRC=$PWD/SRC CO_ORGANOID_MODEL=$PWD/models/shape_seg_co CO_ASSETS=$PWD/ASSETS   # absolute: the driver changes into CO_SRC
+DRIVER="SRC/case studies/cardiac organoids/drug_screen"
+python "$DRIVER/full_driver.py" run NAME shape validate   # 10 plate-wells
+python "$DRIVER/full_driver.py" run NAME shape full       # all images
+python "$DRIVER/post_full.py" NAME                         # QA summary
 ```
