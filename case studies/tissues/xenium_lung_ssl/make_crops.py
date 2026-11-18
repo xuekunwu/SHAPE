@@ -39,7 +39,8 @@ def iter_crops(outs: Path):
     cells = open_zip(Path(outs) / "cells.zarr.zip")
     ids, mask = cell_ids(cells), cells["masks/1"]
     focus = tifffile.TiffFile(Path(outs) / "morphology_focus" / "morphology_focus_0000.ome.tif").series[0]
-    image = zarr.open(focus.levels[0].aszarr(), mode="r")      # the four morphology_focus files as one CYX array
+    # the four morphology_focus files as one CYX array; level=0, as newer tifffile opens the series as its pyramid
+    image = zarr.open(focus.aszarr(level=0), mode="r")
     if image.ndim != 3 or image.shape[0] != 4 or tuple(image.shape[1:]) != tuple(mask.shape):
         raise ValueError(f"morphology_focus {image.shape} does not match the cell mask {mask.shape}")
     height, width = mask.shape
